@@ -63,3 +63,4 @@ Certos módulos possuem "Golden Seal" e não devem ter sua lógica alterada sem 
 ---
 *Desenvolvido pela Arquitetura de Sistemas GrupoB.*
 " " 
+" " 
