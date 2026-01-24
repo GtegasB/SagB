@@ -1,0 +1,10 @@
+{
+  "name": "SagB",
+  "version": "1.6.2",
+  "codename": "Hub Consolidation",
+  "description": "Sistema unificado com registro de desenvolvimento (DevLog) e rotas de agente corrigidas.",
+  "lastUpdated": "2024-05-23",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

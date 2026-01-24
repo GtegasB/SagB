@@ -1,0 +1,29 @@
+
+import { defineConfig, loadEnv } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vitejs.dev/config/
+export default defineConfig(({ mode }) => {
+  // Carrega as variáveis de ambiente baseadas no modo (development/production)
+  const env = loadEnv(mode, (process as any).cwd(), '');
+
+  return {
+    plugins: [react()],
+    define: {
+      // INJEÇÃO FORÇADA: Define a chave diretamente aqui para garantir que o navegador receba.
+      // O JSON.stringify é necessário para que o Vite entenda que é uma string.
+      'process.env.API_KEY': JSON.stringify("AIzaSyAKfMgwymzjtAG7VtT07n980NwkykmNks0"),
+      'process.env.VITE_DEEPSEEK_API_KEY': JSON.stringify("sk-ee91ab44a1324f4a83557bcb0c15eb0d"),
+      
+      // Polyfill de segurança
+      'process.env': JSON.stringify({}), 
+    },
+    resolve: {
+      extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json']
+    },
+    server: {
+      port: 3000,
+      host: true
+    }
+  }
+})

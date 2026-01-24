@@ -1,0 +1,95 @@
+
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="https://static.wixstatic.com/media/64c3dc_866011d493924761b15d6162e82c4948~mv2.png" />
+    <link rel="shortcut icon" type="image/png" href="https://static.wixstatic.com/media/64c3dc_866011d493924761b15d6162e82c4948~mv2.png" />
+    <link rel="apple-touch-icon" href="https://static.wixstatic.com/media/64c3dc_866011d493924761b15d6162e82c4948~mv2.png" />
+    <title>SagB - GrupoB</title>
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;800&family=Nunito+Sans:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'], // Inter como padrão global (Apple-like)
+              nunito: ['Nunito Sans', 'sans-serif'],
+            },
+            colors: {
+              bitrix: {
+                nav: '#111827', // Dark Gray (Quase preto, mais elegante que Teal)
+                accent: '#7C3AED', // Vivid Violet (Moderno)
+                text: '#1F2937', // Gray 800
+                secondary: '#6B7280',
+                border: '#E5E7EB',
+                surface: '#FFFFFF'
+              }
+            },
+            boxShadow: {
+              'soft': '0 2px 10px rgba(0, 0, 0, 0.03)',
+              'hover': '0 20px 40px rgba(0, 0, 0, 0.04)',
+            }
+          },
+        },
+      }
+    </script>
+    <style>
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #E5E7EB; border-radius: 10px; }
+      ::-webkit-scrollbar-thumb:hover { background: #D1D5DB; }
+      
+      body { 
+        -webkit-font-smoothing: antialiased; 
+        -moz-osx-font-smoothing: grayscale;
+        background-color: #F9FAFB; /* Gray 50 - Pure Clean Base */
+        color: #1F2937;
+      }
+
+      @keyframes slideUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-msg {
+        animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+
+      .prose {
+        max-width: none;
+      }
+      .prose p { margin-bottom: 0.75rem; line-height: 1.7; }
+      .prose strong { color: #111827; font-weight: 600; }
+      
+      /* Smooth Inputs */
+      input, textarea, select {
+        transition: all 0.2s ease;
+      }
+      input:focus, textarea:focus, select:focus {
+        box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1);
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.33.0",
+    "react-markdown": "https://esm.sh/react-markdown@^10.1.0",
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="h-screen overflow-hidden bg-gray-50 text-gray-900">
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
