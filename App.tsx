@@ -32,7 +32,7 @@ import {
 import { MASTER_AGENTS_LIST } from './data/agents';
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
-const APP_VERSION = "1.8.1"; // V1.8.1 - DeepSeek Selector
+const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
 const STORAGE_KEYS = {
   AGENTS: 'grupob_activated_agents_v11', 
   CHAT: 'grupob_chat_history_v4',
@@ -259,11 +259,18 @@ const App: React.FC = () => {
       if (foundBU) setActiveBU(foundBU);
     }
     
+    // SAFEGUARD: Validação de Tab
+    const validTabs: TabId[] = ['home', 'ecosystem', 'team', 'conversations', 'management', 'vault', 'fabrica-ca', 'governance', 'unit-room', 'chat-room', 'alignment', '3forb-home', 'audacus-home', 'startyb-home', 'redir', 'requests', 'hub'];
+    
     if (savedTab) {
-      // Compatibilidade: se estava em 'hub', muda para 'ecosystem'
-      setActiveTab(savedTab === 'hub' ? 'ecosystem' : savedTab as TabId);
+      const targetTab = savedTab === 'hub' ? 'ecosystem' : savedTab as TabId;
+      if (validTabs.includes(targetTab)) {
+          setActiveTab(targetTab);
+      } else {
+          setActiveTab('home'); // Fallback se a tab salva for inválida
+      }
     } else {
-      setActiveTab('home'); // Força Home na primeira vez se não tiver salvo
+      setActiveTab('home');
     }
   }, []);
 
@@ -472,6 +479,9 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
+    // SAFEGUARD: Ensure activeBU is valid
+    if (!activeBU) return;
+
     const isTechUnit = activeBU.id === 'startyb';
     const context = `Contexto: Unidade ${activeBU.name}. ${isTechUnit ? 'Desenvolvimento e Arquitetura' : 'Pietro auditando operação'}.`;
     
@@ -594,16 +604,17 @@ const App: React.FC = () => {
 
 
   // CORREÇÃO CRÍTICA: Se estiver no GrupoB, mostra TODOS os agentes ativos no sistema
-  const filteredAgents = activeBU.id === 'grupob' 
+  // SAFEGUARD: Check activeBU before access
+  const filteredAgents = activeBU && activeBU.id === 'grupob' 
     ? activatedAgents 
-    : activatedAgents.filter(a => a.buId === activeBU.id);
+    : activatedAgents.filter(a => activeBU && a.buId === activeBU.id);
   
-  const filteredMessages = messages.filter(m => m.buId === activeBU.id);
-  const filteredAlignMessages = alignmentMessages.filter(m => m.buId === activeBU.id);
-  const currentBlueprint = blueprints[activeBU.id] || {};
+  const filteredMessages = messages.filter(m => activeBU && m.buId === activeBU.id);
+  const filteredAlignMessages = alignmentMessages.filter(m => activeBU && m.buId === activeBU.id);
+  const currentBlueprint = activeBU ? (blueprints[activeBU.id] || {}) : {};
 
   // Determina o "Diretor Ativo" para exibir o placeholder correto e avatar
-  const activeDirector = activeBU.id === 'startyb' ? CASSIO_PERSONA : PIETRO_PERSONA;
+  const activeDirector = activeBU && activeBU.id === 'startyb' ? CASSIO_PERSONA : PIETRO_PERSONA;
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -646,9 +657,12 @@ const App: React.FC = () => {
     } finally { setIsLoading(false); }
   };
 
-  const isImmersiveMode = activeBU.id === 'audacus' && activeTab === 'audacus-home';
+  const isImmersiveMode = activeBU && activeBU.id === 'audacus' && activeTab === 'audacus-home';
 
   const renderContent = () => {
+    // SAFEGUARD: Early return if activeBU is undefined/null
+    if (!activeBU) return null;
+
     if (isTransitioning) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center bg-white">
@@ -822,7 +836,9 @@ const App: React.FC = () => {
             </div>
           </div>
         );
-      default: return null;
+      
+      // DEFAULT FALLBACK: Sempre renderiza Home se a tab for desconhecida
+      default: return <DashboardHome agents={activatedAgents} tasks={tasks} businessUnits={businessUnits} onNavigate={setActiveTab} />;
     }
   };
 
@@ -880,10 +896,13 @@ const App: React.FC = () => {
     );
   }
 
+  // SAFEGUARD: Ensure activeBU is defined before rendering Sidebar
+  const safeBU = activeBU || INITIAL_BUSINESS_UNITS[0];
+
   return (
     <div className="flex h-screen bg-white font-nunito text-bitrix-text overflow-hidden">
       {!isImmersiveMode && (
-        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} agentCount={filteredAgents.length} activeBU={activeBU} version={APP_VERSION} onReset={handleReturnToHub} />
+        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} agentCount={filteredAgents.length} activeBU={safeBU} version={APP_VERSION} onReset={handleReturnToHub} />
       )}
       <main className="flex-1 flex flex-col overflow-hidden relative bg-[#F9FAFB]">{renderContent()}</main>
     </div>

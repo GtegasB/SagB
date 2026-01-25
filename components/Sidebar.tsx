@@ -16,7 +16,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab, 
   agentCount, 
   activeBU,
-  version = "1.5.0",
+  version = "1.8.1", // ALINHADO COM METADATA.JSON
   onReset
 }) => {
   const DEFAULT_LOGO = "https://static.wixstatic.com/media/64c3dc_866011d493924761b15d6162e82c4948~mv2.png";

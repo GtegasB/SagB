@@ -1,9 +1,8 @@
-
 {
   "name": "SagB",
-  "version": "1.6.5",
-  "codename": "Antigravity Link",
-  "description": "Sistema unificado com registro de desenvolvimento (DevLog) e rotas de agente corrigidas.",
+  "version": "1.8.1",
+  "codename": "Antigravity DeepSeek",
+  "description": "Sistema unificado com DeepSeek, Gemini 2.0 Flash e Pipeline CI/CD Ativo.",
   "lastUpdated": "2024-05-23",
   "requestFramePermissions": [
     "microphone"
