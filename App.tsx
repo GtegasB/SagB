@@ -18,10 +18,10 @@ import GovernanceView from './components/GovernanceView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView'; // NOVA IMPORTAÇÃO
 import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, BusinessUnit, BusinessBlueprint, AgentTier, AgentStatus, Task } from './types';
-import { 
-  sendMessageStream, 
-  startMainSession, 
-  createPietroInstruction, 
+import {
+  sendMessageStream,
+  startMainSession,
+  createPietroInstruction,
   createCassioInstruction,
   DEFAULT_PIETRO_PROMPT,
   DEFAULT_CASSIO_PROMPT,
@@ -30,17 +30,18 @@ import {
   transcribeAudio
 } from './services/gemini';
 import { MASTER_AGENTS_LIST } from './data/agents';
+import metadata from './metadata.json';
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
-const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
+//const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
 const STORAGE_KEYS = {
-  AGENTS: 'grupob_activated_agents_v11', 
+  AGENTS: 'grupob_activated_agents_v11',
   CHAT: 'grupob_chat_history_v4',
   ALIGNMENT: 'grupob_align_history_v4',
   BLUEPRINTS: 'grupob_blueprints_v4',
   TOPICS: 'grupob_topics_v4',
   TASKS: 'grupob_tasks_v1',
-  NAV_TAB: 'grupob_nav_active_tab_v1', 
+  NAV_TAB: 'grupob_nav_active_tab_v1',
   NAV_BU: 'grupob_nav_active_bu_v1',
   CUSTOM_UNITS: 'grupob_custom_units_v1'
 };
@@ -50,54 +51,54 @@ const generateId = () => Math.random().toString(36).substring(2, 15);
 // IMAGENS ESTÁVEIS (ATUALIZADAS V5.3 - FIREBASE LINKS)
 const PIETRO_IMAGE = "https://firebasestorage.googleapis.com/v0/b/sagb-grupob-v1.firebasestorage.app/o/Douglas%20Rodrigues%2FPietro%20Carboni%20Foto%20Avatar.png?alt=media&token=082e13ca-7cc8-4316-bd9e-24af3b08deb2";
 const DOUGLAS_IMAGE = "https://firebasestorage.googleapis.com/v0/b/sagb-grupob-v1.firebasestorage.app/o/Douglas%20Rodrigues%2FScreenshot_79.png?alt=media&token=1b6c2884-ae4d-49de-9d03-f0a38e0cfc27";
-const CASSIO_IMAGE = "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=200&h=200"; 
+const CASSIO_IMAGE = "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=200&h=200";
 
 const INITIAL_BUSINESS_UNITS: BusinessUnit[] = [
   // CORE - Paleta "Spectrum 600" (Clarificada e Moderna)
   { id: 'grupob', name: 'GrupoB', themeColor: '#006064', description: 'Holding e Governança Central', type: 'CORE' },
-  { 
-    id: '3forb', 
-    name: '3forB', 
-    themeColor: '#ea580c', 
-    description: 'Performance e Estratégia de Vendas', 
+  {
+    id: '3forb',
+    name: '3forB',
+    themeColor: '#ea580c',
+    description: 'Performance e Estratégia de Vendas',
     type: 'CORE'
   },
-  { 
-    id: 'startyb', 
-    name: 'StartyB', 
-    themeColor: '#dc2626', 
-    description: 'Venture Builder e Tecnologia', 
+  {
+    id: 'startyb',
+    name: 'StartyB',
+    themeColor: '#dc2626',
+    description: 'Venture Builder e Tecnologia',
     type: 'CORE'
   },
-  { 
-    id: 'papob', 
-    name: 'PapoB', 
-    themeColor: '#ca8a04', 
-    description: 'Conteúdo e Comunicação', 
+  {
+    id: 'papob',
+    name: 'PapoB',
+    themeColor: '#ca8a04',
+    description: 'Conteúdo e Comunicação',
     type: 'CORE'
   },
-  { 
-    id: 'acadb', 
-    name: 'AcadB', 
-    themeColor: '#7c3aed', 
-    description: 'Educação Corporativa', 
+  {
+    id: 'acadb',
+    name: 'AcadB',
+    themeColor: '#7c3aed',
+    description: 'Educação Corporativa',
     type: 'CORE'
   },
-  { 
-    id: 'acelerab', 
-    name: 'AceleraB', 
-    themeColor: '#2563eb', 
-    description: 'Aceleração de Negócios', 
+  {
+    id: 'acelerab',
+    name: 'AceleraB',
+    themeColor: '#2563eb',
+    description: 'Aceleração de Negócios',
     type: 'CORE'
   },
-  { 
-    id: 'institutob', 
-    name: 'InstitutoB', 
-    themeColor: '#16a34a', 
-    description: 'Impacto Social e Educação', 
+  {
+    id: 'institutob',
+    name: 'InstitutoB',
+    themeColor: '#16a34a',
+    description: 'Impacto Social e Educação',
     type: 'CORE'
   },
-  
+
   // VENTURES
   { id: 'audacus', name: 'Audacus', themeColor: '#1E1B4B', description: 'Assessoria Jurídica Preventiva', type: 'VENTURY' },
   { id: 'domusys', name: 'DomuSys', themeColor: '#334155', description: 'Automação e Engenharia Elétrica', type: 'VENTURY' },
@@ -139,7 +140,7 @@ const CASSIO_PERSONA: PersonaConfig = {
   tone: 'Técnico, preciso e focado em excelência de código',
   welcomeMessage: 'Editor aberto, Rodrigues. Qual a stack de hoje?',
   avatarColor: '#0EA5E9',
-  imageUrl: null 
+  imageUrl: null
 };
 
 // --- MAPPING HELPERS ---
@@ -161,7 +162,7 @@ const UNIT_MAP: Record<string, string> = {
   'ins': 'institutob',
   'acl': 'acelerab',
   'ppo': 'papob',
-  'met': 'gerac' 
+  'met': 'gerac'
 };
 
 const inferTier = (role: string): AgentTier => {
@@ -174,13 +175,14 @@ const inferTier = (role: string): AgentTier => {
 
 const App: React.FC = () => {
   // --- AUTH STATE (SENHA 8933) ---
+  const version = metadata.version;
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState(false);
 
   // State for Business Units (now dynamic)
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>(INITIAL_BUSINESS_UNITS);
-  
+
   const [activeTab, setActiveTab] = useState<TabId>('home'); // DEFAULT: HOME
   const [activeBU, setActiveBU] = useState<BusinessUnit>(INITIAL_BUSINESS_UNITS[0]);
   const [activatedAgents, setActivatedAgents] = useState<Agent[]>([]);
@@ -205,7 +207,7 @@ const App: React.FC = () => {
   // Seleção de Agente para Onboarding (Vem do Ecossistema)
   const [agentToOnboard, setAgentToOnboard] = useState<Agent | null>(null);
   const [chatTargetAgent, setChatTargetAgent] = useState<Agent | null>(null); // Agente alvo para conversa
-  
+
   // V1.7.8 - Governance Deep Link State
   const [governanceTargetId, setGovernanceTargetId] = useState<string | null>(null);
 
@@ -223,7 +225,7 @@ const App: React.FC = () => {
       setIsAuthenticated(true);
       sessionStorage.setItem('sagb_auth_session', 'granted');
       setAuthError(false);
-      
+
       // FORÇA A HOME (BI) APÓS O LOGIN MANUAL
       setActiveTab('home');
       setActiveBU(INITIAL_BUSINESS_UNITS[0]);
@@ -238,16 +240,16 @@ const App: React.FC = () => {
     const savedUnitsStr = localStorage.getItem(STORAGE_KEYS.CUSTOM_UNITS);
     let allUnits = [...INITIAL_BUSINESS_UNITS];
     if (savedUnitsStr) {
-        try {
-            const customUnits: BusinessUnit[] = JSON.parse(savedUnitsStr);
-            // Merge sem duplicar (baseado em ID)
-            customUnits.forEach(cu => {
-                if (!allUnits.some(u => u.id === cu.id)) {
-                    allUnits.push(cu);
-                }
-            });
-            setBusinessUnits(allUnits);
-        } catch (e) { console.error("Error loading custom units", e); }
+      try {
+        const customUnits: BusinessUnit[] = JSON.parse(savedUnitsStr);
+        // Merge sem duplicar (baseado em ID)
+        customUnits.forEach(cu => {
+          if (!allUnits.some(u => u.id === cu.id)) {
+            allUnits.push(cu);
+          }
+        });
+        setBusinessUnits(allUnits);
+      } catch (e) { console.error("Error loading custom units", e); }
     }
 
     // 2. Restaurar estado de navegação
@@ -258,16 +260,16 @@ const App: React.FC = () => {
       const foundBU = allUnits.find(b => b.id === savedBUId);
       if (foundBU) setActiveBU(foundBU);
     }
-    
+
     // SAFEGUARD: Validação de Tab
     const validTabs: TabId[] = ['home', 'ecosystem', 'team', 'conversations', 'management', 'vault', 'fabrica-ca', 'governance', 'unit-room', 'chat-room', 'alignment', '3forb-home', 'audacus-home', 'startyb-home', 'redir', 'requests', 'hub'];
-    
+
     if (savedTab) {
       const targetTab = savedTab === 'hub' ? 'ecosystem' : savedTab as TabId;
       if (validTabs.includes(targetTab)) {
-          setActiveTab(targetTab);
+        setActiveTab(targetTab);
       } else {
-          setActiveTab('home'); // Fallback se a tab salva for inválida
+        setActiveTab('home'); // Fallback se a tab salva for inválida
       }
     } else {
       setActiveTab('home');
@@ -285,48 +287,48 @@ const App: React.FC = () => {
     setTimeout(() => {
       setActiveBU(bu);
       if (bu.id === '3forb') setActiveTab('3forb-home');
-      else if (bu.id === 'audacus') setActiveTab('audacus-home'); 
+      else if (bu.id === 'audacus') setActiveTab('audacus-home');
       else if (bu.id === 'startyb') setActiveTab('startyb-home'); // ROTA PARA STARTYB
       else if (bu.id === 'grupob') setActiveTab('ecosystem');
       else setActiveTab('alignment');
       setIsTransitioning(false);
-    }, 400); 
+    }, 400);
   };
-  
+
   // V4.0 - Navegação para Sala de Unidade Genérica
   const handleEnterRoom = (buId: string) => {
-     const targetBU = businessUnits.find(b => b.id === buId);
-     if (targetBU) {
-         setIsTransitioning(true);
-         setTimeout(() => {
-             setActiveBU(targetBU);
-             setActiveTab('unit-room');
-             setIsTransitioning(false);
-         }, 300);
-     }
+    const targetBU = businessUnits.find(b => b.id === buId);
+    if (targetBU) {
+      setIsTransitioning(true);
+      setTimeout(() => {
+        setActiveBU(targetBU);
+        setActiveTab('unit-room');
+        setIsTransitioning(false);
+      }, 300);
+    }
   };
 
   const handleReturnToHub = () => {
     setIsTransitioning(true);
     setTimeout(() => {
-        setActiveBU(businessUnits[0]); // Volta para GrupoB
-        setActiveTab('home'); // Volta para Início (Dashboard)
-        setIsTransitioning(false);
+      setActiveBU(businessUnits[0]); // Volta para GrupoB
+      setActiveTab('home'); // Volta para Início (Dashboard)
+      setIsTransitioning(false);
     }, 300);
   };
 
   // Helper para voltar ao Ecossistema/Hub
   const handleBackNavigation = () => {
-      setActiveTab('ecosystem');
+    setActiveTab('ecosystem');
   }
 
   const handleAddTopic = (title: string, priority: 'Alta' | 'Média' | 'Baixa', assignee?: string, dueDate?: string) => {
-    setTopics(prev => [{ 
-      id: generateId(), 
-      title: title, 
-      priority: priority, 
-      status: 'Pendente', 
-      timestamp: new Date(), 
+    setTopics(prev => [{
+      id: generateId(),
+      title: title,
+      priority: priority,
+      status: 'Pendente',
+      timestamp: new Date(),
       buId: activeBU.id,
       assignee: assignee, // NOVO
       dueDate: dueDate // NOVO
@@ -335,47 +337,47 @@ const App: React.FC = () => {
 
   // Handler que vem do CHAT (SystemicVision)
   const handleCreateTopicFromChat = (partialTopic: Partial<Topic>) => {
-      handleAddTopic(
-          partialTopic.title || 'Nova Pauta', 
-          partialTopic.priority || 'Média', 
-          partialTopic.assignee, 
-          partialTopic.dueDate
-      );
+    handleAddTopic(
+      partialTopic.title || 'Nova Pauta',
+      partialTopic.priority || 'Média',
+      partialTopic.assignee,
+      partialTopic.dueDate
+    );
   };
 
   const handleAddAgent = (newAgent: Agent) => {
-     setActivatedAgents(prev => [...prev, newAgent]);
+    setActivatedAgents(prev => [...prev, newAgent]);
   };
 
   const handleRemoveAgent = (agentId: string) => {
-      setActivatedAgents(prev => prev.filter(a => a.id !== agentId));
+    setActivatedAgents(prev => prev.filter(a => a.id !== agentId));
   };
 
   const handleActivateAgent = (agentData: any) => {
     setActivatedAgents(prev => {
-        const existingIndex = prev.findIndex(a => a.universalId === agentData.universalId);
-        
-        if (existingIndex >= 0) {
-            // Hidratação (Update)
-            const updatedAgents = [...prev];
-            updatedAgents[existingIndex] = {
-                ...updatedAgents[existingIndex],
-                ...agentData,
-                // Preserva status e ID originais se não forem sobrescritos explicitamente
-                status: agentData.status || updatedAgents[existingIndex].status,
-                active: true, 
-                id: updatedAgents[existingIndex].id
-            };
-            return updatedAgents;
-        } else {
-            // Criação Nova
-            return [...prev, { 
-              ...agentData, 
-              id: generateId(), 
-              active: true, 
-              status: agentData.status || 'STAGING' 
-            }];
-        }
+      const existingIndex = prev.findIndex(a => a.universalId === agentData.universalId);
+
+      if (existingIndex >= 0) {
+        // Hidratação (Update)
+        const updatedAgents = [...prev];
+        updatedAgents[existingIndex] = {
+          ...updatedAgents[existingIndex],
+          ...agentData,
+          // Preserva status e ID originais se não forem sobrescritos explicitamente
+          status: agentData.status || updatedAgents[existingIndex].status,
+          active: true,
+          id: updatedAgents[existingIndex].id
+        };
+        return updatedAgents;
+      } else {
+        // Criação Nova
+        return [...prev, {
+          ...agentData,
+          id: generateId(),
+          active: true,
+          status: agentData.status || 'STAGING'
+        }];
+      }
     });
   };
 
@@ -391,91 +393,91 @@ const App: React.FC = () => {
   // V4.5 - Roteamento Inteligente de Agente
   const handleAgentInteraction = (agent: Agent) => {
     if (agent.status === 'PLANNED') {
-        // Se planejado, vai para RH (Fábrica) para contratar
-        setAgentToOnboard(agent);
-        setActiveTab('fabrica-ca');
+      // Se planejado, vai para RH (Fábrica) para contratar
+      setAgentToOnboard(agent);
+      setActiveTab('fabrica-ca');
     } else {
-        // Se ativo, vai para Chat (SystemicVision/SplitView)
-        setChatTargetAgent(agent);
-        setActiveTab('chat-room');
+      // Se ativo, vai para Chat (SystemicVision/SplitView)
+      setChatTargetAgent(agent);
+      setActiveTab('chat-room');
     }
   };
 
   // Nova função para atualizar agentes diretamente da Governança (DNA Editor)
   const handleUpdateAgentData = (updatedAgent: Agent) => {
-     setActivatedAgents(prev => prev.map(a => a.id === updatedAgent.id ? updatedAgent : a));
+    setActivatedAgents(prev => prev.map(a => a.id === updatedAgent.id ? updatedAgent : a));
   };
 
   // Função para criar novas Unidades (Ventures) via Importador
   const handleAddBusinessUnit = (newUnit: BusinessUnit) => {
-      setBusinessUnits(prev => {
-          const updated = [...prev, newUnit];
-          // Persist Custom Units
-          const customUnits = updated.filter(u => !INITIAL_BUSINESS_UNITS.some(init => init.id === u.id));
-          localStorage.setItem(STORAGE_KEYS.CUSTOM_UNITS, JSON.stringify(customUnits));
-          return updated;
-      });
+    setBusinessUnits(prev => {
+      const updated = [...prev, newUnit];
+      // Persist Custom Units
+      const customUnits = updated.filter(u => !INITIAL_BUSINESS_UNITS.some(init => init.id === u.id));
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_UNITS, JSON.stringify(customUnits));
+      return updated;
+    });
   };
 
   const handleAddTask = (task: Task) => {
     setTasks(prev => [...prev, task]);
   }
-  
+
   const handleUpdateTaskStatus = (taskId: string, status: Task['status']) => {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status } : t));
   }
 
   // --- AUDIO & FILE HANDLERS ---
   const handleToggleRecording = async () => {
-      if (isRecording) {
-          mediaRecorderRef.current?.stop();
-          setIsRecording(false);
-      } else {
-          try {
-              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-              const mediaRecorder = new MediaRecorder(stream);
-              mediaRecorderRef.current = mediaRecorder;
-              audioChunksRef.current = [];
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
 
-              mediaRecorder.ondataavailable = (event) => {
-                  if (event.data.size > 0) audioChunksRef.current.push(event.data);
-              };
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) audioChunksRef.current.push(event.data);
+        };
 
-              mediaRecorder.onstop = async () => {
-                  setIsTranscribing(true);
-                  const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-                  const reader = new FileReader();
-                  reader.readAsDataURL(audioBlob);
-                  reader.onloadend = async () => {
-                      try {
-                          const base64String = (reader.result as string).split(',')[1];
-                          const transcription = await transcribeAudio(base64String, 'audio/webm');
-                          if (transcription) setInput(prev => prev ? `${prev} ${transcription}` : transcription);
-                      } catch (e) {
-                          console.error("Transcription Failed", e);
-                      } finally {
-                          setIsTranscribing(false);
-                          stream.getTracks().forEach(track => track.stop());
-                      }
-                  };
-              };
-              mediaRecorder.start();
-              setIsRecording(true);
-          } catch (err) { alert("Permissão de microfone negada."); }
-      }
+        mediaRecorder.onstop = async () => {
+          setIsTranscribing(true);
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = async () => {
+            try {
+              const base64String = (reader.result as string).split(',')[1];
+              const transcription = await transcribeAudio(base64String, 'audio/webm');
+              if (transcription) setInput(prev => prev ? `${prev} ${transcription}` : transcription);
+            } catch (e) {
+              console.error("Transcription Failed", e);
+            } finally {
+              setIsTranscribing(false);
+              stream.getTracks().forEach(track => track.stop());
+            }
+          };
+        };
+        mediaRecorder.start();
+        setIsRecording(true);
+      } catch (err) { alert("Permissão de microfone negada."); }
+    }
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (e) => {
-          const result = e.target?.result as string;
-          const base64String = result.split(',')[1];
-          setAttachment({ data: base64String, mimeType: file.type, preview: result });
-      };
-      reader.readAsDataURL(file);
-      event.target.value = '';
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      const base64String = result.split(',')[1];
+      setAttachment({ data: base64String, mimeType: file.type, preview: result });
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
   };
 
   useEffect(() => {
@@ -484,7 +486,7 @@ const App: React.FC = () => {
 
     const isTechUnit = activeBU.id === 'startyb';
     const context = `Contexto: Unidade ${activeBU.name}. ${isTechUnit ? 'Desenvolvimento e Arquitetura' : 'Pietro auditando operação'}.`;
-    
+
     try {
       // Troca o DNA do agente principal baseado na Unidade
       const instruction = isTechUnit ? createCassioInstruction() : createPietroInstruction();
@@ -494,16 +496,16 @@ const App: React.FC = () => {
     }
   }, [activeBU]);
 
-  useEffect(() => { 
+  useEffect(() => {
     // SEED LOGIC (Updated V1.7.4 - Recovery Protocol)
-    const savedAgentsStr = localStorage.getItem(STORAGE_KEYS.AGENTS); 
+    const savedAgentsStr = localStorage.getItem(STORAGE_KEYS.AGENTS);
     const legacyAgentsStr = localStorage.getItem('grupob_activated_agents_v10'); // Fallback to previous version
 
     let currentAgents: Agent[] = [];
 
     if (savedAgentsStr) {
-      try { 
-        currentAgents = JSON.parse(savedAgentsStr); 
+      try {
+        currentAgents = JSON.parse(savedAgentsStr);
       } catch (e) { console.error("Erro ao carregar agentes locais", e); }
     } else if (legacyAgentsStr) {
       // Attempt migration from v10 if v11 is missing
@@ -515,83 +517,83 @@ const App: React.FC = () => {
 
     // Normalizar Lista Mestre
     const masterSeed: Agent[] = MASTER_AGENTS_LIST.map(raw => {
-        // --- INJEÇÃO DE DNA DO SISTEMA (HARDCODED) ---
-        let injectedPrompt = '';
-        if (raw.id === 'ca006gpb') injectedPrompt = DEFAULT_PIETRO_PROMPT;
-        if (raw.id === 'ca045tgs') injectedPrompt = DEFAULT_CASSIO_PROMPT;
-        if (raw.id === 'ca044tgs') injectedPrompt = KLAUS_PROMPT;
-        if (raw.id === 'ca902tgs') injectedPrompt = NEWTON_PROMPT;
+      // --- INJEÇÃO DE DNA DO SISTEMA (HARDCODED) ---
+      let injectedPrompt = '';
+      if (raw.id === 'ca006gpb') injectedPrompt = DEFAULT_PIETRO_PROMPT;
+      if (raw.id === 'ca045tgs') injectedPrompt = DEFAULT_CASSIO_PROMPT;
+      if (raw.id === 'ca044tgs') injectedPrompt = KLAUS_PROMPT;
+      if (raw.id === 'ca902tgs') injectedPrompt = NEWTON_PROMPT;
 
-        return {
-          id: raw.id, // Usa ID oficial
-          universalId: raw.id,
-          name: raw.name,
-          officialRole: raw.role,
-          buId: UNIT_MAP[raw.unit] || 'grupob',
-          tier: inferTier(raw.role),
-          active: raw.is_active,
-          status: raw.is_active ? 'ACTIVE' : 'PLANNED', // Força status conforme data/agents.ts
-          version: '1.0',
-          company: UNIT_MAP[raw.unit] ? businessUnits.find(b => b.id === UNIT_MAP[raw.unit])?.name || 'GrupoB' : 'GrupoB',
-          fullPrompt: injectedPrompt, 
-          sector: raw.role.split(' ')[0],
-          modelProvider: (raw as any).model_provider || 'gemini' // Mapeamento correto do provedor
-        };
+      return {
+        id: raw.id, // Usa ID oficial
+        universalId: raw.id,
+        name: raw.name,
+        officialRole: raw.role,
+        buId: UNIT_MAP[raw.unit] || 'grupob',
+        tier: inferTier(raw.role),
+        active: raw.is_active,
+        status: raw.is_active ? 'ACTIVE' : 'PLANNED', // Força status conforme data/agents.ts
+        version: '1.0',
+        company: UNIT_MAP[raw.unit] ? businessUnits.find(b => b.id === UNIT_MAP[raw.unit])?.name || 'GrupoB' : 'GrupoB',
+        fullPrompt: injectedPrompt,
+        sector: raw.role.split(' ')[0],
+        modelProvider: (raw as any).model_provider || 'gemini' // Mapeamento correto do provedor
+      };
     });
 
     // SE a lista local estiver vazia OU se for uma nova versão de storage (sem merge legacy)
     // Inicializa com a Master List Limpa
     if (currentAgents.length === 0) {
-        setActivatedAgents(masterSeed);
+      setActivatedAgents(masterSeed);
     } else {
-        // Merge cuidadoso (preserva agentes criados manualmente, mas respeita reset de status)
-        const mergedAgents = [...currentAgents];
-        
-        masterSeed.forEach(seedAgent => {
-            const existsIndex = mergedAgents.findIndex(a => a.universalId === seedAgent.universalId);
-            if (existsIndex === -1) {
-                // RESTORE MISSING AGENT (This fixes the "Agents Disappeared" issue)
-                mergedAgents.push(seedAgent);
-            } else {
-                 // ATUALIZAÇÃO FORÇADA DE AGENTES DE SISTEMA (Pietro, Cássio, etc)
-                 const isSystemAgent = ['ca006gpb', 'ca045tgs', 'ca044tgs', 'ca902tgs', 'ca099aud'].includes(seedAgent.id);
-                 
-                 const manualOverride = localStorage.getItem(seedAgent.id);
+      // Merge cuidadoso (preserva agentes criados manualmente, mas respeita reset de status)
+      const mergedAgents = [...currentAgents];
 
-                 mergedAgents[existsIndex] = {
-                     ...mergedAgents[existsIndex],
-                     name: seedAgent.name,
-                     officialRole: seedAgent.officialRole,
-                     tier: seedAgent.tier,
-                     status: isSystemAgent ? 'ACTIVE' : seedAgent.status, 
-                     // Garante que o provedor seja atualizado se vier do master
-                     modelProvider: seedAgent.modelProvider || mergedAgents[existsIndex].modelProvider || 'gemini',
-                     // PRIORIDADE: 1. Edição Manual (Override) 2. Prompt Hardcoded (System) 3. Prompt Existente
-                     fullPrompt: manualOverride ? manualOverride : (isSystemAgent ? seedAgent.fullPrompt : mergedAgents[existsIndex].fullPrompt)
-                 };
-            }
-        });
-        setActivatedAgents(mergedAgents);
+      masterSeed.forEach(seedAgent => {
+        const existsIndex = mergedAgents.findIndex(a => a.universalId === seedAgent.universalId);
+        if (existsIndex === -1) {
+          // RESTORE MISSING AGENT (This fixes the "Agents Disappeared" issue)
+          mergedAgents.push(seedAgent);
+        } else {
+          // ATUALIZAÇÃO FORÇADA DE AGENTES DE SISTEMA (Pietro, Cássio, etc)
+          const isSystemAgent = ['ca006gpb', 'ca045tgs', 'ca044tgs', 'ca902tgs', 'ca099aud'].includes(seedAgent.id);
+
+          const manualOverride = localStorage.getItem(seedAgent.id);
+
+          mergedAgents[existsIndex] = {
+            ...mergedAgents[existsIndex],
+            name: seedAgent.name,
+            officialRole: seedAgent.officialRole,
+            tier: seedAgent.tier,
+            status: isSystemAgent ? 'ACTIVE' : seedAgent.status,
+            // Garante que o provedor seja atualizado se vier do master
+            modelProvider: seedAgent.modelProvider || mergedAgents[existsIndex].modelProvider || 'gemini',
+            // PRIORIDADE: 1. Edição Manual (Override) 2. Prompt Hardcoded (System) 3. Prompt Existente
+            fullPrompt: manualOverride ? manualOverride : (isSystemAgent ? seedAgent.fullPrompt : mergedAgents[existsIndex].fullPrompt)
+          };
+        }
+      });
+      setActivatedAgents(mergedAgents);
     }
-    
+
     // --- LOAD REST OF STATE ---
 
     const savedMessages = localStorage.getItem(STORAGE_KEYS.CHAT);
-    if (savedMessages) { try { setMessages(JSON.parse(savedMessages).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }))); } catch (e) {} } 
-    
+    if (savedMessages) { try { setMessages(JSON.parse(savedMessages).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }))); } catch (e) { } }
+
     const savedAlignMessages = localStorage.getItem(STORAGE_KEYS.ALIGNMENT);
-    if (savedAlignMessages) { try { setAlignmentMessages(JSON.parse(savedAlignMessages).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }))); } catch (e) {} }
+    if (savedAlignMessages) { try { setAlignmentMessages(JSON.parse(savedAlignMessages).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }))); } catch (e) { } }
 
     const savedBlueprints = localStorage.getItem(STORAGE_KEYS.BLUEPRINTS);
-    if (savedBlueprints) { try { setBlueprints(JSON.parse(savedBlueprints)); } catch (e) {} }
-    
+    if (savedBlueprints) { try { setBlueprints(JSON.parse(savedBlueprints)); } catch (e) { } }
+
     // Carrega Tópicos
     const savedTopics = localStorage.getItem(STORAGE_KEYS.TOPICS);
-    if (savedTopics) { try { setTopics(JSON.parse(savedTopics).map((t: any) => ({ ...t, timestamp: new Date(t.timestamp) }))); } catch (e) {} }
+    if (savedTopics) { try { setTopics(JSON.parse(savedTopics).map((t: any) => ({ ...t, timestamp: new Date(t.timestamp) }))); } catch (e) { } }
 
     // Carrega Tasks
     const savedTasks = localStorage.getItem(STORAGE_KEYS.TASKS);
-    if (savedTasks) { try { setTasks(JSON.parse(savedTasks).map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) }))); } catch (e) {} }
+    if (savedTasks) { try { setTasks(JSON.parse(savedTasks).map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) }))); } catch (e) { } }
 
   }, []);
 
@@ -605,10 +607,10 @@ const App: React.FC = () => {
 
   // CORREÇÃO CRÍTICA: Se estiver no GrupoB, mostra TODOS os agentes ativos no sistema
   // SAFEGUARD: Check activeBU before access
-  const filteredAgents = activeBU && activeBU.id === 'grupob' 
-    ? activatedAgents 
+  const filteredAgents = activeBU && activeBU.id === 'grupob'
+    ? activatedAgents
     : activatedAgents.filter(a => activeBU && a.buId === activeBU.id);
-  
+
   const filteredMessages = messages.filter(m => activeBU && m.buId === activeBU.id);
   const filteredAlignMessages = alignmentMessages.filter(m => activeBU && m.buId === activeBU.id);
   const currentBlueprint = activeBU ? (blueprints[activeBU.id] || {}) : {};
@@ -630,11 +632,11 @@ const App: React.FC = () => {
     const botMsgId = generateId();
     setIsLoading(true);
     setMessages(prev => [...prev, { id: botMsgId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true }]);
-    
+
     try {
       const stream = await sendMessageStream(userText, `Direto com Rodrigues. Unidade: ${activeBU.name}.`);
       let fullText = '';
-      
+
       for await (const chunk of stream) {
         // Handle Text
         const chunkText = (chunk as GenerateContentResponse).text || '';
@@ -647,12 +649,12 @@ const App: React.FC = () => {
     } catch (error) {
       console.error(error);
       setMessages(prev => prev.map(msg => msg.id === botMsgId ? { ...msg, text: "Falha de conexão com o Diretor (API Key Error).", isStreaming: false } : msg));
-      setMessages(prev => [...prev, { 
-          id: 'error-' + Date.now(), 
-          text: "⚠️ **ERRO DE SISTEMA:** Não foi possível conectar ao Gemini API. Verifique as variáveis de ambiente.", 
-          sender: Sender.System, 
-          timestamp: new Date(), 
-          buId: activeBU.id 
+      setMessages(prev => [...prev, {
+        id: 'error-' + Date.now(),
+        text: "⚠️ **ERRO DE SISTEMA:** Não foi possível conectar ao Gemini API. Verifique as variáveis de ambiente.",
+        sender: Sender.System,
+        timestamp: new Date(),
+        buId: activeBU.id
       }]);
     } finally { setIsLoading(false); }
   };
@@ -666,14 +668,14 @@ const App: React.FC = () => {
     if (isTransitioning) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center bg-white">
-           <div className="w-12 h-12 rounded-xl border-4 border-gray-100 border-t-bitrix-accent animate-spin mb-4"></div>
-           <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.4em]">Sincronizando Ambiente...</p>
+          <div className="w-12 h-12 rounded-xl border-4 border-gray-100 border-t-bitrix-accent animate-spin mb-4"></div>
+          <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.4em]">Sincronizando Ambiente...</p>
         </div>
       );
     }
 
     if (activeBU.id === '3forb' && activeTab === '3forb-home') return <ThreeForBView activeTab={activeTab} activeBU={activeBU} setActiveTab={setActiveTab} agents={activatedAgents} onAddTopic={handleAddTopic} />;
-    
+
     if (activeBU.id === 'audacus' && activeTab === 'audacus-home') return <AudacusView activeBU={activeBU} onBack={handleReturnToHub} />;
 
     // ROTA STARTYB
@@ -681,115 +683,115 @@ const App: React.FC = () => {
 
     switch (activeTab) {
       case 'home': return <DashboardHome agents={activatedAgents} tasks={tasks} businessUnits={businessUnits} onNavigate={setActiveTab} />;
-      
+
       // FIX: HUB VIEW SEMPRE RECEBE LISTA COMPLETA DE AGENTES (activatedAgents)
       case 'ecosystem': return <HubView businessUnits={businessUnits} activeBU={activeBU} onSelectBU={handleSelectBU} onNavigate={setActiveTab} agents={activatedAgents} onSelectAgent={handleAgentInteraction} />;
       // Fallback for 'hub' key from localstorage if present
       case 'hub': return <HubView businessUnits={businessUnits} activeBU={activeBU} onSelectBU={handleSelectBU} onNavigate={setActiveTab} agents={activatedAgents} onSelectAgent={handleAgentInteraction} />;
-      
+
       case 'management': return <ManagementView tasks={tasks} onAddTask={handleAddTask} onUpdateTaskStatus={handleUpdateTaskStatus} />;
-      case 'unit-room': return <UnitView activeBU={activeBU} agents={activatedAgents} onBack={handleBackNavigation} />; 
-      
+      case 'unit-room': return <UnitView activeBU={activeBU} agents={activatedAgents} onBack={handleBackNavigation} />;
+
       // NOVA ROTA: CONVERSAS (HISTÓRICO)
       case 'conversations': return <ConversationsView agents={activatedAgents} onOpenChat={handleAgentInteraction} />;
 
       // NOVA LÓGICA V4.6 - Governance Deep Linking
       case 'governance': return (
-          <GovernanceView 
-              onBack={() => setActiveTab('ecosystem')} 
-              agents={activatedAgents} 
-              onUpdateAgent={handleUpdateAgentData} 
-              businessUnits={businessUnits} 
-              onAddUnit={handleAddBusinessUnit}
-              targetAgentId={governanceTargetId} // Prop de Direcionamento
-              onClearTarget={() => setGovernanceTargetId(null)} // Limpeza após uso
-          />
-      ); 
-      
-      case 'alignment': return <AlignmentView activeBU={activeBU} messages={filteredAlignMessages} onAddMessage={(m) => setAlignmentMessages(p => [...p, m])} blueprint={currentBlueprint} onUpdateBlueprint={(bp) => setBlueprints(p => ({...p, [activeBU.id]: {...p[activeBU.id], ...bp}}))} />;
-      
-      case 'fabrica-ca': return (
-          <AgentFactory 
-              agents={activatedAgents} 
-              initialAgent={agentToOnboard} 
-              onNavigateToEcosystem={() => setActiveTab('ecosystem')} 
-              onActivate={handleActivateAgent} 
-              onRemove={handleRemoveAgent} 
-              activeBU={activeBU} 
-              businessUnits={businessUnits} 
-              onManageIntelligence={(agent) => {
-                  // NOVO HANDLER: Redireciona para Governança/Inteligência
-                  setGovernanceTargetId(agent.id);
-                  setActiveTab('governance');
-              }}
-          />
+        <GovernanceView
+          onBack={() => setActiveTab('ecosystem')}
+          agents={activatedAgents}
+          onUpdateAgent={handleUpdateAgentData}
+          businessUnits={businessUnits}
+          onAddUnit={handleAddBusinessUnit}
+          targetAgentId={governanceTargetId} // Prop de Direcionamento
+          onClearTarget={() => setGovernanceTargetId(null)} // Limpeza após uso
+        />
       );
-      
+
+      case 'alignment': return <AlignmentView activeBU={activeBU} messages={filteredAlignMessages} onAddMessage={(m) => setAlignmentMessages(p => [...p, m])} blueprint={currentBlueprint} onUpdateBlueprint={(bp) => setBlueprints(p => ({ ...p, [activeBU.id]: { ...p[activeBU.id], ...bp } }))} />;
+
+      case 'fabrica-ca': return (
+        <AgentFactory
+          agents={activatedAgents}
+          initialAgent={agentToOnboard}
+          onNavigateToEcosystem={() => setActiveTab('ecosystem')}
+          onActivate={handleActivateAgent}
+          onRemove={handleRemoveAgent}
+          activeBU={activeBU}
+          businessUnits={businessUnits}
+          onManageIntelligence={(agent) => {
+            // NOVO HANDLER: Redireciona para Governança/Inteligência
+            setGovernanceTargetId(agent.id);
+            setActiveTab('governance');
+          }}
+        />
+      );
+
       // NOVA ROTA: EQUIPE GLOBAL (VISÃO DE TODOS OS AGENTES PARA CHAT)
       case 'team': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} viewMode="global" />;
 
       // RESTORED: CHAT ROOM (Systemic Vision Logic) with onConvertToTopic prop
       case 'chat-room': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} />;
 
-      case 'vault': 
-        return <BacklogView 
-          topics={topics.filter(t => t.buId === activeBU.id)} 
+      case 'vault':
+        return <BacklogView
+          topics={topics.filter(t => t.buId === activeBU.id)}
           agents={filteredAgents}
-          onAddTopic={(title, priority, assignee, dueDate) => handleAddTopic(title, priority, assignee, dueDate)} 
-          onRemoveTopic={(id) => setTopics(prev => prev.filter(t => t.id !== id))} 
-          onUpdateStatus={(id, s) => setTopics(prev => prev.map(t => t.id === id ? { ...t, status: s } : t))} 
+          onAddTopic={(title, priority, assignee, dueDate) => handleAddTopic(title, priority, assignee, dueDate)}
+          onRemoveTopic={(id) => setTopics(prev => prev.filter(t => t.id !== id))}
+          onUpdateStatus={(id, s) => setTopics(prev => prev.map(t => t.id === id ? { ...t, status: s } : t))}
         />;
       case 'redir':
-      case 'requests': 
+      case 'requests':
         return (
           <div className="h-full flex flex-col relative bg-[#F9FAFB] overflow-hidden">
             <header className="h-20 px-10 flex items-center justify-between border-b border-gray-100 bg-white/80 backdrop-blur z-20">
-               <span className="text-[9px] font-black text-gray-400 uppercase tracking-[0.4em]">
-                 Canal Direto: {activeBU.name} 
-                 {activeBU.id === 'startyb' && <span className="text-blue-500 ml-2">(ARCHITECT MODE)</span>}
-               </span>
+              <span className="text-[9px] font-black text-gray-400 uppercase tracking-[0.4em]">
+                Canal Direto: {activeBU.name}
+                {activeBU.id === 'startyb' && <span className="text-blue-500 ml-2">(ARCHITECT MODE)</span>}
+              </span>
             </header>
-            
+
             {/* CHAT CONTAINER - Scroll Handling Fixed */}
             <div className="flex-1 overflow-y-auto custom-scrollbar relative" ref={chatContainerRef}>
               <div className="max-w-4xl mx-auto px-8 py-10 pb-48 space-y-8">
                 {filteredMessages.map((msg) => (
                   <div key={msg.id} className={`flex ${msg.sender === Sender.User ? 'flex-row-reverse' : 'flex-row'} items-start gap-4 animate-msg group`}>
                     <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0 border border-gray-200 bg-white flex items-center justify-center mt-2">
-                       {msg.sender === Sender.User ? (
-                         <img src={DOUGLAS_IMAGE} className="w-full h-full object-cover" />
-                       ) : (
-                         activeDirector.imageUrl ? (
-                           <img src={activeDirector.imageUrl} className="w-full h-full object-cover" />
-                         ) : (
-                           <div className="text-[10px] font-black uppercase text-white" style={{ color: activeDirector.avatarColor }}>
-                             {activeDirector.name.substring(0,2)}
-                           </div>
-                         )
-                       )}
+                      {msg.sender === Sender.User ? (
+                        <img src={DOUGLAS_IMAGE} className="w-full h-full object-cover" />
+                      ) : (
+                        activeDirector.imageUrl ? (
+                          <img src={activeDirector.imageUrl} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="text-[10px] font-black uppercase text-white" style={{ color: activeDirector.avatarColor }}>
+                            {activeDirector.name.substring(0, 2)}
+                          </div>
+                        )
+                      )}
                     </div>
-                    
+
                     <div className={`flex flex-col ${msg.sender === Sender.User ? 'items-end' : 'items-start'} max-w-[85%]`}>
-                       <div className="flex items-center gap-2 mb-1 px-1 opacity-60">
-                          <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
-                              {msg.sender === Sender.User ? 'Douglas Rodrigues' : activeDirector.name}
-                          </span>
-                       </div>
+                      <div className="flex items-center gap-2 mb-1 px-1 opacity-60">
+                        <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
+                          {msg.sender === Sender.User ? 'Douglas Rodrigues' : activeDirector.name}
+                        </span>
+                      </div>
 
                       {msg.sender === Sender.System ? (
-                          <div className="px-5 py-3 bg-white border border-gray-200 rounded-xl text-gray-500 text-[10px] font-black uppercase tracking-widest w-full text-center shadow-sm">
-                              {msg.text}
-                          </div>
+                        <div className="px-5 py-3 bg-white border border-gray-200 rounded-xl text-gray-500 text-[10px] font-black uppercase tracking-widest w-full text-center shadow-sm">
+                          {msg.text}
+                        </div>
                       ) : (
-                          // BUBBLE: WHITE ON WHITE THEME (CLEAN)
-                          <div className={`
+                        // BUBBLE: WHITE ON WHITE THEME (CLEAN)
+                        <div className={`
                              px-6 py-4 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 
                              text-[12px] leading-relaxed font-medium transition-all duration-300
                              bg-white text-gray-700
                              ${msg.sender === Sender.User ? 'rounded-tr-sm' : 'rounded-tl-sm prose prose-sm max-w-none prose-p:text-gray-700 prose-strong:text-gray-900'}
                           `}>
-                            {msg.sender === Sender.Bot ? <ReactMarkdown>{msg.text}</ReactMarkdown> : msg.text}
-                          </div>
+                          {msg.sender === Sender.Bot ? <ReactMarkdown>{msg.text}</ReactMarkdown> : msg.text}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -800,34 +802,34 @@ const App: React.FC = () => {
             {/* INPUT AREA */}
             <div className="absolute bottom-0 left-0 right-0 bg-white/80 backdrop-blur pb-10 pt-4 z-30">
               {attachment && (
-                  <div className="max-w-3xl mx-auto mb-2 flex items-center justify-end px-6">
-                      <div className="bg-white border border-gray-200 p-2 rounded-xl shadow-sm flex items-center gap-3">
-                          <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-                              {attachment.mimeType.startsWith('image/') ? (
-                                  <img src={attachment.preview} className="w-full h-full object-cover rounded-lg" />
-                              ) : <FileTextIcon className="w-5 h-5 text-gray-400" />}
-                          </div>
-                          <button onClick={() => setAttachment(null)} className="text-gray-400 hover:text-red-500"><XIcon className="w-4 h-4"/></button>
-                      </div>
+                <div className="max-w-3xl mx-auto mb-2 flex items-center justify-end px-6">
+                  <div className="bg-white border border-gray-200 p-2 rounded-xl shadow-sm flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+                      {attachment.mimeType.startsWith('image/') ? (
+                        <img src={attachment.preview} className="w-full h-full object-cover rounded-lg" />
+                      ) : <FileTextIcon className="w-5 h-5 text-gray-400" />}
+                    </div>
+                    <button onClick={() => setAttachment(null)} className="text-gray-400 hover:text-red-500"><XIcon className="w-4 h-4" /></button>
                   </div>
+                </div>
               )}
 
               <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} accept="image/*,application/pdf,.txt" />
 
               <form onSubmit={handleSubmit} className="max-w-3xl mx-auto px-6 relative flex items-center bg-white border border-gray-100 rounded-[2.5rem] p-2 shadow-2xl hover:shadow-[0_20px_40px_rgba(0,0,0,0.05)] transition-all">
                 <button type="button" onClick={() => fileInputRef.current?.click()} className="w-10 h-10 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 transition-all hover:bg-gray-50">
-                    <PaperclipIcon className="w-5 h-5" />
+                  <PaperclipIcon className="w-5 h-5" />
                 </button>
                 <button type="button" onClick={handleToggleRecording} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:bg-gray-50 ${isRecording ? 'text-red-500 animate-pulse' : 'text-gray-400 hover:text-gray-600'}`}>
-                    {isRecording ? <StopCircleIcon className="w-5 h-5" /> : <MicIcon className="w-5 h-5" />}
+                  {isRecording ? <StopCircleIcon className="w-5 h-5" /> : <MicIcon className="w-5 h-5" />}
                 </button>
 
-                <input 
-                  value={input} 
-                  onChange={e => setInput(e.target.value)} 
-                  placeholder={isTranscribing ? "Transcrevendo..." : `Falar com ${activeDirector.name} sobre ${activeBU.name}...`} 
-                  className="flex-1 bg-transparent px-4 py-4 outline-none font-medium text-gray-600 placeholder:text-gray-300 text-sm" 
-                  disabled={isLoading || isTranscribing} 
+                <input
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  placeholder={isTranscribing ? "Transcrevendo..." : `Falar com ${activeDirector.name} sobre ${activeBU.name}...`}
+                  className="flex-1 bg-transparent px-4 py-4 outline-none font-medium text-gray-600 placeholder:text-gray-300 text-sm"
+                  disabled={isLoading || isTranscribing}
                 />
                 <button type="submit" disabled={(!input.trim() && !attachment) || isLoading || isTranscribing} className="w-12 h-12 rounded-full flex items-center justify-center text-bitrix-nav hover:text-bitrix-accent transition-all">
                   <SendIcon className="w-6 h-6" />
@@ -836,7 +838,7 @@ const App: React.FC = () => {
             </div>
           </div>
         );
-      
+
       // DEFAULT FALLBACK: Sempre renderiza Home se a tab for desconhecida
       default: return <DashboardHome agents={activatedAgents} tasks={tasks} businessUnits={businessUnits} onNavigate={setActiveTab} />;
     }
@@ -848,9 +850,9 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-[#111827] flex flex-col items-center justify-center p-4 font-nunito animate-msg">
         {/* Logo/Icon */}
         <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center mb-8 border border-white/10 shadow-2xl">
-           <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-             <path d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z" />
-           </svg>
+          <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z" />
+          </svg>
         </div>
 
         <div className="max-w-sm w-full">
@@ -873,7 +875,7 @@ const App: React.FC = () => {
                 `}
               />
             </div>
-            
+
             {authError && (
               <p className="text-center text-[10px] font-black text-red-500 uppercase tracking-widest animate-pulse">
                 Acesso Negado
@@ -887,9 +889,9 @@ const App: React.FC = () => {
               Entrar
             </button>
           </form>
-          
+
           <div className="mt-12 text-center">
-             <p className="text-[9px] text-gray-700 font-mono">ID: 8933 • SECURE GATEWAY</p>
+            <p className="text-[9px] text-gray-700 font-mono">ID: 8933 • SECURE GATEWAY</p>
           </div>
         </div>
       </div>
@@ -902,7 +904,7 @@ const App: React.FC = () => {
   return (
     <div className="flex h-screen bg-white font-nunito text-bitrix-text overflow-hidden">
       {!isImmersiveMode && (
-        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} agentCount={filteredAgents.length} activeBU={safeBU} version={APP_VERSION} onReset={handleReturnToHub} />
+        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} agentCount={filteredAgents.length} activeBU={safeBU} version={version} onReset={handleReturnToHub} />
       )}
       <main className="flex-1 flex flex-col overflow-hidden relative bg-[#F9FAFB]">{renderContent()}</main>
     </div>

@@ -1,6 +1,6 @@
 {
   "name": "SagB",
-  "version": "1.8.1",
+  "version": "1.0.0",
   "codename": "Antigravity DeepSeek",
   "description": "Sistema unificado com DeepSeek, Gemini 2.0 Flash e Pipeline CI/CD Ativo.",
   "lastUpdated": "2024-05-23",
