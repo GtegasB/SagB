@@ -469,7 +469,7 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
                 <textarea 
                     value={value}
                     onChange={e => setValue(e.target.value)}
-                    className="w-full h-full p-8 bg-white resize-none outline-none font-mono text-xs leading-relaxed text-gray-700 custom-scrollbar"
+                    className="w-full h-full p-8 bg-white resize-none outline-none font-mono text-xs leading-relaxed text-gray-800 custom-scrollbar"
                     spellCheck={false}
                     placeholder={placeholder}
                 />
@@ -625,7 +625,8 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
                                 <textarea 
                                     value={tempPrompt}
                                     onChange={e => setTempPrompt(e.target.value)}
-                                    className="flex-1 p-8 resize-none outline-none font-mono text-xs leading-relaxed text-gray-700 custom-scrollbar"
+                                    // FORCE WHITE BACKGROUND AND DARK GRAY TEXT HERE
+                                    className="flex-1 p-8 resize-none outline-none font-mono text-xs leading-relaxed text-gray-800 bg-white custom-scrollbar"
                                     spellCheck={false}
                                     placeholder="Defina o prompt do sistema aqui..."
                                 />

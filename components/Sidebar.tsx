@@ -125,10 +125,14 @@ const Sidebar: React.FC<SidebarProps> = ({
         })}
       </nav>
 
-      {/* FOOTER - CLEAN VERSION */}
+      {/* FOOTER - ANTIGRAVITY STATUS */}
       <div className="mt-4 pt-4 border-t border-gray-100 px-1">
-        <div className="mt-3 text-center">
+        <div className="mt-3 flex flex-col items-center">
            <span className="text-[9px] font-medium text-gray-300">v{version} • Pure Clean</span>
+           <div className="flex items-center gap-1.5 mt-1 opacity-60">
+              <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse"></div>
+              <span className="text-[8px] font-black uppercase tracking-widest text-gray-400">Antigravity On</span>
+           </div>
         </div>
       </div>
     </aside>
