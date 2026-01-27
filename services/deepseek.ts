@@ -3,7 +3,7 @@
 // Responsável pela inteligência do Agente Dr. Alex Chen
 
 // SEGURANÇA: Prioriza variável de ambiente. Fallback mantido apenas para dev local.
-const DEEPSEEK_API_KEY = process.env.VITE_DEEPSEEK_API_KEY || "sk-ee91ab44a1324f4a83557bcb0c15eb0d"; 
+const DEEPSEEK_API_KEY = process.env.VITE_DEEPSEEK_API_KEY || "sk-b6725e26ad154430836dbfda506214bb";
 const API_URL = "https://api.deepseek.com/chat/completions";
 
 export interface DeepSeekMessage {
@@ -14,13 +14,13 @@ export interface DeepSeekMessage {
 // Simulador de Stream compatível com a interface do Gemini
 // Isso permite que o SystemicVision consuma os dados da mesma forma
 export async function* streamDeepSeekResponse(
-  messages: DeepSeekMessage[], 
+  messages: DeepSeekMessage[],
   systemInstruction: string
 ) {
-  
+
   if (!DEEPSEEK_API_KEY || DEEPSEEK_API_KEY.includes("SUA_CHAVE")) {
-      yield { text: "\n\n[ERRO DE CONFIGURAÇÃO: Chave DeepSeek não encontrada no .env]" };
-      return;
+    yield { text: "\n\n[ERRO DE CONFIGURAÇÃO: Chave DeepSeek não encontrada no .env]" };
+    return;
   }
 
   // Prepara o payload

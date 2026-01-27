@@ -31,6 +31,8 @@ import {
 } from './services/gemini';
 import { MASTER_AGENTS_LIST } from './data/agents';
 import metadata from './metadata.json';
+import { db } from './services/firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
 //const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
@@ -185,7 +187,31 @@ const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<TabId>('home'); // DEFAULT: HOME
   const [activeBU, setActiveBU] = useState<BusinessUnit>(INITIAL_BUSINESS_UNITS[0]);
-  const [activatedAgents, setActivatedAgents] = useState<Agent[]>([]);
+
+  // OFFLINE-FIRST: Inicializa com a Lista Mestre para garantir UI imediata
+  const [activatedAgents, setActivatedAgents] = useState<Agent[]>(() => {
+    return MASTER_AGENTS_LIST.map(seed => {
+      let injectedPrompt = '';
+      if (seed.id === 'ca006gpb') injectedPrompt = DEFAULT_PIETRO_PROMPT;
+      if (seed.id === 'ca045tgs') injectedPrompt = DEFAULT_CASSIO_PROMPT;
+
+      return {
+        id: seed.id,
+        universalId: seed.id,
+        name: seed.name,
+        officialRole: seed.role,
+        buId: UNIT_MAP[seed.unit] || 'grupob',
+        tier: inferTier(seed.role),
+        active: seed.is_active,
+        status: seed.is_active ? 'ACTIVE' : 'PLANNED',
+        version: '1.0',
+        company: 'GrupoB',
+        fullPrompt: injectedPrompt,
+        sector: seed.role.split(' ')[0],
+        modelProvider: (seed as any).model_provider || 'gemini'
+      } as Agent;
+    });
+  });
   const [messages, setMessages] = useState<Message[]>([]);
   const [alignmentMessages, setAlignmentMessages] = useState<Message[]>([]);
   const [blueprints, setBlueprints] = useState<Record<string, BusinessBlueprint>>({});
@@ -496,109 +522,51 @@ const App: React.FC = () => {
     }
   }, [activeBU]);
 
+  // --- FIRESTORE SYNC (SUBSTITUI LOCALSTORAGE PARA AGENTES) ---
   useEffect(() => {
-    // SEED LOGIC (Updated V1.7.4 - Recovery Protocol)
-    const savedAgentsStr = localStorage.getItem(STORAGE_KEYS.AGENTS);
-    const legacyAgentsStr = localStorage.getItem('grupob_activated_agents_v10'); // Fallback to previous version
+    const unsubscribe = onSnapshot(collection(db, 'agents'), (snapshot) => {
+      const firestoreAgents = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as Agent[];
 
-    let currentAgents: Agent[] = [];
+      // Merge Strategy: Master List (Defaults) + Firestore (Overrides & New)
+      const finalList = MASTER_AGENTS_LIST.map(seed => {
+        const remote = firestoreAgents.find(fa => fa.universalId === seed.id);
+        if (remote) return remote;
 
-    if (savedAgentsStr) {
-      try {
-        currentAgents = JSON.parse(savedAgentsStr);
-      } catch (e) { console.error("Erro ao carregar agentes locais", e); }
-    } else if (legacyAgentsStr) {
-      // Attempt migration from v10 if v11 is missing
-      try {
-        console.log("Migrating agents from v10...");
-        currentAgents = JSON.parse(legacyAgentsStr);
-      } catch (e) { console.error("Erro ao migrar agentes v10", e); }
-    }
+        // Fallback to minimal seed object if not in DB yet
+        return {
+          id: seed.id,
+          universalId: seed.id,
+          name: seed.name,
+          officialRole: seed.role,
+          buId: UNIT_MAP[seed.unit] || 'grupob',
+          tier: inferTier(seed.role),
+          active: seed.is_active,
+          status: seed.is_active ? 'ACTIVE' : 'PLANNED',
+          version: '1.0',
+          company: 'GrupoB',
+          fullPrompt: '',
+          sector: seed.role.split(' ')[0],
+          modelProvider: (seed as any).model_provider || 'gemini'
+        } as Agent;
+      });
 
-    // Normalizar Lista Mestre
-    const masterSeed: Agent[] = MASTER_AGENTS_LIST.map(raw => {
-      // --- INJEÇÃO DE DNA DO SISTEMA (HARDCODED) ---
-      let injectedPrompt = '';
-      if (raw.id === 'ca006gpb') injectedPrompt = DEFAULT_PIETRO_PROMPT;
-      if (raw.id === 'ca045tgs') injectedPrompt = DEFAULT_CASSIO_PROMPT;
-      if (raw.id === 'ca044tgs') injectedPrompt = KLAUS_PROMPT;
-      if (raw.id === 'ca902tgs') injectedPrompt = NEWTON_PROMPT;
-
-      return {
-        id: raw.id, // Usa ID oficial
-        universalId: raw.id,
-        name: raw.name,
-        officialRole: raw.role,
-        buId: UNIT_MAP[raw.unit] || 'grupob',
-        tier: inferTier(raw.role),
-        active: raw.is_active,
-        status: raw.is_active ? 'ACTIVE' : 'PLANNED', // Força status conforme data/agents.ts
-        version: '1.0',
-        company: UNIT_MAP[raw.unit] ? businessUnits.find(b => b.id === UNIT_MAP[raw.unit])?.name || 'GrupoB' : 'GrupoB',
-        fullPrompt: injectedPrompt,
-        sector: raw.role.split(' ')[0],
-        modelProvider: (raw as any).model_provider || 'gemini' // Mapeamento correto do provedor
-      };
-    });
-
-    // SE a lista local estiver vazia OU se for uma nova versão de storage (sem merge legacy)
-    // Inicializa com a Master List Limpa
-    if (currentAgents.length === 0) {
-      setActivatedAgents(masterSeed);
-    } else {
-      // Merge cuidadoso (preserva agentes criados manualmente, mas respeita reset de status)
-      const mergedAgents = [...currentAgents];
-
-      masterSeed.forEach(seedAgent => {
-        const existsIndex = mergedAgents.findIndex(a => a.universalId === seedAgent.universalId);
-        if (existsIndex === -1) {
-          // RESTORE MISSING AGENT (This fixes the "Agents Disappeared" issue)
-          mergedAgents.push(seedAgent);
-        } else {
-          // ATUALIZAÇÃO FORÇADA DE AGENTES DE SISTEMA (Pietro, Cássio, etc)
-          const isSystemAgent = ['ca006gpb', 'ca045tgs', 'ca044tgs', 'ca902tgs', 'ca099aud'].includes(seedAgent.id);
-
-          const manualOverride = localStorage.getItem(seedAgent.id);
-
-          mergedAgents[existsIndex] = {
-            ...mergedAgents[existsIndex],
-            name: seedAgent.name,
-            officialRole: seedAgent.officialRole,
-            tier: seedAgent.tier,
-            status: isSystemAgent ? 'ACTIVE' : seedAgent.status,
-            // Garante que o provedor seja atualizado se vier do master
-            modelProvider: seedAgent.modelProvider || mergedAgents[existsIndex].modelProvider || 'gemini',
-            // PRIORIDADE: 1. Edição Manual (Override) 2. Prompt Hardcoded (System) 3. Prompt Existente
-            fullPrompt: manualOverride ? manualOverride : (isSystemAgent ? seedAgent.fullPrompt : mergedAgents[existsIndex].fullPrompt)
-          };
+      // Add custom agents from Firestore that are NOT in Master List
+      firestoreAgents.forEach(fa => {
+        if (!finalList.find(i => i.universalId === fa.universalId)) {
+          finalList.push(fa);
         }
       });
-      setActivatedAgents(mergedAgents);
-    }
 
-    // --- LOAD REST OF STATE ---
+      setActivatedAgents(finalList);
+    });
 
-    const savedMessages = localStorage.getItem(STORAGE_KEYS.CHAT);
-    if (savedMessages) { try { setMessages(JSON.parse(savedMessages).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }))); } catch (e) { } }
-
-    const savedAlignMessages = localStorage.getItem(STORAGE_KEYS.ALIGNMENT);
-    if (savedAlignMessages) { try { setAlignmentMessages(JSON.parse(savedAlignMessages).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }))); } catch (e) { } }
-
-    const savedBlueprints = localStorage.getItem(STORAGE_KEYS.BLUEPRINTS);
-    if (savedBlueprints) { try { setBlueprints(JSON.parse(savedBlueprints)); } catch (e) { } }
-
-    // Carrega Tópicos
-    const savedTopics = localStorage.getItem(STORAGE_KEYS.TOPICS);
-    if (savedTopics) { try { setTopics(JSON.parse(savedTopics).map((t: any) => ({ ...t, timestamp: new Date(t.timestamp) }))); } catch (e) { } }
-
-    // Carrega Tasks
-    const savedTasks = localStorage.getItem(STORAGE_KEYS.TASKS);
-    if (savedTasks) { try { setTasks(JSON.parse(savedTasks).map((t: any) => ({ ...t, createdAt: new Date(t.createdAt) }))); } catch (e) { } }
-
+    return () => unsubscribe();
   }, []);
 
   // --- SAVE STATE ---
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.AGENTS, JSON.stringify(activatedAgents)); }, [activatedAgents]);
+  // --- SAVE STATE (LOCALSTORAGE REMOVIDO PARA AGENTES - AGORA É FIRESTORE) ---
+  // useEffect(() => { localStorage.setItem(STORAGE_KEYS.AGENTS, JSON.stringify(activatedAgents)); }, [activatedAgents]); 
+
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.CHAT, JSON.stringify(messages)); }, [messages]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.ALIGNMENT, JSON.stringify(alignmentMessages)); }, [alignmentMessages]);
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(topics)); }, [topics]);
