@@ -21,7 +21,7 @@ import {
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
-    apiKey: "AIzaSyAKfMgwymzjtAG7VtT07n98ONwkykmNks0",
+    apiKey: process.env.API_KEY || "AIzaSyAKfMgwymzjtAG7VtT07n980NwkykmNks0", // Use variable with zero fallback
     authDomain: "sagb-grupob-v1.firebaseapp.com",
     projectId: "sagb-grupob-v1",
     storageBucket: "sagb-grupob-v1.appspot.com",
