@@ -765,9 +765,33 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         } catch (error: any) {
             console.error("Neural Connection Error Detail:", error);
             const technicalMsg = error.message || "Conexão Instável";
+
+            // TENTATIVA DE FALLBACK AUTOMÁTICO PARA DEEPSEEK SE O GEMINI FALHAR
+            if (technicalMsg.includes("403") || technicalMsg.includes("PERMISSION_DENIED") || technicalMsg.includes("blocked")) {
+                console.warn("⚠️ Gemini Bloqueado. Ativando Protocolo de Emergência (DeepSeek Fallback)...");
+                try {
+                    const deepSeekHistory = activeMessages.concat(userMsg).map(m => ({
+                        role: m.sender === Sender.User ? 'user' : 'assistant',
+                        content: m.text
+                    })) as DeepSeekMessage[];
+
+                    const stream = streamDeepSeekResponse(deepSeekHistory, selectedAgent.fullPrompt);
+                    let fullText = "⚠️ [MODO DE EMERGÊNCIA ATIVADO: Gemini bloqueado. Usando DeepSeek.]\n\n";
+
+                    for await (const chunk of stream) {
+                        fullText += chunk.text;
+                        setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
+                    }
+                    setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
+                    return; // Sucesso no Fallback
+                } catch (dsError: any) {
+                    console.error("DeepSeek Fallback also failed:", dsError);
+                }
+            }
+
             setActiveMessages(prev => prev.map(m => m.id === botMsgId ? {
                 ...m,
-                text: `Erro na conexão neural (${technicalMsg}). Newton, verifique se a 'Generative Language API' está ativada no Google Cloud para este projeto.`,
+                text: `Erro na conexão neural (${technicalMsg}). Newton, crie uma NOVA CHAVE DE API e verifique as restrições de serviço no Google Cloud.`,
                 isStreaming: false
             } : m));
         } finally {
