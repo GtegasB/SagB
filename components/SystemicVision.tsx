@@ -762,9 +762,14 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                 updateSessionMetadata(currentSessionId);
             }
 
-        } catch (error) {
-            console.error(error);
-            setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: "Erro na conexão neural.", isStreaming: false } : m));
+        } catch (error: any) {
+            console.error("Neural Connection Error Detail:", error);
+            const technicalMsg = error.message || "Conexão Instável";
+            setActiveMessages(prev => prev.map(m => m.id === botMsgId ? {
+                ...m,
+                text: `Erro na conexão neural (${technicalMsg}). Newton, verifique se a 'Generative Language API' está ativada no Google Cloud para este projeto.`,
+                isStreaming: false
+            } : m));
         } finally {
             setIsLoading(false);
         }

@@ -31,10 +31,10 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with settings
+// Initialize Firestore with settings and custom database ID
 export const db = initializeFirestore(app, {
     cacheSizeBytes: CACHE_SIZE_UNLIMITED
-});
+}, "sagb-banco-dados");
 
 export const auth = getAuth(app);
 export const storage = getStorage(app);
