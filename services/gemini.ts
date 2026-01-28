@@ -85,7 +85,7 @@ ${context || 'Sala de Comando Central.'}
 `.trim();
 
   mainChatSession = ai.chats.create({
-    model: 'gemini-2.0-flash-exp',
+    model: 'gemini-2.5-flash',
     config: {
       systemInstruction: instruction,
       temperature: 0.2
@@ -101,7 +101,7 @@ export const startPietroSession = (participantsContext: string = "") => {
 export const startKlausSession = () => {
   const ai = getClient();
   return ai.chats.create({
-    model: 'gemini-2.0-flash-exp',
+    model: 'gemini-2.5-flash',
     config: {
       systemInstruction: createKlausInstruction(),
       temperature: 0.3
@@ -121,7 +121,7 @@ export const startAgentSession = (
   agentId: string,
   systemInstruction: string,
   knowledgeBase: string[] = [],
-  modelId: string = 'gemini-2.0-flash-exp',
+  modelId: string = 'gemini-2.5-flash',
   history?: Content[],
   userContext?: { name: string, nickname: string, role: string },
   ragContext?: string, // Documentos recuperados automaticamente
@@ -194,7 +194,7 @@ export const consolidateChatMemory = async (chatHistory: string): Promise<string
   const ai = getClient();
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.5-flash',
       contents: `
 ATENÇÃO SISTEMA DE TREINAMENTO:
 Você é um auditor de qualidade de IA.
@@ -224,7 +224,7 @@ export const generateTitleOptions = async (messagesText: string): Promise<string
   const ai = getClient();
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.5-flash',
       contents: `
 ATENÇÃO: Você é um assistente executivo.
 Analise a conversa e sugira 3 opções de Títulos.
@@ -254,7 +254,7 @@ export const generateTaskSuggestions = async (contextText: string): Promise<stri
   const ai = getClient();
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.5-flash',
       contents: `
 ATENÇÃO: Sugira 3 nomes curtos para Tarefa (Pauta) baseados no contexto.
 Comece com Verbo no Infinitivo.
@@ -284,7 +284,7 @@ export const transcribeAudio = async (base64Audio: string, mimeType: string = 'a
   const promptText = "Transcreva o áudio fielmente.";
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash-exp',
+      model: 'gemini-2.5-flash',
       contents: {
         parts: [
           { inlineData: { mimeType: mimeType, data: base64Audio } },
@@ -339,7 +339,7 @@ const AGENT_SCHEMA = {
 export const createAgentFromScratch = async (prompt: string) => {
   const ai = getClient();
   const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash-exp',
+    model: 'gemini-2.5-flash',
     contents: `ARQUITETO PIETRO: Gere o DNA V1.0 para: "${prompt}".`,
     config: {
       responseMimeType: "application/json",
