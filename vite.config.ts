@@ -12,11 +12,11 @@ export default defineConfig(({ mode }) => {
     define: {
       // INJEÇÃO FORÇADA: Define a chave diretamente aqui para garantir que o navegador receba.
       // O JSON.stringify é necessário para que o Vite entenda que é uma string.
-      'process.env.API_KEY': JSON.stringify("AIzaSyAKfMgwymzjtAG7VtT07n980NwkykmNks0"),
-      'process.env.VITE_DEEPSEEK_API_KEY': JSON.stringify("sk-ee91ab44a1324f4a83557bcb0c15eb0d"),
-      
+      'process.env.API_KEY': JSON.stringify("AIzaSyAKfMgwymzjtAG7VtT07n98ONwkykmNks0"), // Fixed Typo 0 -> O
+      'process.env.VITE_DEEPSEEK_API_KEY': JSON.stringify("sk-b6725e26ad154430836dbfda506214bb"), // New Key
+
       // Polyfill de segurança
-      'process.env': JSON.stringify({}), 
+      'process.env': JSON.stringify({}),
     },
     resolve: {
       extensions: ['.mjs', '.js', '.ts', '.jsx', '.tsx', '.json']

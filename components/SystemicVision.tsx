@@ -196,6 +196,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             docsInventory // Inventário para o prompt do sistema
         );
         setGeminiSession(gs);
+        return gs;
     };
 
     // --- RESIZING LOGIC ---
@@ -709,9 +710,9 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
             } else {
                 // GEMINI (DEFAULT)
-                if (!geminiSession) {
-                    initializeSession(selectedAgent);
-                    await new Promise(r => setTimeout(r, 500));
+                let currentSession = geminiSession;
+                if (!currentSession) {
+                    currentSession = initializeSession(selectedAgent);
                 }
 
                 let messagePayload: any = userText;
@@ -732,7 +733,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     ];
                 }
 
-                const result = await geminiSession?.sendMessageStream({ message: messagePayload });
+                const result = await currentSession?.sendMessageStream({ message: messagePayload });
                 let fullText = '';
 
                 for await (const chunk of result) {
