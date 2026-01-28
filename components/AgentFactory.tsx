@@ -249,8 +249,11 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                 try {
                     if (editingId) {
                         await updateDoc(doc(db, "agents", editingId), payload);
+                        alert("✅ Agente atualizado com sucesso no Firestore!");
                     } else {
+                        console.log("Tentando criar agente em 'agents'...", payload);
                         const docRef = await addDoc(collection(db, "agents"), payload);
+                        alert(`✅ Sucesso! Agente criado no Firestore.\nID: ${docRef.id}\nColeção: agents`);
                         await updateDoc(docRef, { id: docRef.id });
                         payload.id = docRef.id;
                     }
@@ -261,7 +264,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
             };
 
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("TIMEOUT")), 10000)
+                setTimeout(() => reject(new Error("TIMEOUT")), 20000)
             );
 
             await Promise.race([saveToFirestore(), timeoutPromise]);
