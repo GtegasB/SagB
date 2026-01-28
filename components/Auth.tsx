@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { auth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from '../services/firebase';
+import { auth, db, doc, setDoc, signInWithEmailAndPassword, createUserWithEmailAndPassword } from '../services/firebase';
 import { SendIcon } from './Icon';
 
 interface AuthProps {
@@ -11,8 +11,18 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
     const [isLogin, setIsLogin] = useState(true);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [name, setName] = useState('');
+    const [role, setRole] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+
+    const inferTier = (roleName: string) => {
+        const r = roleName.toLowerCase();
+        if (r.includes('chairman') || r.includes('ceo') || r.includes('cfo') || r.includes('cro') || r.includes('conselheiro')) return 'ESTRATÉGICO';
+        if (r.includes('diretor') || r.includes('head') || r.includes('gestor') || r.includes('sócio')) return 'TÁTICO';
+        if (r.includes('mentor') || r.includes('auditor') || r.includes('treinador') || r.includes('controller')) return 'CONTROLE';
+        return 'OPERACIONAL';
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -23,7 +33,25 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
             if (isLogin) {
                 await signInWithEmailAndPassword(auth, email, password);
             } else {
-                await createUserWithEmailAndPassword(auth, email, password);
+                if (!name || !role) {
+                    setError('Nome e Cargo são obrigatórios para novos usuários.');
+                    setLoading(false);
+                    return;
+                }
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                // CRIAR PERFIL NO FIRESTORE
+                await setDoc(doc(db, "users", user.uid), {
+                    uid: user.uid,
+                    email: user.email,
+                    name: name,
+                    nickname: name.split(' ')[0],
+                    role: role,
+                    company: 'GrupoB',
+                    tier: inferTier(role),
+                    createdAt: new Date()
+                });
             }
             onAuthSuccess();
         } catch (err: any) {
@@ -56,6 +84,33 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    {!isLogin && (
+                        <>
+                            <div>
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4 mb-2 block">Nome Completo</label>
+                                <input
+                                    type="text"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-black/5 transition-all text-sm font-medium"
+                                    placeholder="Ex: Douglas Rodrigues"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4 mb-2 block">Cargo Corporativo</label>
+                                <input
+                                    type="text"
+                                    value={role}
+                                    onChange={(e) => setRole(e.target.value)}
+                                    className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-black/5 transition-all text-sm font-medium"
+                                    placeholder="Ex: Chairman"
+                                    required
+                                />
+                            </div>
+                        </>
+                    )}
+
                     <div>
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-4 mb-2 block">E-mail Corporativo</label>
                         <input

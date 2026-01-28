@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Agent, Message, Sender, BusinessUnit, AgentTier, AgentStatus, Topic, PersonaConfig } from '../types';
+import { Agent, Message, Sender, BusinessUnit, AgentTier, AgentStatus, Topic, PersonaConfig, UserProfile } from '../types';
 import { startAgentSession, generateTitleOptions, transcribeAudio, generateTaskSuggestions, consolidateChatMemory } from '../services/gemini';
 import { streamDeepSeekResponse, DeepSeekMessage } from '../services/deepseek';
 import { retrieveRelevantContext, retrieveLearnedMemory, addDocumentToAgent, addLearningToAgent } from '../services/knowledge';
@@ -9,23 +9,6 @@ import { SendIcon, NewChatIcon, MicIcon, StopCircleIcon, BackIcon, FolderIcon, P
 import { Avatar } from './Avatar';
 import ChatMessage from './ChatMessage';
 
-// --- USER CONTEXT (SIMULADO / PERSONALIZAÇÃO) ---
-const CURRENT_USER = {
-    name: "Douglas Rodrigues",
-    nickname: "Rodrigues",
-    role: "Chairman",
-    avatar: "https://firebasestorage.googleapis.com/v0/b/sagb-grupob-v1.firebasestorage.app/o/Douglas%20Rodrigues%2FScreenshot_79.png?alt=media&token=1b6c2884-ae4d-49de-9d03-f0a38e0cfc27"
-};
-
-// Frases de saudação humana e natural
-const HUMAN_GREETINGS = [
-    `Fala ${CURRENT_USER.nickname}. Estou na escuta.`,
-    `Opa, ${CURRENT_USER.nickname}. O que temos para agora?`,
-    `Bora falar, ${CURRENT_USER.nickname}?`,
-    `Na linha. Qual a pauta?`,
-    `Pronto. O que manda?`,
-    `E aí ${CURRENT_USER.nickname}. Pode falar.`
-];
 
 interface SystemicVisionProps {
     dynamicAgents: Agent[];
@@ -41,6 +24,7 @@ interface SystemicVisionProps {
     onBack?: () => void;
     onConvertToTopic?: (topic: Partial<Topic>) => void;
     viewMode?: 'bu' | 'global';
+    userProfile?: UserProfile | null;
 }
 
 // Interface para Sessão
@@ -52,7 +36,23 @@ interface ChatSession {
     lastMessageAt: number;
 }
 
-const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdateAgents, activeBU, onAddAgent, onApproveAgent, onPlanAgent, onEnterRoom, businessUnits = [], totalGlobalAgents = 0, forcedAgent, onBack, onConvertToTopic, viewMode = 'bu' }) => {
+const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdateAgents, activeBU, onAddAgent, onApproveAgent, onPlanAgent, onEnterRoom, businessUnits = [], totalGlobalAgents = 0, forcedAgent, onBack, onConvertToTopic, viewMode = 'bu', userProfile }) => {
+
+    const CURRENT_USER = useMemo(() => ({
+        name: userProfile?.name || "Douglas Rodrigues",
+        nickname: userProfile?.nickname || userProfile?.name?.split(' ')[0] || "Rodrigues",
+        role: userProfile?.role || "Chairman",
+        avatar: userProfile?.avatarUrl || "https://firebasestorage.googleapis.com/v0/b/sagb-grupob-v1.firebasestorage.app/o/Douglas%20Rodrigues%2FScreenshot_79.png?alt=media&token=1b6c2884-ae4d-49de-9d03-f0a38e0cfc27"
+    }), [userProfile]);
+
+    const HUMAN_GREETINGS = [
+        `Fala ${CURRENT_USER.nickname}. Estou na escuta.`,
+        `Opa, ${CURRENT_USER.nickname}. O que temos para agora?`,
+        `Bora falar, ${CURRENT_USER.nickname}?`,
+        `Na linha. Qual a pauta?`,
+        `Pronto. O que manda?`,
+        `E aí ${CURRENT_USER.nickname}. Pode falar.`
+    ];
     const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
     // --- SESSION MANAGEMENT STATE ---

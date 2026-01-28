@@ -1,6 +1,6 @@
 
-import React, { useState } from 'react';
-import { TabId, BusinessUnit } from '../types';
+import React from 'react';
+import { TabId, BusinessUnit, UserProfile } from '../types';
 
 interface SidebarProps {
   activeTab: TabId;
@@ -10,6 +10,7 @@ interface SidebarProps {
   version?: string;
   onReset?: () => void;
   onLogout?: () => void;
+  userProfile?: UserProfile | null;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -17,11 +18,13 @@ const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   agentCount,
   activeBU,
-  version = "1.8.1", // ALINHADO COM METADATA.JSON
+  version = "1.8.1",
   onReset,
-  onLogout
+  onLogout,
+  userProfile
 }) => {
   const DEFAULT_LOGO = "https://static.wixstatic.com/media/64c3dc_866011d493924761b15d6162e82c4948~mv2.png";
+  const DEFAULT_AVATAR = "https://firebasestorage.googleapis.com/v0/b/sagb-grupob-v1.firebasestorage.app/o/Douglas%20Rodrigues%2FScreenshot_79.png?alt=media&token=1b6c2884-ae4d-49de-9d03-f0a38e0cfc27";
 
   const menuItems: { id: TabId; label: string; icon: string }[] = [
     {
@@ -67,7 +70,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    // ALTERAÇÃO AQUI: hidden md:flex (Esconde no celular, exibe no desktop)
     <aside className="hidden md:flex w-[260px] bg-white flex-col h-full border-r border-gray-100 shrink-0 z-30 font-sans py-6 px-3">
 
       {/* BRANDING */}
@@ -90,7 +92,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
       </button>
 
-      {/* MENU NAVIGATION - PURE CLEAN */}
+      {/* MENU NAVIGATION */}
       <nav className="flex-1 space-y-1 overflow-y-auto custom-scrollbar">
         {menuItems.map((item) => {
           const isActive = activeTab === item.id;
@@ -104,7 +106,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                 ${isActive ? 'bg-gray-50 text-gray-900' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'}
               `}
             >
-              {/* ÍCONE (Phosphor Style SVG Path) */}
               <svg
                 className={`w-5 h-5 mr-3 shrink-0 transition-colors duration-200 stroke-[1.5] ${isActive ? 'text-gray-900' : 'text-gray-400 group-hover:text-gray-600'}`}
                 fill="none"
@@ -114,7 +115,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <path d={item.icon} strokeLinecap="round" strokeLinejoin="round" />
               </svg>
 
-              {/* LABEL */}
               <span className={`text-sm tracking-tight ${isActive ? 'font-semibold' : 'font-medium'}`}>
                 {item.label}
               </span>
@@ -125,6 +125,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </button>
           );
         })}
+
         {onLogout && (
           <button
             onClick={onLogout}
@@ -143,13 +144,27 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
       </nav>
 
-      {/* FOOTER - ANTIGRAVITY STATUS */}
-      <div className="mt-4 pt-4 border-t border-gray-100 px-1">
-        <div className="mt-3 flex flex-col items-center">
+      {/* USER PROFILE BADGE */}
+      <div className="mt-4 pt-4 border-t border-gray-100 px-3">
+        <div className="flex items-center gap-3 p-2 rounded-xl bg-gray-50/50 border border-gray-100/50">
+          <div className="w-9 h-9 rounded-lg overflow-hidden border border-white shadow-sm shrink-0">
+            <img src={userProfile?.avatarUrl || DEFAULT_AVATAR} className="w-full h-full object-cover" />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[11px] font-bold text-gray-900 truncate tracking-tight">
+              {userProfile?.name || 'Douglas Rodrigues'}
+            </span>
+            <span className="text-[9px] font-black text-gray-400 truncate uppercase tracking-widest">
+              {userProfile?.tier || 'ESTRATÉGICO'}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col items-center">
           <span className="text-[9px] font-medium text-gray-300">v{version} • Gerac Start </span>
           <div className="flex items-center gap-1.5 mt-1 opacity-60">
             <div className="w-1 h-1 rounded-full bg-green-500 animate-pulse"></div>
-            <span className="text-[8px] font-black uppercase tracking-widest text-gray-400">Antigravity On</span>
+            <span className="text-[8px] font-black uppercase tracking-widest text-gray-400">Sistema Conectado</span>
           </div>
         </div>
       </div>

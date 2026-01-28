@@ -80,7 +80,7 @@ export interface Agent {
   sector: string;
   tier: AgentTier;
   knowledgeBase?: string[]; // Memória de Sessão (Legado)
-  
+
   // RAG & LEARNING (V1.8)
   globalDocuments?: { id: string, title: string, content: string, tags: string[] }[]; // Biblioteca do Agente
   learnedMemory?: string[]; // Fatos aprendidos e consolidados ao longo do tempo
@@ -91,7 +91,7 @@ export interface Agent {
   salary?: string;
   startDate?: string;
   docCount?: number;
-  
+
   // V2.0 - IDENTIDADE VISUAL OBRIGATÓRIA
   avatarUrl?: string; // Base64 Image Data
 
@@ -126,4 +126,16 @@ export interface MeetingState {
   isActive: boolean;
   participants: (Agent | PersonaConfig)[];
   activeSpeakerId: string | null;
+}
+
+export interface UserProfile {
+  uid: string;
+  email: string; // Adicionado para referência
+  name: string;
+  nickname: string;
+  role: string;
+  company: string;
+  avatarUrl?: string;
+  tier: AgentTier;
+  createdAt: Date;
 }

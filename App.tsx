@@ -18,7 +18,7 @@ import GovernanceView from './components/GovernanceView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView';
 import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
-import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, BusinessUnit, BusinessBlueprint, AgentTier, AgentStatus, Task } from './types';
+import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, BusinessUnit, BusinessBlueprint, AgentTier, AgentStatus, Task, UserProfile } from './types';
 import {
   sendMessageStream,
   startMainSession,
@@ -33,7 +33,7 @@ import {
 import { MASTER_AGENTS_LIST } from './data/agents';
 import metadata from './metadata.json';
 import { db, auth, onAuthStateChanged, signOut, User } from './services/firebase';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc } from 'firebase/firestore';
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
 //const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
@@ -179,6 +179,7 @@ const inferTier = (role: string): AgentTier => {
 const App: React.FC = () => {
   const version = metadata.version;
   const [user, setUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
   // State for Business Units (now dynamic)
@@ -238,11 +239,31 @@ const App: React.FC = () => {
 
   // --- VERIFICAÇÃO DE LOGIN FIREBASE ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    let unsubscribeProfile: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      setIsInitializing(false);
+
+      if (currentUser) {
+        // Buscar perfil no Firestore em tempo real
+        unsubscribeProfile = onSnapshot(doc(db, "users", currentUser.uid), (snapshot) => {
+          if (snapshot.exists()) {
+            setUserProfile(snapshot.data() as UserProfile);
+          } else {
+            setUserProfile(null);
+          }
+          setIsInitializing(false);
+        });
+      } else {
+        setUserProfile(null);
+        setIsInitializing(false);
+      }
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeProfile) unsubscribeProfile();
+    };
   }, []);
 
   const handleLogout = async () => {
@@ -691,10 +712,10 @@ const App: React.FC = () => {
       );
 
       // NOVA ROTA: EQUIPE GLOBAL (VISÃO DE TODOS OS AGENTES PARA CHAT)
-      case 'team': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} viewMode="global" />;
+      case 'team': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} viewMode="global" userProfile={userProfile} />;
 
       // RESTORED: CHAT ROOM (Systemic Vision Logic) with onConvertToTopic prop
-      case 'chat-room': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} />;
+      case 'chat-room': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} userProfile={userProfile} />;
 
       case 'vault':
         return <BacklogView
@@ -722,7 +743,7 @@ const App: React.FC = () => {
                   <div key={msg.id} className={`flex ${msg.sender === Sender.User ? 'flex-row-reverse' : 'flex-row'} items-start gap-4 animate-msg group`}>
                     <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0 border border-gray-200 bg-white flex items-center justify-center mt-2">
                       {msg.sender === Sender.User ? (
-                        <img src={DOUGLAS_IMAGE} className="w-full h-full object-cover" />
+                        <img src={userProfile?.avatarUrl || DOUGLAS_IMAGE} className="w-full h-full object-cover" />
                       ) : (
                         activeDirector.imageUrl ? (
                           <img src={activeDirector.imageUrl} className="w-full h-full object-cover" />
@@ -737,7 +758,7 @@ const App: React.FC = () => {
                     <div className={`flex flex-col ${msg.sender === Sender.User ? 'items-end' : 'items-start'} max-w-[85%]`}>
                       <div className="flex items-center gap-2 mb-1 px-1 opacity-60">
                         <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
-                          {msg.sender === Sender.User ? 'Douglas Rodrigues' : activeDirector.name}
+                          {msg.sender === Sender.User ? (userProfile?.name || 'Douglas Rodrigues') : activeDirector.name}
                         </span>
                       </div>
 
@@ -833,6 +854,7 @@ const App: React.FC = () => {
           version={version}
           onReset={handleReturnToHub}
           onLogout={handleLogout}
+          userProfile={userProfile}
         />
       )}
       <main className="flex-1 flex flex-col overflow-hidden relative bg-[#F9FAFB]">{renderContent()}</main>
