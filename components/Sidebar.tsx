@@ -9,6 +9,7 @@ interface SidebarProps {
   activeBU: BusinessUnit;
   version?: string;
   onReset?: () => void;
+  onLogout?: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -17,7 +18,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   agentCount,
   activeBU,
   version = "1.8.1", // ALINHADO COM METADATA.JSON
-  onReset
+  onReset,
+  onLogout
 }) => {
   const DEFAULT_LOGO = "https://static.wixstatic.com/media/64c3dc_866011d493924761b15d6162e82c4948~mv2.png";
 
@@ -123,6 +125,22 @@ const Sidebar: React.FC<SidebarProps> = ({
             </button>
           );
         })}
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            className="group flex items-center w-full px-3 py-2.5 rounded-lg transition-all duration-200 text-red-500 hover:bg-red-50"
+          >
+            <svg
+              className="w-5 h-5 mr-3 shrink-0 stroke-[1.5]"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="text-sm tracking-tight font-medium">Sair do Sistema</span>
+          </button>
+        )}
       </nav>
 
       {/* FOOTER - ANTIGRAVITY STATUS */}

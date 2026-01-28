@@ -1,5 +1,12 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import {
+    getAuth,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signOut,
+    onAuthStateChanged,
+    User
+} from 'firebase/auth';
 import {
     getFirestore,
     collection,
@@ -43,4 +50,15 @@ enableIndexedDbPersistence(db).catch((err) => {
 });
 
 // Helper exports to keep imports clean in components
-export { collection, getDocs, setDoc, doc, addDoc };
+export {
+    collection,
+    getDocs,
+    setDoc,
+    doc,
+    addDoc,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    signOut,
+    onAuthStateChanged
+};
+export type { User };

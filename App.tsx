@@ -16,7 +16,8 @@ import StartyBView from './components/StartyBView'; // NEW MODULE
 import ManagementView from './components/ManagementView';
 import GovernanceView from './components/GovernanceView';
 import UnitView from './components/UnitView';
-import ConversationsView from './components/ConversationsView'; // NOVA IMPORTAÇÃO
+import ConversationsView from './components/ConversationsView';
+import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
 import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, BusinessUnit, BusinessBlueprint, AgentTier, AgentStatus, Task } from './types';
 import {
   sendMessageStream,
@@ -31,7 +32,7 @@ import {
 } from './services/gemini';
 import { MASTER_AGENTS_LIST } from './data/agents';
 import metadata from './metadata.json';
-import { db } from './services/firebase';
+import { db, auth, onAuthStateChanged, signOut, User } from './services/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
@@ -176,11 +177,9 @@ const inferTier = (role: string): AgentTier => {
 };
 
 const App: React.FC = () => {
-  // --- AUTH STATE (SENHA 8933) ---
   const version = metadata.version;
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [authPassword, setAuthPassword] = useState('');
-  const [authError, setAuthError] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   // State for Business Units (now dynamic)
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>(INITIAL_BUSINESS_UNITS);
@@ -237,26 +236,21 @@ const App: React.FC = () => {
   // V1.7.8 - Governance Deep Link State
   const [governanceTargetId, setGovernanceTargetId] = useState<string | null>(null);
 
-  // --- VERIFICAÇÃO DE LOGIN ---
+  // --- VERIFICAÇÃO DE LOGIN FIREBASE ---
   useEffect(() => {
-    const sessionAuth = sessionStorage.getItem('sagb_auth_session');
-    if (sessionAuth === 'granted') {
-      setIsAuthenticated(true);
-    }
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsInitializing(false);
+    });
+    return () => unsubscribe();
   }, []);
 
-  const handleAuthSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (authPassword === '8933') {
-      setIsAuthenticated(true);
-      sessionStorage.setItem('sagb_auth_session', 'granted');
-      setAuthError(false);
-
-      // FORÇA A HOME (BI) APÓS O LOGIN MANUAL
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
       setActiveTab('home');
-      setActiveBU(INITIAL_BUSINESS_UNITS[0]);
-    } else {
-      setAuthError(true);
+    } catch (err) {
+      console.error("Erro ao sair:", err);
     }
   };
 
@@ -812,67 +806,33 @@ const App: React.FC = () => {
     }
   };
 
-  // --- SE NÃO ESTIVER AUTENTICADO, MOSTRA LOCK SCREEN ---
-  if (!isAuthenticated) {
+  if (isInitializing) {
     return (
-      <div className="min-h-screen bg-[#111827] flex flex-col items-center justify-center p-4 font-nunito animate-msg">
-        {/* Logo/Icon */}
-        <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center mb-8 border border-white/10 shadow-2xl">
-          <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-            <path d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z" />
-          </svg>
-        </div>
-
-        <div className="max-w-sm w-full">
-          <div className="text-center mb-10">
-            <h1 className="text-2xl font-black text-white uppercase tracking-widest mb-2">Acesso Restrito</h1>
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-[0.4em]">Sistema Autônomo GrupoB</p>
-          </div>
-
-          <form onSubmit={handleAuthSubmit} className="flex flex-col gap-4">
-            <div className="relative">
-              <input
-                type="password"
-                autoFocus
-                value={authPassword}
-                onChange={(e) => { setAuthPassword(e.target.value); setAuthError(false); }}
-                placeholder="Senha de Acesso"
-                className={`
-                  w-full bg-gray-900/50 border text-center text-white text-lg font-bold py-4 rounded-2xl outline-none transition-all placeholder:text-gray-700
-                  ${authError ? 'border-red-500/50 focus:border-red-500' : 'border-white/10 focus:border-white/30'}
-                `}
-              />
-            </div>
-
-            {authError && (
-              <p className="text-center text-[10px] font-black text-red-500 uppercase tracking-widest animate-pulse">
-                Acesso Negado
-              </p>
-            )}
-
-            <button
-              type="submit"
-              className="w-full py-4 bg-white text-gray-900 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-gray-200 transition-all shadow-lg active:scale-95"
-            >
-              Entrar
-            </button>
-          </form>
-
-          <div className="mt-12 text-center">
-            <p className="text-[9px] text-gray-700 font-mono">ID: 8933 • SECURE GATEWAY</p>
-          </div>
-        </div>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center">
+        <div className="w-12 h-12 rounded-xl border-4 border-gray-100 border-t-black animate-spin mb-4"></div>
+        <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.4em]">Iniciando Protocolos...</p>
       </div>
     );
   }
 
-  // SAFEGUARD: Ensure activeBU is defined before rendering Sidebar
+  if (!user) {
+    return <Auth onAuthSuccess={() => { }} />;
+  }
+
   const safeBU = activeBU || INITIAL_BUSINESS_UNITS[0];
 
   return (
     <div className="flex h-screen bg-white font-nunito text-bitrix-text overflow-hidden">
       {!isImmersiveMode && (
-        <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} agentCount={filteredAgents.length} activeBU={safeBU} version={version} onReset={handleReturnToHub} />
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          agentCount={filteredAgents.length}
+          activeBU={safeBU}
+          version={version}
+          onReset={handleReturnToHub}
+          onLogout={handleLogout}
+        />
       )}
       <main className="flex-1 flex flex-col overflow-hidden relative bg-[#F9FAFB]">{renderContent()}</main>
     </div>
