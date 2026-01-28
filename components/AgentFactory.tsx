@@ -1,6 +1,5 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { Agent, BusinessUnit, AgentStatus, AgentTier, ModelProvider } from '../types';
+import { Agent, BusinessUnit, AgentStatus, AgentTier, ModelProvider, Venture } from '../types';
 import { Avatar } from './Avatar';
 import { PaperclipIcon, PlusIcon, SearchIcon, ChevronDownIcon, XIcon, TrashIcon, PencilIcon, CloudUploadIcon, BotIcon, BackIcon } from './Icon';
 import { db, auth } from '../services/firebase';
@@ -12,6 +11,7 @@ interface AgentFactoryProps {
     onRemove?: (agentId: string) => void;
     activeBU: BusinessUnit;
     businessUnits: BusinessUnit[];
+    ventures: Venture[]; // NOVO v1.5.0
     agents: Agent[];
     initialAgent?: Agent | null;
     onManageIntelligence?: (agent: Agent) => void;
@@ -30,7 +30,7 @@ const INITIAL_MOVABLE_COLUMNS = [
     { id: 'ambient', label: 'Ambiente', width: 60, align: 'center' },
     { id: 'role', label: 'Cargo Principal', width: 220, align: 'left' },
     { id: 'docs', label: 'Doc. Vinculados', width: 100, align: 'left' },
-    { id: 'company', label: 'Empresa', width: 140, align: 'left' },
+    { id: 'company', label: 'Marca / Venture', width: 180, align: 'left' },
     { id: 'division', label: 'Divisão', width: 100, align: 'left' },
     { id: 'type', label: 'Tipo', width: 130, align: 'left' },
     { id: 'model', label: 'Cérebro', width: 100, align: 'left' },
@@ -48,6 +48,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
     onRemove,
     activeBU,
     businessUnits,
+    ventures,
     agents,
     onManageIntelligence
 }) => {
@@ -67,6 +68,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         officialRole: '',
         company: activeBU.name,
         buId: activeBU.id,
+        ventureId: '', // NOVO v1.5.0
         status: 'ACTIVE',
         tier: 'OPERACIONAL',
         division: '',
@@ -189,6 +191,10 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
     const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
+            if (file.size > 400000) {
+                alert("⚠️ ARQUIVO MUITO GRANDE: O Rosto do agente deve ter no máximo 400KB.");
+                return;
+            }
             const reader = new FileReader();
             reader.onloadend = () => {
                 setNewAgent(prev => ({ ...prev, avatarUrl: reader.result as string }));
@@ -200,6 +206,10 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
     const handleAmbientUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
+            if (file.size > 400000) {
+                alert("⚠️ ARQUIVO MUITO GRANDE: A foto de ambiente deve ter no máximo 400KB.");
+                return;
+            }
             const reader = new FileReader();
             reader.onloadend = () => {
                 setNewAgent(prev => ({ ...prev, ambientPhotoUrl: reader.result as string }));
@@ -223,9 +233,10 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
             return;
         }
 
-        // VERIFICAÇÃO DE TAMANHO DA IMAGEM
-        if ((newAgent.avatarUrl?.length || 0) > 900000 || (newAgent.ambientPhotoUrl?.length || 0) > 900000) {
-            alert("⚠️ Uma das imagens é muito pesada (>1MB). O banco de dados recusou.\n\nPor favor, use fotos compressas ou suba o arquivo novamente.");
+        // VERIFICAÇÃO DE TAMANHO DA IMAGEM (V1.5.0 - Rigidez Total)
+        const photoLimit = 400000; // 400KB
+        if ((newAgent.avatarUrl?.length || 0) > photoLimit || (newAgent.ambientPhotoUrl?.length || 0) > photoLimit) {
+            alert(`⚠️ ESCALA EXCEDIDA: Uma das imagens é muito pesada (>400KB). \n\nO Firestore tem um limite total de 1MB por agente. Por favor, use imagens menores ou comprimas.`);
             return;
         }
 
@@ -237,8 +248,8 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         const tempId = editingId || Date.now().toString();
 
         const generateAutoId = () => {
-            const currentBU = businessUnits.find(bu => bu.id === newAgent.buId);
-            const sigla = currentBU?.sigla || 'gpb';
+            const venture = ventures.find(v => v.id === newAgent.ventureId);
+            const sigla = venture?.name?.substring(0, 3).toLowerCase() || 'gpb';
             // Pega o número sequencial baseado no total de agentes (V1.2 Scale)
             const sequence = agents.length + 1;
             const padded = sequence.toString().padStart(3, '0');
@@ -296,11 +307,8 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                 }
             };
 
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("TIMEOUT")), 20000)
-            );
-
-            await Promise.race([saveToFirestore(), timeoutPromise]);
+            // V1.5.0 - Removido Promise.race para evitar silenciar erros reais e facilitar debug no Mac
+            await saveToFirestore();
 
         } catch (error: any) {
             console.error("Firestore Info:", error);
@@ -374,15 +382,15 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         }
 
         return filteredList.reduce((acc, agent) => {
-            const bu = businessUnits.find(b => b.id === agent.buId);
-            const buKey = bu ? bu.name : (agent.company || 'Outros');
-            const themeColor = bu ? bu.themeColor : '#6B7280';
-            const buId = bu ? bu.id : 'custom_unit';
+            const venture = ventures.find(v => v.id === agent.ventureId);
+            const ventureName = venture ? venture.name : (agent.company || 'Outros');
+            const themeColor = '#6366f1'; // Default Indigo
+            const ventureId = venture ? venture.id : 'custom_unit';
 
-            if (!acc[buKey]) {
-                acc[buKey] = { id: buId, name: buKey, color: themeColor, agents: [] };
+            if (!acc[ventureName]) {
+                acc[ventureName] = { id: ventureId, name: ventureName, color: themeColor, agents: [] };
             }
-            acc[buKey].agents.push(agent);
+            acc[ventureName].agents.push(agent);
             return acc;
         }, {} as Record<string, { id: string, name: string, color: string, agents: Agent[] }>);
     };
@@ -444,8 +452,12 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                 case 'docs': return wrapCell(<span className="text-[10px] text-gray-300">-</span>, 'center');
                 case 'company':
                     return wrapCell(
-                        <select className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none" value={newAgent.buId} onChange={e => setNewAgent({ ...newAgent, buId: e.target.value })}>
-                            {businessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
+                        <select className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none font-bold" value={newAgent.ventureId} onChange={e => {
+                            const selectedVenture = ventures.find(v => v.id === e.target.value);
+                            setNewAgent({ ...newAgent, ventureId: e.target.value, company: selectedVenture?.name || 'GrupoB' });
+                        }}>
+                            <option value="">-- Selecione a Venture --</option>
+                            {ventures.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                         </select>
                     );
                 case 'division': return wrapCell(<input className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none focus:ring-1 focus:ring-blue-400" placeholder="Divisão" value={newAgent.division || ''} onChange={e => setNewAgent({ ...newAgent, division: e.target.value })} />);
@@ -509,9 +521,10 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                 case 'role': return wrapCell(<div className={`text-[10px] whitespace-nowrap overflow-hidden text-ellipsis max-w-full cursor-text ${isMaintenance ? 'text-gray-400' : 'text-gray-600'}`} title={agent.officialRole}>{agent.officialRole}</div>);
                 case 'docs': return wrapCell(<span className="text-[10px] text-gray-300 font-bold">{agent.docCount || '—'}</span>);
                 case 'company':
+                    const vnt = ventures.find(v => v.id === agent.ventureId);
                     return wrapCell(
-                        <div className="h-6 w-full flex items-center justify-center rounded-[4px] text-white text-[9px] font-bold uppercase shadow-sm cursor-pointer hover:opacity-90 mx-auto" style={{ backgroundColor: grouping === 'company' ? '#d1d5db' : badgeColor }}>
-                            {badgeName}
+                        <div className="h-6 w-full flex items-center justify-center rounded-[4px] bg-indigo-50 border border-indigo-100 text-indigo-600 text-[9px] font-black uppercase shadow-sm cursor-pointer hover:bg-indigo-100 transition-all mx-auto px-2 truncate">
+                            {vnt ? vnt.name : (agent.company || 'GPB')}
                         </div>
                     );
                 case 'division': return wrapCell(<span className="text-[10px] text-gray-500 font-bold block text-center truncate">{agent.division || agent.sector || '—'}</span>);

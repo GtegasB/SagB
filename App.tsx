@@ -9,6 +9,7 @@ import AgentFactory from './components/AgentFactory';
 import BacklogView from './components/BacklogView';
 import HubView from './components/HubView';
 import DashboardHome from './components/DashboardHome'; // NEW IMPORT
+import VenturesView from './components/VenturesView'; // NEW MODULE v1.5.0
 import AlignmentView from './components/AlignmentView';
 import ThreeForBView from './components/ThreeForBView';
 import AudacusView from './components/AudacusView';
@@ -18,7 +19,7 @@ import GovernanceView from './components/GovernanceView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView';
 import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
-import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, BusinessUnit, BusinessBlueprint, AgentTier, AgentStatus, Task, UserProfile } from './types';
+import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, Venture, BusinessUnit, BusinessBlueprint, AgentTier, AgentStatus, Task, UserProfile } from './types';
 import {
   sendMessageStream,
   startMainSession,
@@ -223,6 +224,7 @@ const App: React.FC = () => {
   const [blueprints, setBlueprints] = useState<Record<string, BusinessBlueprint>>({});
   const [topics, setTopics] = useState<Topic[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [ventures, setVentures] = useState<Venture[]>([]); // NEW STATE v1.5.0
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
@@ -248,6 +250,7 @@ const App: React.FC = () => {
     let unsubscribeProfile: (() => void) | undefined;
     let unsubscribeTopics: (() => void) | undefined;
     let unsubscribeTasks: (() => void) | undefined;
+    let unsubscribeVentures: (() => void) | undefined;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -295,13 +298,31 @@ const App: React.FC = () => {
             setTasks(loadedTasks);
           }
         );
+
+        // V1.5.0 - Sincronização de Ventures
+        unsubscribeVentures = onSnapshot(
+          collection(db, "ventures"),
+          (snapshot) => {
+            const loadedVentures = snapshot.docs.map(doc => {
+              const data = doc.data();
+              return {
+                ...data,
+                id: doc.id,
+                timestamp: (data.timestamp as Timestamp).toDate()
+              } as unknown as Venture;
+            });
+            setVentures(loadedVentures);
+          }
+        );
       } else {
         if (unsubscribeProfile) unsubscribeProfile();
         if (unsubscribeTopics) unsubscribeTopics();
         if (unsubscribeTasks) unsubscribeTasks();
+        if (unsubscribeVentures) unsubscribeVentures();
         setUserProfile(null);
         setTopics([]);
         setTasks([]);
+        setVentures([]);
         setIsInitializing(false);
       }
     });
@@ -311,6 +332,7 @@ const App: React.FC = () => {
       if (unsubscribeProfile) unsubscribeProfile();
       if (unsubscribeTopics) unsubscribeTopics();
       if (unsubscribeTasks) unsubscribeTasks();
+      if (unsubscribeVentures) unsubscribeVentures();
     };
   }, []);
 
@@ -453,6 +475,16 @@ const App: React.FC = () => {
       partialTopic.assignee,
       partialTopic.dueDate
     );
+  };
+
+  const handleRemoveVenture = async (id: string) => {
+    if (confirm("Deseja realmente remover esta Venture?")) {
+      try {
+        await deleteDoc(doc(db, "ventures", id));
+      } catch (e) {
+        console.error("Error removing venture:", e);
+      }
+    }
   };
 
   const handleAddAgent = (newAgent: Agent) => {
@@ -793,6 +825,7 @@ const App: React.FC = () => {
           onRemove={handleRemoveAgent}
           activeBU={activeBU}
           businessUnits={businessUnits}
+          ventures={ventures} // NOVO v1.5.0
           onManageIntelligence={(agent) => {
             // NOVO HANDLER: Redireciona para Governança/Inteligência
             setGovernanceTargetId(agent.id);
@@ -814,6 +847,13 @@ const App: React.FC = () => {
           onAddTopic={(title, priority, assignee, dueDate) => handleAddTopic(title, priority, assignee, dueDate)}
           onRemoveTopic={handleRemoveTopic}
           onUpdateStatus={handleUpdateTopicStatus}
+        />;
+      case 'ventures': // NEW HUB v1.5.0
+        return <VenturesView
+          ventures={ventures}
+          agents={activatedAgents}
+          onAddVenture={(v) => setVentures(prev => [v, ...prev])}
+          onRemoveVenture={handleRemoveVenture}
         />;
       case 'redir':
       case 'requests':

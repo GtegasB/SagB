@@ -14,6 +14,8 @@ import {
     setDoc,
     doc,
     addDoc,
+    deleteDoc,
+    Timestamp,
     enableIndexedDbPersistence,
     initializeFirestore,
     CACHE_SIZE_UNLIMITED
@@ -53,6 +55,8 @@ export {
     setDoc,
     doc,
     addDoc,
+    deleteDoc,
+    Timestamp,
     signInWithEmailAndPassword,
     createUserWithEmailAndPassword,
     signOut,

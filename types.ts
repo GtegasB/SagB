@@ -12,7 +12,7 @@ export type AgentStatus = 'PLANNED' | 'STAGING' | 'ACTIVE' | 'MAINTENANCE' | 'BL
 export type ModelProvider = 'gemini' | 'deepseek'; // NOVO: Opções de Cérebro
 
 // V4.2 - Adicionado 'home' como Dashboard Inicial
-export type TabId = 'home' | 'ecosystem' | 'team' | 'conversations' | 'management' | 'redir' | 'vault' | 'fabrica-ca' | 'governance' | 'methodology' | 'hub' | 'alignment' | 'market' | 'sales' | 'expansion' | '3forb-home' | 'audacus-home' | 'startyb-home' | 'requests' | 'unit-room' | 'chat-room';
+export type TabId = 'home' | 'ecosystem' | 'team' | 'conversations' | 'management' | 'redir' | 'vault' | 'fabrica-ca' | 'governance' | 'methodology' | 'hub' | 'alignment' | 'market' | 'sales' | 'expansion' | '3forb-home' | 'audacus-home' | 'startyb-home' | 'requests' | 'unit-room' | 'chat-room' | 'ventures';
 
 export type BUType = 'CORE' | 'VENTURY' | 'PERSONAL' | 'METHODOLOGY';
 
@@ -67,13 +67,28 @@ export interface Task {
   dueDate?: Date; // Novo campo para data de entrega
 }
 
+export interface Venture {
+  id: string;
+  name: string;
+  logo: string; // Obrigatório v1.5.0
+  status: 'IDEIA' | 'DESENVOLVIMENTO' | 'APROVADO';
+  type: 'Marca' | 'Projeto';
+  statusLab: 'Pendente' | 'Validado' | 'Próximo Teste';
+  niche?: string;
+  segment?: string;
+  sphere?: string;
+  url?: string; // NOVO v1.5.1: Link para o sistema externo
+  timestamp: Date;
+}
+
 export interface Agent {
   id: string; // ID Local React (UUID)
   universalId?: string; // ID Oficial SAGB (ex: ca001gpb)
   name: string;
   version: string;
   company: string;
-  buId: string;
+  buId?: string; // Tornando opcional na v1.5.0 (migração para Ventures)
+  ventureId?: string; // Novo: Link com a Venture vinculada
   officialRole: string;
   fullPrompt: string;
   active: boolean; // Mantido para compatibilidade
