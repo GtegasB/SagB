@@ -261,9 +261,9 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
             active: true
         };
 
-        // Remove undefined fields
+        // Remove undefined and null fields to avoid Firestore 'invalid-argument'
         const payload = Object.fromEntries(
-            Object.entries(rawPayload).filter(([_, v]) => v !== undefined)
+            Object.entries(rawPayload).filter(([_, v]) => v !== undefined && v !== null)
         );
 
         console.log("DEBUG: Payload Preparado para Firestore:", payload);

@@ -42,16 +42,23 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                 const user = userCredential.user;
 
                 // CRIAR PERFIL NO FIRESTORE
-                await setDoc(doc(db, "users", user.uid), {
+                const rawUserProfile = {
                     uid: user.uid,
-                    email: user.email,
-                    name: name,
-                    nickname: name.split(' ')[0],
-                    role: role,
+                    email: user.email || '',
+                    name: name || '',
+                    nickname: (name || '').split(' ')[0] || 'User',
+                    role: role || 'Colaborador',
                     company: 'GrupoB',
-                    tier: inferTier(role),
+                    tier: inferTier(role || ''),
                     createdAt: new Date()
-                });
+                };
+
+                // Limpeza de campos undefined para evitar invalid-argument
+                const payload = Object.fromEntries(
+                    Object.entries(rawUserProfile).filter(([_, v]) => v !== undefined)
+                );
+
+                await setDoc(doc(db, "users", user.uid), payload);
             }
             onAuthSuccess();
         } catch (err: any) {

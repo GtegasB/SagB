@@ -33,7 +33,7 @@ import {
 import { MASTER_AGENTS_LIST } from './data/agents';
 import metadata from './metadata.json';
 import { db, auth, onAuthStateChanged, signOut, User } from './services/firebase';
-import { collection, onSnapshot, doc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, query, where, orderBy, Timestamp } from 'firebase/firestore';
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
 //const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
@@ -246,6 +246,8 @@ const App: React.FC = () => {
   // --- VERIFICAÇÃO DE LOGIN FIREBASE ---
   useEffect(() => {
     let unsubscribeProfile: (() => void) | undefined;
+    let unsubscribeTopics: (() => void) | undefined;
+    let unsubscribeTasks: (() => void) | undefined;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -260,8 +262,46 @@ const App: React.FC = () => {
           }
           setIsInitializing(false);
         });
+
+        // V1.4.0 - Sincronização de Pautas (Topics)
+        unsubscribeTopics = onSnapshot(
+          query(collection(db, "topics"), orderBy("timestamp", "desc")),
+          (snapshot) => {
+            const loadedTopics = snapshot.docs.map(doc => {
+              const data = doc.data();
+              return {
+                ...data,
+                id: doc.id,
+                timestamp: (data.timestamp as Timestamp).toDate()
+              } as Topic;
+            });
+            setTopics(loadedTopics);
+          }
+        );
+
+        // V1.4.0 - Sincronização de Tarefas (Tasks)
+        unsubscribeTasks = onSnapshot(
+          query(collection(db, "tasks"), orderBy("createdAt", "desc")),
+          (snapshot) => {
+            const loadedTasks = snapshot.docs.map(doc => {
+              const data = doc.data();
+              return {
+                ...data,
+                id: doc.id,
+                createdAt: (data.createdAt as Timestamp).toDate(),
+                dueDate: data.dueDate ? (data.dueDate as Timestamp).toDate() : undefined
+              } as unknown as Task;
+            });
+            setTasks(loadedTasks);
+          }
+        );
       } else {
+        if (unsubscribeProfile) unsubscribeProfile();
+        if (unsubscribeTopics) unsubscribeTopics();
+        if (unsubscribeTasks) unsubscribeTasks();
         setUserProfile(null);
+        setTopics([]);
+        setTasks([]);
         setIsInitializing(false);
       }
     });
@@ -269,6 +309,8 @@ const App: React.FC = () => {
     return () => {
       unsubscribeAuth();
       if (unsubscribeProfile) unsubscribeProfile();
+      if (unsubscribeTopics) unsubscribeTopics();
+      if (unsubscribeTasks) unsubscribeTasks();
     };
   }, []);
 
@@ -369,17 +411,38 @@ const App: React.FC = () => {
     setActiveTab('ecosystem');
   }
 
-  const handleAddTopic = (title: string, priority: 'Alta' | 'Média' | 'Baixa', assignee?: string, dueDate?: string) => {
-    setTopics(prev => [{
-      id: generateId(),
-      title: title,
-      priority: priority,
-      status: 'Pendente',
-      timestamp: new Date(),
-      buId: activeBU.id,
-      assignee: assignee, // NOVO
-      dueDate: dueDate // NOVO
-    }, ...prev]);
+  const handleAddTopic = async (title: string, priority: 'Alta' | 'Média' | 'Baixa', assignee?: string, dueDate?: string) => {
+    try {
+      const newTopic = {
+        title: title,
+        priority: priority,
+        status: 'Pendente',
+        timestamp: Timestamp.fromDate(new Date()),
+        buId: activeBU.id,
+        assignee: assignee || '',
+        dueDate: dueDate || ''
+      };
+      await addDoc(collection(db, "topics"), newTopic);
+    } catch (e) {
+      console.error("Error adding topic:", e);
+      alert("Erro ao salvar pauta no Firestore.");
+    }
+  };
+
+  const handleRemoveTopic = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "topics", id));
+    } catch (e) {
+      console.error("Error removing topic:", e);
+    }
+  };
+
+  const handleUpdateTopicStatus = async (id: string, s: 'Pendente' | 'Em Pauta' | 'Resolvido') => {
+    try {
+      await updateDoc(doc(db, "topics", id), { status: s });
+    } catch (e) {
+      console.error("Error updating topic status:", e);
+    }
   };
 
   // Handler que vem do CHAT (SystemicVision)
@@ -428,13 +491,12 @@ const App: React.FC = () => {
     });
   };
 
-  const handleApproveAgent = (agentId: string) => {
-    setActivatedAgents(prev => prev.map(a => {
-      if (a.id === agentId) {
-        return { ...a, status: 'ACTIVE' };
-      }
-      return a;
-    }));
+  const handleApproveAgent = async (agentId: string) => {
+    try {
+      await updateDoc(doc(db, "agents", agentId), { status: 'ACTIVE' });
+    } catch (e) {
+      console.error("Error approving agent:", e);
+    }
   };
 
   // V4.5 - Roteamento Inteligente de Agente
@@ -451,8 +513,17 @@ const App: React.FC = () => {
   };
 
   // Nova função para atualizar agentes diretamente da Governança (DNA Editor)
-  const handleUpdateAgentData = (updatedAgent: Agent) => {
-    setActivatedAgents(prev => prev.map(a => a.id === updatedAgent.id ? updatedAgent : a));
+  const handleUpdateAgentData = async (updatedAgent: Agent) => {
+    try {
+      const { id, ...data } = updatedAgent;
+      // Sanitização básica antes de salvar
+      const payload = Object.fromEntries(
+        Object.entries(data).filter(([_, v]) => v !== undefined && v !== null)
+      );
+      await updateDoc(doc(db, "agents", id), payload);
+    } catch (e) {
+      console.error("Error updating agent data:", e);
+    }
   };
 
   // Função para criar novas Unidades (Ventures) via Importador
@@ -466,12 +537,25 @@ const App: React.FC = () => {
     });
   };
 
-  const handleAddTask = (task: Task) => {
-    setTasks(prev => [...prev, task]);
+  const handleAddTask = async (task: Task) => {
+    try {
+      const { id, ...data } = task;
+      await addDoc(collection(db, "tasks"), {
+        ...data,
+        createdAt: Timestamp.fromDate(new Date()),
+        dueDate: task.dueDate ? Timestamp.fromDate(task.dueDate) : null
+      });
+    } catch (e) {
+      console.error("Error adding task:", e);
+    }
   }
 
-  const handleUpdateTaskStatus = (taskId: string, status: Task['status']) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status } : t));
+  const handleUpdateTaskStatus = async (taskId: string, status: Task['status']) => {
+    try {
+      await updateDoc(doc(db, "tasks", taskId), { status });
+    } catch (e) {
+      console.error("Error updating task status:", e);
+    }
   }
 
   // --- AUDIO & FILE HANDLERS ---
@@ -728,8 +812,8 @@ const App: React.FC = () => {
           topics={topics.filter(t => t.buId === activeBU.id)}
           agents={filteredAgents}
           onAddTopic={(title, priority, assignee, dueDate) => handleAddTopic(title, priority, assignee, dueDate)}
-          onRemoveTopic={(id) => setTopics(prev => prev.filter(t => t.id !== id))}
-          onUpdateStatus={(id, s) => setTopics(prev => prev.map(t => t.id === id ? { ...t, status: s } : t))}
+          onRemoveTopic={handleRemoveTopic}
+          onUpdateStatus={handleUpdateTopicStatus}
         />;
       case 'redir':
       case 'requests':
