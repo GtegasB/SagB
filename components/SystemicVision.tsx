@@ -5,7 +5,7 @@ import { Agent, Message, Sender, BusinessUnit, AgentTier, AgentStatus, Topic, Pe
 import { startAgentSession, generateTitleOptions, transcribeAudio, generateTaskSuggestions, consolidateChatMemory } from '../services/gemini';
 import { streamDeepSeekResponse, DeepSeekMessage } from '../services/deepseek';
 import { retrieveRelevantContext, retrieveLearnedMemory, addDocumentToAgent, addLearningToAgent } from '../services/knowledge';
-import { SendIcon, NewChatIcon, MicIcon, StopCircleIcon, BackIcon, FolderIcon, PlusIcon, FileTextIcon, CloudUploadIcon, PaperclipIcon, XIcon, BookIcon, BotIcon, PencilIcon, CheckIcon } from './Icon';
+import { SendIcon, NewChatIcon, MicIcon, StopCircleIcon, BackIcon, FolderIcon, PlusIcon, FileTextIcon, CloudUploadIcon, PaperclipIcon, XIcon, BookIcon, BotIcon, PencilIcon, CheckIcon, TrashIcon } from './Icon';
 import { Avatar } from './Avatar';
 import ChatMessage from './ChatMessage';
 
@@ -104,6 +104,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         assignee: '',
         date: new Date().toISOString().split('T')[0]
     });
+    const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
     const chatEndRef = useRef<HTMLDivElement>(null);
     const stopStreamingRef = useRef(false);
@@ -297,16 +298,52 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         } else {
             setActiveMessages([]);
         }
+    };
 
-        if (agent) {
-            if (agent.modelProvider !== 'deepseek') {
-                initializeSession(agent);
-            } else {
-                setGeminiSession(null);
+    const handleManualSuggestTitle = async () => {
+        if (activeMessages.length < 2) return;
+        setIsLoading(true);
+        const context = activeMessages.slice(-10).map(m => m.text).join('\n');
+        try {
+            const sug = await generateTitleOptions(context);
+            setTitleOptions(sug);
+        } catch (e) {
+            console.error("Erro ao sugerir título:", e);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleDeleteSession = (sessionId: string) => {
+        if (!window.confirm("Deseja realmente excluir esta conversa?")) return;
+
+        const updatedSessions = sessions.filter(s => s.id !== sessionId);
+        setSessions(updatedSessions);
+        if (selectedAgent) {
+            localStorage.setItem(`grupob_sessions_${selectedAgent.id}`, JSON.stringify(updatedSessions));
+        }
+        localStorage.removeItem(`grupob_chat_${sessionId}`);
+
+        if (currentSessionId === sessionId) {
+            setCurrentSessionId(null);
+            setActiveMessages([]);
+        }
+        setMenuOpenId(null);
+    };
+
+    const handleRenameSession = (sessionId: string) => {
+        const session = sessions.find(s => s.id === sessionId);
+        const newTitle = window.prompt("Novo nome da conversa:", session?.title);
+        if (newTitle && newTitle.trim()) {
+            const updatedSessions = sessions.map(s => s.id === sessionId ? { ...s, title: newTitle.trim() } : s);
+            setSessions(updatedSessions);
+            if (selectedAgent) {
+                localStorage.setItem(`grupob_sessions_${selectedAgent.id}`, JSON.stringify(updatedSessions));
             }
         }
-        setShowHistorySidebar(false);
+        setMenuOpenId(null);
     };
+
 
     const handleOpenAgent = (agent: Agent) => {
         setSelectedAgent(agent);
@@ -344,19 +381,22 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     };
 
     // --- CORE: LOGICA DE EDIÇÃO E REGENERAÇÃO ---
-    const handleUpdateAndRegenerate = async (msg: Message, newText: string) => {
+    const handleUpdateAndRegenerate = async (msg: Message, newText: string, newAttachment?: { data: string, mimeType: string, preview: string } | null) => {
         if (!selectedAgent) return;
 
         // 1. Encontrar o índice da mensagem editada
         const msgIndex = activeMessages.findIndex(m => m.id === msg.id);
         if (msgIndex === -1) return;
 
-        // 2. Cortar o histórico: Manter tudo ATÉ a mensagem editada (removendo o que veio depois)
-        // O novo histórico será [0...msgIndex] onde msgIndex é a mensagem do usuário agora editada
+        // 2. Cortar o histórico: Manter tudo ATÉ a mensagem editada
         const truncatedMessages = activeMessages.slice(0, msgIndex + 1);
 
-        // 3. Atualizar o texto da mensagem do usuário
-        truncatedMessages[msgIndex] = { ...truncatedMessages[msgIndex], text: newText };
+        // 3. Atualizar o texto e anexo da mensagem do usuário
+        truncatedMessages[msgIndex] = {
+            ...truncatedMessages[msgIndex],
+            text: newAttachment ? (newText ? newText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : newText,
+            attachment: newAttachment || undefined
+        };
 
         // 4. Atualizar estado visual imediatamente
         setActiveMessages(truncatedMessages);
@@ -650,28 +690,26 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
         setInput('');
         setAttachment(null);
-        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.focus();
+        }
 
         const userMsg: Message = {
             id: Date.now().toString(),
             text: currentAttachment ? (userText ? userText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : userText,
             sender: Sender.User,
             timestamp: new Date(),
-            buId: activeBU.id
+            buId: activeBU.id,
+            attachment: currentAttachment ? {
+                data: currentAttachment.data,
+                mimeType: currentAttachment.mimeType,
+                preview: currentAttachment.preview
+            } : undefined
         };
 
         setActiveMessages(prev => [...prev, userMsg]);
         setIsLoading(true);
-
-        if (activeMessages.length > 2 && !titleOptions && !currentSessionId?.includes('legacy')) {
-            const historyText = activeMessages.map(m => `${m.sender}: ${m.text}`).join('\n');
-            generateTitleOptions(historyText).then(opts => setTitleOptions(opts));
-        }
-
-        if (activeMessages.length % 5 === 0) {
-            const context = activeMessages.slice(-5).map(m => m.text).join('\n');
-            generateTaskSuggestions(context).then(sug => setTaskSuggestions(sug));
-        }
 
         const botMsgId = Date.now().toString() + '_bot';
         setActiveMessages(prev => [...prev, {
@@ -960,44 +998,61 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                     </button>
                                 </div>
 
-                                <button
-                                    onClick={() => createNewSession(selectedAgent)}
-                                    className="flex items-center gap-2 w-full p-3 bg-white border border-gray-200 rounded-xl shadow-sm hover:border-bitrix-accent hover:text-bitrix-accent transition-all mb-4 group"
-                                >
-                                    <div className="w-6 h-6 rounded-md bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-bitrix-accent group-hover:text-white transition-colors">
-                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M12 4v16m8-8H4" /></svg>
-                                    </div>
-                                    <span className="text-[10px] font-bold text-gray-700 group-hover:text-bitrix-accent uppercase tracking-widest">Nova Conversa</span>
-                                </button>
-
-                                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-0">
+                                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-0 pr-1">
                                     {sessions.length === 0 && <p className="text-center text-[9px] text-gray-300 mt-10">Nenhum histórico.</p>}
                                     {sessions.map(session => (
-                                        <button
-                                            key={session.id}
-                                            onClick={() => selectSession(session.id, selectedAgent)}
-                                            className={`w-full text-left py-2 px-3 rounded-lg mb-1 transition-all border ${currentSessionId === session.id
-                                                ? 'bg-white border-gray-100 shadow-sm'
-                                                : 'border-transparent hover:bg-white/50 text-gray-500'
-                                                }`}
-                                        >
-                                            <div className="w-full min-w-0">
-                                                <h4 className={`text-[11px] font-bold truncate ${currentSessionId === session.id ? 'text-bitrix-nav' : 'text-gray-600'
-                                                    }`}>
-                                                    {session.title}
-                                                </h4>
+                                        <div key={session.id} className="relative group/session mb-1">
+                                            <button
+                                                onClick={() => selectSession(session.id, selectedAgent)}
+                                                className={`w-full text-left py-2.5 pl-3 pr-10 rounded-lg transition-all border ${currentSessionId === session.id
+                                                    ? 'bg-white border-gray-100 shadow-sm'
+                                                    : 'border-transparent hover:bg-white/50 text-gray-500'
+                                                    }`}
+                                            >
+                                                <div className="w-full min-w-0">
+                                                    <h4 className={`text-[11px] font-bold truncate ${currentSessionId === session.id ? 'text-bitrix-nav' : 'text-gray-600'
+                                                        }`}>
+                                                        {session.title}
+                                                    </h4>
+                                                </div>
+                                            </button>
+
+                                            <div className="absolute right-2 top-2 opacity-0 group-hover/session:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === session.id ? null : session.id); }}
+                                                    className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded-md hover:bg-gray-100"
+                                                >
+                                                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" /></svg>
+                                                </button>
+
+                                                {menuOpenId === session.id && (
+                                                    <div className="absolute right-0 top-7 w-32 bg-white border border-gray-100 rounded-xl shadow-xl z-[100] py-1 animate-msg">
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleRenameSession(session.id); }}
+                                                            className="w-full text-left px-4 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50 flex items-center gap-2"
+                                                        >
+                                                            <PencilIcon className="w-3 h-3" /> Renomear
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleDeleteSession(session.id); }}
+                                                            className="w-full text-left px-4 py-2 text-[10px] font-bold text-red-500 hover:bg-red-50 flex items-center gap-2"
+                                                        >
+                                                            <TrashIcon className="w-3 h-3" /> Excluir
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
-                                        </button>
+                                        </div>
                                     ))}
                                 </div>
 
                                 <div className="mt-4 pt-4 border-t border-gray-100">
                                     <button
-                                        onClick={handleConsolidateLearning}
-                                        disabled={isTraining}
-                                        className="w-full py-2 bg-green-50 border border-green-200 rounded-lg text-green-700 text-[8px] font-black uppercase tracking-widest hover:bg-green-100 transition-all flex items-center justify-center gap-2"
+                                        onClick={() => createNewSession(selectedAgent)}
+                                        className="flex items-center justify-center gap-2 w-full p-3 bg-bitrix-nav text-white rounded-xl shadow-lg hover:bg-black transition-all group"
                                     >
-                                        {isTraining ? <div className="w-2 h-2 rounded-full border-2 border-green-700 border-t-transparent animate-spin"></div> : "🧠 Fixar Aprendizado"}
+                                        <PlusIcon className="w-3.5 h-3.5" />
+                                        <span className="text-[9px] font-black uppercase tracking-widest text-white">Nova Conversa</span>
                                     </button>
                                 </div>
                             </div>
@@ -1063,21 +1118,30 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-2 md:gap-4">
+                                <div className="flex items-center gap-2 md:gap-3">
                                     <button
                                         onClick={() => setIsInviteModalOpen(true)}
-                                        className="w-10 h-10 rounded-xl bg-gray-100 text-gray-500 hover:bg-bitrix-nav hover:text-white transition-all flex items-center justify-center shadow-sm"
+                                        className="h-10 px-4 rounded-xl bg-gray-100 text-gray-500 hover:bg-bitrix-nav hover:text-white transition-all flex items-center gap-2 shadow-sm border border-gray-200"
                                         title="Convocar Agente para a Sala"
                                     >
-                                        <PlusIcon className="w-5 h-5" />
+                                        <PlusIcon className="w-3.5 h-3.5" />
+                                        <span className="text-[9px] font-black uppercase tracking-widest">Participantes</span>
+                                    </button>
+
+                                    <button
+                                        onClick={handleManualSuggestTitle}
+                                        className="h-10 px-4 bg-white border border-gray-200 text-gray-600 rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest hover:border-bitrix-nav hover:text-bitrix-nav transition-all shadow-sm flex items-center gap-2"
+                                    >
+                                        <BotIcon className="w-3.5 h-3.5" />
+                                        <span className="hidden md:inline">Sugerir Título</span>
                                     </button>
 
                                     {onConvertToTopic && (
                                         <button
                                             onClick={() => openTaskModal()}
-                                            className="px-3 py-2 bg-white border border-gray-200 text-gray-600 rounded-xl text-[8px] font-black uppercase tracking-widest hover:border-bitrix-nav hover:text-bitrix-nav transition-all shadow-sm flex items-center gap-2"
+                                            className="h-10 px-4 bg-white border border-gray-200 text-gray-600 rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest hover:border-bitrix-nav hover:text-bitrix-nav transition-all shadow-sm flex items-center gap-2"
                                         >
-                                            <BookIcon className="w-3 h-3" />
+                                            <BookIcon className="w-3.5 h-3.5" />
                                             <span className="hidden md:inline">Gerar Pauta</span>
                                         </button>
                                     )}
@@ -1306,18 +1370,23 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                             disabled={isLoading || isTranscribing}
                                         />
 
-                                        <button
-                                            type="button"
-                                            onClick={handleToggleRecording}
-                                            disabled={isLoading || isTranscribing}
-                                            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 mb-1 ${isRecording
-                                                ? 'text-red-500 animate-pulse'
-                                                : 'text-gray-300 hover:text-gray-500'
-                                                } disabled:opacity-30`}
-                                            title={isRecording ? "Parar Gravação" : "Gravar Áudio"}
-                                        >
-                                            {isRecording ? <StopCircleIcon className="w-5 h-5" /> : <MicIcon className="w-5 h-5" />}
-                                        </button>
+                                        <div className="flex flex-col items-center shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={handleToggleRecording}
+                                                disabled={isLoading || isTranscribing}
+                                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isRecording
+                                                    ? 'text-red-600 bg-red-50 ring-4 ring-red-100 animate-pulse scale-110'
+                                                    : 'text-gray-300 hover:text-gray-500'
+                                                    } disabled:opacity-30`}
+                                                title={isRecording ? "Parar Gravação" : "Gravar Áudio"}
+                                            >
+                                                {isRecording ? <StopCircleIcon className="w-6 h-6" /> : <MicIcon className="w-5 h-5" />}
+                                            </button>
+                                            {isRecording && (
+                                                <span className="text-[7px] font-black text-red-500 uppercase tracking-widest mt-0.5 animate-pulse">Gravando...</span>
+                                            )}
+                                        </div>
 
                                         {isLoading ? (
                                             <div className="w-10 h-10 flex items-center justify-center mb-1">

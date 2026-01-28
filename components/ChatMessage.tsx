@@ -9,7 +9,7 @@ interface ChatMessageProps {
     message: Message;
     directors: PersonaConfig[];
     agentContext?: { name: string, avatarUrl?: string };
-    onEdit?: (msg: Message, newText: string) => void;
+    onEdit?: (msg: Message, newText: string, newAttachment?: { data: string, mimeType: string, preview: string } | null) => void;
 }
 
 const DOUGLAS_IMAGE = "https://firebasestorage.googleapis.com/v0/b/sagb-grupob-v1.firebasestorage.app/o/Douglas%20Rodrigues%2FScreenshot_79.png?alt=media&token=1b6c2884-ae4d-49de-9d03-f0a38e0cfc27";
@@ -22,16 +22,34 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentCont
     // --- ESTADO LOCAL DE EDIÇÃO ---
     const [isEditing, setIsEditing] = useState(false);
     const [editedText, setEditedText] = useState(message.text);
+    const [editedAttachment, setEditedAttachment] = useState(message.attachment);
+    const editFileInputRef = React.useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         setEditedText(message.text);
-    }, [message.text]);
+        setEditedAttachment(message.attachment);
+    }, [message.text, message.attachment]);
 
     const handleSave = () => {
-        if (editedText.trim() !== message.text && onEdit) {
-            onEdit(message, editedText);
+        if ((editedText.trim() !== message.text || editedAttachment !== message.attachment) && onEdit) {
+            onEdit(message, editedText, editedAttachment);
         }
         setIsEditing(false);
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setEditedAttachment({
+                    data: reader.result as string,
+                    mimeType: file.type,
+                    preview: URL.createObjectURL(file)
+                });
+            };
+            reader.readAsDataURL(file);
+        }
     };
 
     const handleCancel = () => {
@@ -101,46 +119,24 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentCont
                 // Current User Logic: flex-row-reverse (Bubble ... Avatar).
                 // New User Logic: flex-row (Avatar ... Bubble). 
                 // BUT `justify-end` keeps the block on the right.
-                <div key={index} className={`flex items-end gap-3 max-w-[90%] md:max-w-[80%] ${isBot ? 'flex-row' : 'flex-row'}`}>
+                <div key={index} className={`flex items-start gap-4 max-w-[95%] md:max-w-[85%] ${isBot ? 'flex-row' : 'flex-row'}`}>
 
-                    {/* --- AVATAR (Agora sempre à esquerda do conteúdo, mas o bloco todo flutua na direita para usuario) --- 
-                 Se o usuário quer o avatar à esquerda DA CAIXA DE MENSAGEM, então a ordem é [Avatar] [Mensagem].
-                 Isso é o padrão 'flex-row'. 
-                 Se for Bot: [Avatar] [Mensagem] (Já é assim).
-                 Se for User: [Avatar] [Mensagem] (Mudado de row-reverse).
-             */}
-                    <div className={`flex flex-col items-center shrink-0 ${!isBot ? 'order-first' : ''}`}>
+                    <div className="flex flex-col items-center shrink-0 mt-1">
                         <Avatar
                             name={part.speaker}
                             url={part.imageUrl || undefined}
-                            className={`w-10 h-10 rounded-xl shadow-sm border border-gray-100 ${isBot ? 'grayscale' : ''}`}
+                            className="w-10 h-10 rounded-xl shadow-sm border border-white"
                         />
                     </div>
 
                     {/* --- BLOCO DE CONTEÚDO --- */}
-                    <div className={`flex flex-col min-w-0 ${isBot ? 'items-start' : 'items-end'}`}>
+                    <div className={`flex flex-col min-w-0 ${isBot ? 'items-start' : 'items-end'}`} style={{ minWidth: (part.speaker.length * 9) + 20 }}>
 
-                        {/* HEADER: Nome + Label */}
-                        {/* 1. Nome: Primeira maiúscula (Title Case) -> Remover uppercase */}
-                        <div className={`flex items-end mb-1 px-1 gap-2 ${isBot ? 'flex-row' : 'flex-row-reverse'}`}>
-                            <span className={`text-[10px] font-bold tracking-widest truncate max-w-[150px] ${isBot ? 'text-gray-400' : 'text-purple-400'}`}>
+                        {/* HEADER: Nome */}
+                        <div className={`flex items-end mb-1 px-1 ${isBot ? 'flex-row' : 'flex-row-reverse'}`}>
+                            <span className={`text-[10px] font-black tracking-widest truncate ${isBot ? 'text-gray-400' : 'text-indigo-400'}`}>
                                 {part.speaker}
                             </span>
-
-                            {!isBot && !isEditing && (
-                                <div className="flex items-center gap-2">
-                                    {onEdit && (
-                                        <button
-                                            onClick={() => setIsEditing(true)}
-                                            // 2. Editar: Cinza e "Editar" (Capitalize/Normal)
-                                            className="text-[9px] font-bold text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1"
-                                        >
-                                            <PencilIcon className="w-2.5 h-2.5" />
-                                            Editar
-                                        </button>
-                                    )}
-                                </div>
-                            )}
                         </div>
 
                         {/* BUBBLE (FIXED VISUALS - PURPLE & FIT) */}
@@ -152,34 +148,87 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentCont
                             }
                 `}>
                             {isEditing ? (
-                                <div className="flex flex-col gap-2 min-w-[300px]">
+                                <div className="flex flex-col gap-2 min-w-[280px] md:min-w-[400px]">
                                     <textarea
                                         value={editedText}
                                         onChange={(e) => setEditedText(e.target.value)}
-                                        className="w-full bg-white/50 border border-gray-200 rounded-lg p-2 text-sm outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-100 transition-all resize-none min-h-[100px]"
+                                        className="w-full bg-white/50 border border-indigo-100 rounded-lg p-3 text-sm outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 transition-all resize-none min-h-[100px]"
                                         autoFocus
                                     />
-                                    <div className="flex justify-end gap-2 mt-1">
-                                        <button onClick={handleCancel} className="p-1.5 rounded-lg text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors" title="Cancelar">
-                                            <XIcon className="w-4 h-4" />
+
+                                    {/* Edit Mode Attachment Preview/Add */}
+                                    <div className="flex items-center gap-2 px-1">
+                                        <input
+                                            type="file"
+                                            ref={editFileInputRef}
+                                            className="hidden"
+                                            onChange={handleFileChange}
+                                        />
+                                        <button
+                                            onClick={() => editFileInputRef.current?.click()}
+                                            className="p-2 rounded-lg bg-gray-50 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600 transition-all flex items-center gap-2 text-[10px] font-bold"
+                                        >
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                                            {editedAttachment ? "Trocar Arquivo" : "Anexar Arquivo"}
                                         </button>
-                                        <button onClick={handleSave} className="px-3 py-1.5 bg-purple-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-purple-600 transition-colors flex items-center gap-2">
-                                            <CheckIcon className="w-3 h-3" />
-                                            Confirmar
+
+                                        {editedAttachment && (
+                                            <div className="flex items-center gap-2 p-1 bg-indigo-50 rounded-lg border border-indigo-100">
+                                                <img src={editedAttachment.preview} className="w-6 h-6 rounded object-cover" />
+                                                <button onClick={() => setEditedAttachment(null)} className="text-red-400 hover:text-red-600">
+                                                    <XIcon className="w-3 h-3" />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex justify-end gap-2 mt-2">
+                                        <button onClick={handleCancel} className="text-[10px] font-bold text-gray-400 px-3 py-2 hover:bg-gray-50 rounded-lg transition-colors">Cancelar</button>
+                                        <button onClick={handleSave} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 shadow-md shadow-indigo-100 transition-all flex items-center gap-2">
+                                            <CheckIcon className="w-3.5 h-3.5" />
+                                            Salvar Alterações
                                         </button>
                                     </div>
                                 </div>
                             ) : (
-                                isBot ? <ReactMarkdown>{part.content}</ReactMarkdown> : part.content
+                                <div className="space-y-3">
+                                    {message.attachment && (
+                                        <div className="mb-2">
+                                            {message.attachment.mimeType.startsWith('image/') ? (
+                                                <img
+                                                    src={message.attachment.preview}
+                                                    alt="Anexo"
+                                                    className="max-w-full max-h-64 rounded-lg border border-white/20 shadow-sm"
+                                                />
+                                            ) : (
+                                                <div className="flex items-center gap-2 p-2 bg-black/5 rounded-lg border border-black/5">
+                                                    <div className="w-8 h-8 rounded bg-white flex items-center justify-center shadow-sm">
+                                                        <CheckIcon className="w-4 h-4 text-gray-400" />
+                                                    </div>
+                                                    <span className="text-[10px] font-bold text-gray-500 truncate max-w-[120px]">Documento</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                    {isBot ? <ReactMarkdown>{part.content}</ReactMarkdown> : <span>{part.content}</span>}
+                                </div>
                             )}
                         </div>
 
                         {/* FOOTER: Horário e Status */}
-                        <div className={`flex items-center gap-2 mt-1 px-1 ${isBot ? 'justify-start' : 'justify-end'}`}>
+                        <div className={`flex items-center gap-3 mt-1.5 px-1 ${isBot ? 'justify-start' : 'justify-end'}`}>
+                            {!isBot && onEdit && !isEditing && (
+                                <button
+                                    onClick={() => setIsEditing(true)}
+                                    className="text-[9px] font-bold text-indigo-400/60 hover:text-indigo-600 transition-colors flex items-center gap-1"
+                                >
+                                    Editar
+                                </button>
+                            )}
                             <span className="text-[9px] font-bold text-gray-300 uppercase tracking-tighter">
                                 {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
-                            {!isBot && <span className="text-[8px] font-black text-purple-400 uppercase">Lido</span>}
+                            {!isBot && <span className="text-[8px] font-black text-indigo-400 uppercase">Lido</span>}
                         </div>
 
                         {/* Streaming Indicator */}

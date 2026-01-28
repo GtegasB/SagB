@@ -58,68 +58,74 @@ const CASSIO_IMAGE = "https://images.unsplash.com/photo-1519085360753-af0119f7cb
 
 const INITIAL_BUSINESS_UNITS: BusinessUnit[] = [
   // CORE - Paleta "Spectrum 600" (Clarificada e Moderna)
-  { id: 'grupob', name: 'GrupoB', themeColor: '#006064', description: 'Holding e Governança Central', type: 'CORE' },
+  { id: 'grupob', name: 'GrupoB', themeColor: '#006064', description: 'Holding e Governança Central', type: 'CORE', sigla: 'gpb' },
   {
     id: '3forb',
     name: '3forB',
     themeColor: '#ea580c',
     description: 'Performance e Estratégia de Vendas',
-    type: 'CORE'
+    type: 'CORE',
+    sigla: '3fb'
   },
   {
     id: 'startyb',
     name: 'StartyB',
     themeColor: '#dc2626',
     description: 'Venture Builder e Tecnologia',
-    type: 'CORE'
+    type: 'CORE',
+    sigla: 'stb'
   },
   {
     id: 'papob',
     name: 'PapoB',
     themeColor: '#ca8a04',
     description: 'Conteúdo e Comunicação',
-    type: 'CORE'
+    type: 'CORE',
+    sigla: 'ppb'
   },
   {
     id: 'acadb',
     name: 'AcadB',
     themeColor: '#7c3aed',
     description: 'Educação Corporativa',
-    type: 'CORE'
+    type: 'CORE',
+    sigla: 'adb'
   },
   {
     id: 'acelerab',
     name: 'AceleraB',
     themeColor: '#2563eb',
     description: 'Aceleração de Negócios',
-    type: 'CORE'
+    type: 'CORE',
+    sigla: 'acb'
   },
   {
     id: 'institutob',
     name: 'InstitutoB',
     themeColor: '#16a34a',
     description: 'Impacto Social e Educação',
-    type: 'CORE'
+    type: 'CORE',
+    sigla: 'itb'
   },
 
   // VENTURES
-  { id: 'audacus', name: 'Audacus', themeColor: '#1E1B4B', description: 'Assessoria Jurídica Preventiva', type: 'VENTURY' },
-  { id: 'domusys', name: 'DomuSys', themeColor: '#334155', description: 'Automação e Engenharia Elétrica', type: 'VENTURY' },
-  { id: 'scaleodonto', name: 'Scale Odonto', themeColor: '#92400E', description: 'Aceleração para Odontologia', type: 'VENTURY' },
-  { id: 'tegas', name: 'Tegas', themeColor: '#64748B', description: 'Tecnologia Estratégica para Gestão', type: 'VENTURY' },
-  { id: 'nuexus', name: 'Nuexus', themeColor: '#0F172A', description: 'Investimentos e Infra Estrutura', type: 'VENTURY' },
-  { id: 'zoggon', name: 'Zoggon', themeColor: '#1E293B', description: 'Inteligência em Obras', type: 'VENTURY' },
-  { id: 'domuse', name: 'Domusè', themeColor: '#0D9488', description: 'Curadoria Imobiliária', type: 'VENTURY' },
-  { id: 'ziplia', name: 'Ziplia', themeColor: '#8B5CF6', description: 'Plataforma Multi-IA', type: 'VENTURY' },
-  { id: 'seddore', name: 'Seddore', themeColor: '#475569', description: 'Ambientes de Alto Padrão', type: 'VENTURY' },
-  { id: 'piblo', name: 'Piblo', themeColor: '#0EA5E9', description: 'Hub de Negócios Multicategoria', type: 'VENTURY' },
-  { id: 'douglas-rodrigues', name: 'Douglas Rodrigues', themeColor: '#111827', description: 'Mentoria Estratégica de Crescimento', type: 'VENTURY' },
+  { id: 'audacus', name: 'Audacus', themeColor: '#1E1B4B', description: 'Assessoria Jurídica Preventiva', type: 'VENTURY', sigla: 'aud' },
+  { id: 'domusys', name: 'DomuSys', themeColor: '#334155', description: 'Automação e Engenharia Elétrica', type: 'VENTURY', sigla: 'dms' },
+  { id: 'scaleodonto', name: 'Scale Odonto', themeColor: '#92400E', description: 'Aceleração para Odontologia', type: 'VENTURY', sigla: 'sco' },
+  { id: 'tegas', name: 'Tegas', themeColor: '#64748B', description: 'Tecnologia Estratégica para Gestão', type: 'VENTURY', sigla: 'tgs' },
+  { id: 'nuexus', name: 'Nuexus', themeColor: '#0F172A', description: 'Investimentos e Infra Estrutura', type: 'VENTURY', sigla: 'nux' },
+  { id: 'zoggon', name: 'Zoggon', themeColor: '#1E293B', description: 'Inteligência em Obras', type: 'VENTURY', sigla: 'zog' },
+  { id: 'domuse', name: 'Domusè', themeColor: '#0D9488', description: 'Curadoria Imobiliária', type: 'VENTURY', sigla: 'dse' },
+  { id: 'ziplia', name: 'Ziplia', themeColor: '#8B5CF6', description: 'Plataforma Multi-IA', type: 'VENTURY', sigla: 'zip' },
+  { id: 'seddore', name: 'Seddore', themeColor: '#475569', description: 'Ambientes de Alto Padrão', type: 'VENTURY', sigla: 'sed' },
+  { id: 'piblo', name: 'Piblo', themeColor: '#0EA5E9', description: 'Hub de Negócios Multicategoria', type: 'VENTURY', sigla: 'pib' },
+  { id: 'douglas-rodrigues', name: 'Douglas Rodrigues', themeColor: '#111827', description: 'Mentoria Estratégica de Crescimento', type: 'VENTURY', sigla: 'drg' },
 
   // METODOLOGIAS
-  { id: 'gerac', name: 'GERAC', themeColor: '#800080', description: 'Gestão e Empreendedorismo Responsável', type: 'METHODOLOGY' },
-  { id: 'uau', name: 'Jornada U.A.U', themeColor: '#06B6D4', description: 'Ultra Atendimento Único', type: 'METHODOLOGY' },
-  { id: 'mav', name: 'M.A.V', themeColor: '#F43F5E', description: 'Ciclo de Receita Avançada', type: 'METHODOLOGY' },
-  { id: 'dr-metodo', name: 'Decisão & Resultado', themeColor: '#10B981', description: 'Metodologia de Performance', type: 'METHODOLOGY' }
+  { id: 'gerac', name: 'GERAC', themeColor: '#800080', description: 'Gestão e Empreendedorismo Responsável', type: 'METHODOLOGY', sigla: 'grc' },
+  { id: 'uau', name: 'Jornada U.A.U', themeColor: '#06B6D4', description: 'Ultra Atendimento Único', type: 'METHODOLOGY', sigla: 'uau' },
+  { id: 'mav', name: 'M.A.V', themeColor: '#F43F5E', description: 'Ciclo de Receita Avançada', type: 'METHODOLOGY', sigla: 'mav' },
+  { id: 'dr-metodo', name: 'Decisão & Resultado', themeColor: '#10B981', description: 'Metodologia de Performance', type: 'METHODOLOGY', sigla: 'drm' }
 ];
 
 const PIETRO_PERSONA: PersonaConfig = {

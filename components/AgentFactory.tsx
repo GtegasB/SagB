@@ -26,7 +26,8 @@ interface DynamicOption {
 
 // Definição das colunas móveis
 const INITIAL_MOVABLE_COLUMNS = [
-    { id: 'photo', label: 'Foto', width: 60, align: 'center' },
+    { id: 'photo', label: 'Rosto', width: 60, align: 'center' },
+    { id: 'ambient', label: 'Ambiente', width: 60, align: 'center' },
     { id: 'role', label: 'Cargo Principal', width: 220, align: 'left' },
     { id: 'docs', label: 'Doc. Vinculados', width: 100, align: 'left' },
     { id: 'company', label: 'Empresa', width: 140, align: 'left' },
@@ -72,10 +73,12 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         salary: '',
         collaboratorType: 'AGENTE_IA',
         avatarUrl: '',
+        ambientPhotoUrl: '',
         modelProvider: 'gemini'
     });
 
     const avatarInputRef = useRef<HTMLInputElement>(null);
+    const ambientInputRef = useRef<HTMLInputElement>(null);
 
     const [statusOptions, setStatusOptions] = useState<DynamicOption[]>([
         { id: 'ACTIVE', label: 'ATIVOS', colorClass: 'bg-green-500 text-white hover:bg-green-600', isSystem: true },
@@ -194,6 +197,17 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         }
     };
 
+    const handleAmbientUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setNewAgent(prev => ({ ...prev, ambientPhotoUrl: reader.result as string }));
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
     const [isSaving, setIsSaving] = useState(false); // NOVO STATE PARA BLOQUEAR CLIQUES
 
     const handleSaveNewAgent = async () => {
@@ -204,14 +218,14 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
             return;
         }
 
-        if (!newAgent.avatarUrl) {
-            alert("PROTOCOLO DE SEGURANÇA: É obrigatório adicionar uma foto de identidade para o agente.");
+        if (!newAgent.avatarUrl || !newAgent.ambientPhotoUrl) {
+            alert("PROTOCOLO QUADRO DE ELITE: É obrigatório adicionar DUAS fotos (Rosto e Ambiente) para o agente.");
             return;
         }
 
-        // VERIFICAÇÃO DE TAMANHO DA IMAGEM (Limitando a ~900KB para segurança do Firestore)
-        if (newAgent.avatarUrl.length > 900000) {
-            alert("⚠️ A imagem escolhida é muito pesada (>1MB). O banco de dados recusou.\n\nPor favor, escolha uma imagem menor ou tire um print screen dela e cole novamente.");
+        // VERIFICAÇÃO DE TAMANHO DA IMAGEM
+        if ((newAgent.avatarUrl?.length || 0) > 900000 || (newAgent.ambientPhotoUrl?.length || 0) > 900000) {
+            alert("⚠️ Uma das imagens é muito pesada (>1MB). O banco de dados recusou.\n\nPor favor, use fotos compressas ou suba o arquivo novamente.");
             return;
         }
 
@@ -219,11 +233,21 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
 
         const selectedBU = businessUnits.find(b => b.id === newAgent.buId);
 
-        // Se tiver editingId, usamos ele. Se não, geramos temporário (será substituído pelo Firestore ID)
+        // Se tiver editingId, usamos ele. Se não, geramos automático (ca + seq + sigla)
         const tempId = editingId || Date.now().toString();
+
+        const generateAutoId = () => {
+            const currentBU = businessUnits.find(bu => bu.id === newAgent.buId);
+            const sigla = currentBU?.sigla || 'gpb';
+            // Pega o número sequencial baseado no total de agentes (V1.2 Scale)
+            const sequence = agents.length + 1;
+            const padded = sequence.toString().padStart(3, '0');
+            return `ca${padded}${sigla}`;
+        };
+
         const universalId = editingId
             ? agents.find(a => a.id === editingId)?.universalId
-            : `ca${Math.floor(Math.random() * 10000)}new`;
+            : generateAutoId();
 
         // LIMPEZA DE PAYLOAD: O Firestore não aceita valores 'undefined'
         const rawPayload = {
@@ -402,8 +426,17 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                     return (
                         <td className="px-2 align-middle text-center">
                             <input type="file" ref={avatarInputRef} className="hidden" accept="image/*" onChange={handleAvatarUpload} />
-                            <div onClick={() => avatarInputRef.current?.click()} className={`w-8 h-8 rounded-full mx-auto flex items-center justify-center text-[8px] font-bold border cursor-pointer hover:scale-110 transition-all relative overflow-hidden ${!newAgent.avatarUrl ? 'bg-red-100 border-red-300 text-red-500 animate-pulse' : 'bg-gray-200 border-gray-300'}`} title="FOTO OBRIGATÓRIA">
+                            <div onClick={() => avatarInputRef.current?.click()} className={`w-8 h-8 rounded-full mx-auto flex items-center justify-center text-[8px] font-bold border cursor-pointer hover:scale-110 transition-all relative overflow-hidden ${!newAgent.avatarUrl ? 'bg-red-100 border-red-300 text-red-500 animate-pulse' : 'bg-gray-200 border-gray-300'}`} title="ROSTO OBRIGATÓRIO">
                                 {newAgent.avatarUrl ? <img src={newAgent.avatarUrl} className="w-full h-full object-cover" /> : <CloudUploadIcon className="w-4 h-4" />}
+                            </div>
+                        </td>
+                    );
+                case 'ambient':
+                    return (
+                        <td className="px-2 align-middle text-center">
+                            <input type="file" ref={ambientInputRef} className="hidden" accept="image/*" onChange={handleAmbientUpload} />
+                            <div onClick={() => ambientInputRef.current?.click()} className={`w-8 h-8 rounded-lg mx-auto flex items-center justify-center text-[8px] font-bold border cursor-pointer hover:scale-110 transition-all relative overflow-hidden ${!newAgent.ambientPhotoUrl ? 'bg-red-100 border-red-300 text-red-500 animate-pulse' : 'bg-gray-200 border-gray-300'}`} title="AMBIENTE OBRIGATÓRIO">
+                                {newAgent.ambientPhotoUrl ? <img src={newAgent.ambientPhotoUrl} className="w-full h-full object-cover" /> : <CloudUploadIcon className="w-4 h-4" />}
                             </div>
                         </td>
                     );
@@ -534,8 +567,8 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                         <BackIcon className="w-6 h-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl font-black text-bitrix-nav uppercase tracking-tighter">R.H.</h1>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Gestão de Colaboradores & I.A.</p>
+                        <h1 className="text-2xl font-black text-bitrix-nav uppercase tracking-tighter">Quadro de Elite</h1>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Gestão de Colaboradores Estratégicos & I.A.</p>
                     </div>
                 </div>
 
@@ -581,7 +614,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                             </th>
                             {/* FIXADO: Coluna Nome */}
                             <th className="text-left px-4 text-[9px] font-bold text-gray-400 uppercase tracking-widest whitespace-nowrap bg-white relative group border-b border-gray-100 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]" style={{ position: 'sticky', left: colWidths.expand, zIndex: 40 }}>
-                                Nome <Resizer colId="name" />
+                                Nome / I.D. <Resizer colId="name" />
                             </th>
 
                             {/* COLUNAS MÓVEIS (DRAGGABLE) */}

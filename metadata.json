@@ -1,9 +1,9 @@
 {
   "name": "SagB",
-  "version": "1.0.0",
-  "codename": "Antigravity DeepSeek",
-  "description": "Sistema unificado com DeepSeek, Gemini 2.0 Flash e Pipeline CI/CD Ativo.",
-  "lastUpdated": "2024-05-23",
+  "version": "1.1.0",
+  "codename": "SagB Neural Quantum",
+  "description": "Multi-user Scalable Infrastructure with Gemini 2.5 Flash.",
+  "lastUpdated": "2026-01-28",
   "requestFramePermissions": [
     "microphone"
   ]

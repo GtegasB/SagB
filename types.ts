@@ -33,6 +33,7 @@ export interface BusinessUnit {
   type: BUType;
   idNumber?: string;
   parentId?: string;
+  sigla?: string;
 }
 
 export interface Decision {
@@ -93,7 +94,8 @@ export interface Agent {
   docCount?: number;
 
   // V2.0 - IDENTIDADE VISUAL OBRIGATÓRIA
-  avatarUrl?: string; // Base64 Image Data
+  avatarUrl?: string; // Base64 Image Data (Face/Rosto)
+  ambientPhotoUrl?: string; // Base64 Image Data (Ambiente)
 
   // V2.1 - MULTI-MODELO (CÉREBRO)
   modelProvider?: ModelProvider; // 'gemini' | 'deepseek'
@@ -108,6 +110,7 @@ export interface Message {
   isStreaming?: boolean;
   isDecision?: boolean;
   participantName?: string;
+  attachment?: { data: string, mimeType: string, preview: string };
 }
 
 export interface PersonaConfig {

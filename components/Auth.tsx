@@ -158,12 +158,10 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                 </form>
 
                 <div className="mt-8 text-center px-4">
-                    <button
-                        onClick={() => setIsLogin(!isLogin)}
-                        className="text-[11px] font-black text-gray-400 hover:text-black transition-colors uppercase tracking-widest"
-                    >
-                        {isLogin ? 'Não tem conta? Cadastrar-se' : 'Já tem conta? Entrar agora'}
-                    </button>
+                    <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest leading-relaxed">
+                        Acesso Restrito ao Quadro de Elite.<br />
+                        Contate o administrador para obter suas credenciais.
+                    </p>
                 </div>
 
                 <div className="mt-12 pt-8 border-t border-gray-50 flex justify-center gap-6">
