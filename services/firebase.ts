@@ -21,13 +21,12 @@ import {
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
-    apiKey: process.env.API_KEY || "AIzaSyAKfMgwymzjtAG7VtT07n980NwkykmNks0", // Use variable with zero fallback
+    apiKey: process.env.API_KEY || "AIzaSyCUREZsmpAdyFPJQ51fnBBXFq7CbSFlBYI",
     authDomain: "sagb-grupob-v1.firebaseapp.com",
     projectId: "sagb-grupob-v1",
-    storageBucket: "sagb-grupob-v1.appspot.com",
+    storageBucket: "sagb-grupob-v1.firebasestorage.app",
     messagingSenderId: "1098332631364",
-    appId: "1:1098332631364:web:e3f5b7c8d9a0b1c2d3e4f5",
-    measurementId: "G-XXXXXXXXXX"
+    appId: "1:1098332631364:web:e21093b44e3e621a932711"
 };
 
 const app = initializeApp(firebaseConfig);
