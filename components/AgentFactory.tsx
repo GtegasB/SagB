@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Agent, BusinessUnit, AgentStatus, AgentTier, ModelProvider } from '../types';
 import { Avatar } from './Avatar';
 import { PaperclipIcon, PlusIcon, SearchIcon, ChevronDownIcon, XIcon, TrashIcon, PencilIcon, CloudUploadIcon, BotIcon, BackIcon } from './Icon';
-import { db } from '../services/firebase';
+import { db, auth } from '../services/firebase';
 import { collection, addDoc, updateDoc, doc } from 'firebase/firestore';
 
 interface AgentFactoryProps {
@@ -237,19 +237,31 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
 
         // --- FIREBASE INTEGRATION (COM TIMEOUT PARA OFFLINE MODE) ---
         try {
-            // Promise wrapper para forçar timeout de 5 segundos
+            // Validação de Autenticação antes de salvar
+            if (!auth.currentUser) {
+                alert("Sessão expirada. Por favor, saia e entre novamente.");
+                setIsSaving(false);
+                return;
+            }
+
+            // Promise wrapper para forçar timeout de 10 segundos
             const saveToFirestore = async () => {
-                if (editingId) {
-                    await updateDoc(doc(db, "agents", editingId), payload);
-                } else {
-                    const docRef = await addDoc(collection(db, "agents"), payload);
-                    await updateDoc(docRef, { id: docRef.id });
-                    payload.id = docRef.id;
+                try {
+                    if (editingId) {
+                        await updateDoc(doc(db, "agents", editingId), payload);
+                    } else {
+                        const docRef = await addDoc(collection(db, "agents"), payload);
+                        await updateDoc(docRef, { id: docRef.id });
+                        payload.id = docRef.id;
+                    }
+                } catch (e: any) {
+                    console.error("Firestore Save Error:", e);
+                    throw e; // Repassa para o catch externo
                 }
             };
 
             const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("TIMEOUT")), 5000)
+                setTimeout(() => reject(new Error("TIMEOUT")), 10000)
             );
 
             await Promise.race([saveToFirestore(), timeoutPromise]);
@@ -261,11 +273,12 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                 console.warn("Salvando em modo Offline (Timeout)");
                 alert("⚠️ Conexão lenta: Seu agente foi salvo no dispositivo e será sincronizado assim que possível.");
             }
-            else if (error.code === 'resource-exhausted') {
-                alert("Erro de Cota do Firebase. A imagem pode ser muito grande.");
-                return; // Bloqueia saída se for erro fatal
+            else {
+                console.error("Erro Crítico Firestore:", error);
+                alert(`Erro ao salvar no banco de dados (${error.code || error.message}). Verifique as permissões com o Newton.`);
+                setIsSaving(false);
+                return; // Bloqueia se der erro real
             }
-            // Outros erros: Loga mas permite prosseguir localmente (Offline First Real)
         }
 
         // SUCESSO
