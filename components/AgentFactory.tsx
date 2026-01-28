@@ -683,6 +683,6 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
             </div>
         </div>
     );
+};
 
-
-    export default AgentFactory;
+export default AgentFactory;
