@@ -225,15 +225,24 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
             ? agents.find(a => a.id === editingId)?.universalId
             : `ca${Math.floor(Math.random() * 10000)}new`;
 
-        const payload = {
+        // LIMPEZA DE PAYLOAD: O Firestore não aceita valores 'undefined'
+        const rawPayload = {
             ...newAgent,
             company: selectedBU ? selectedBU.name : 'GrupoB',
             version: '1.0',
             fullPrompt: editingId ? (newAgent.fullPrompt || '') : '',
             sector: newAgent.division || 'Geral',
             id: tempId,
-            universalId: universalId
+            universalId: universalId,
+            active: true
         };
+
+        // Remove undefined fields
+        const payload = Object.fromEntries(
+            Object.entries(rawPayload).filter(([_, v]) => v !== undefined)
+        );
+
+        console.log("DEBUG: Payload Preparado para Firestore:", payload);
 
         // --- FIREBASE INTEGRATION (COM TIMEOUT PARA OFFLINE MODE) ---
         try {

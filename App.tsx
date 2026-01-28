@@ -520,6 +520,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'agents'), (snapshot) => {
       const firestoreAgents = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as Agent[];
+      console.log("DEBUG: Agentes vindos do Firestore:", firestoreAgents);
 
       // Merge Strategy: Master List (Defaults) + Firestore (Overrides & New)
       const finalList = MASTER_AGENTS_LIST.map(seed => {
