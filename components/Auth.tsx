@@ -33,6 +33,7 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
             else if (err.code === 'auth/invalid-email') setError('E-mail inválido.');
             else if (err.code === 'auth/email-already-in-use') setError('Este e-mail já está em uso.');
             else if (err.code === 'auth/weak-password') setError('A senha deve ter pelo menos 6 caracteres.');
+            else if (err.code === 'auth/configuration-not-found') setError('Configuração não encontrada. Newton, você REALMENTE ativou a "Identity Toolkit API" no Google Cloud Library para este projeto?');
             else setError(`Erro ao autenticar (${err.code}). Verifique sua conexão e se o login por e-mail está ativo no Firebase.`);
         } finally {
             setLoading(false);
