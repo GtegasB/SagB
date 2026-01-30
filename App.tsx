@@ -661,41 +661,16 @@ const App: React.FC = () => {
 
   // --- FIRESTORE SYNC (SUBSTITUI LOCALSTORAGE PARA AGENTES) ---
   useEffect(() => {
+    // Carrega agentes SOMENTE do Firestore (Fonte da Verdade)
     const unsubscribe = onSnapshot(collection(db, 'agents'), (snapshot) => {
-      const firestoreAgents = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as Agent[];
-      console.log("DEBUG: Agentes vindos do Firestore:", firestoreAgents);
+      const firestoreAgents = snapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id
+      })) as Agent[];
 
-      // Merge Strategy: Master List (Defaults) + Firestore (Overrides & New)
-      const finalList = MASTER_AGENTS_LIST.map(seed => {
-        const remote = firestoreAgents.find(fa => fa.universalId === seed.id);
-        if (remote) return remote;
-
-        // Fallback to minimal seed object if not in DB yet
-        return {
-          id: seed.id,
-          universalId: seed.id,
-          name: seed.name,
-          officialRole: seed.role,
-          buId: UNIT_MAP[seed.unit] || 'grupob',
-          tier: inferTier(seed.role),
-          active: seed.is_active,
-          status: seed.is_active ? 'ACTIVE' : 'PLANNED',
-          version: '1.0',
-          company: 'GrupoB',
-          fullPrompt: '',
-          sector: seed.role.split(' ')[0],
-          modelProvider: (seed as any).model_provider || 'gemini'
-        } as Agent;
-      });
-
-      // Add custom agents from Firestore that are NOT in Master List
-      firestoreAgents.forEach(fa => {
-        if (!finalList.find(i => i.universalId === fa.universalId)) {
-          finalList.push(fa);
-        }
-      });
-
-      setActivatedAgents(finalList);
+      setActivatedAgents(firestoreAgents);
+    }, (error) => {
+      console.error("Erro ao conectar no Firestore:", error);
     });
 
     return () => unsubscribe();

@@ -3,7 +3,7 @@ import { Agent, BusinessUnit, AgentStatus, AgentTier, ModelProvider, Venture } f
 import { Avatar } from './Avatar';
 import { PaperclipIcon, PlusIcon, SearchIcon, ChevronDownIcon, XIcon, TrashIcon, PencilIcon, CloudUploadIcon, BotIcon, BackIcon } from './Icon';
 import { db, auth } from '../services/firebase';
-import { collection, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, setDoc, Timestamp } from 'firebase/firestore';
 
 interface AgentFactoryProps {
     onNavigateToEcosystem: () => void;
@@ -81,6 +81,65 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
 
     const avatarInputRef = useRef<HTMLInputElement>(null);
     const ambientInputRef = useRef<HTMLInputElement>(null);
+
+    const handleSaveAgent = async () => {
+        // Validação simples
+        if (!newAgent.name || !newAgent.officialRole) {
+            alert("Preencha Nome e Cargo.");
+            return;
+        }
+
+        // Trava botão para evitar duplo clique
+        const originalLabel = document.getElementById('btn-save')?.innerText;
+        if (document.getElementById('btn-save')) {
+            document.getElementById('btn-save')!.innerText = "Salvando...";
+            (document.getElementById('btn-save') as HTMLButtonElement).disabled = true;
+        }
+
+        try {
+            // Gera ID se não existir
+            const agentId = editingId || newAgent.id || `ag_${Date.now()}`;
+
+            // Prepara dados
+            const payload: any = {
+                ...newAgent,
+                id: agentId,
+                universalId: agentId,
+                updatedAt: Timestamp.now(),
+                // Se for novo, marca data de criação
+                ...(editingId ? {} : { createdAt: Timestamp.now(), status: 'ACTIVE' })
+            };
+
+            // Limpeza de campos vazios
+            Object.keys(payload).forEach(key =>
+                (payload[key] === undefined || payload[key] === null) && delete payload[key]
+            );
+
+            // SALVAMENTO NO FIRESTORE (Cria coleção automaticamente se não existir)
+            await setDoc(doc(db, "agents", agentId), payload, { merge: true });
+
+            // Sucesso
+            console.log("Agente salvo:", agentId);
+
+            // Limpa formulário e fecha modal
+            setNewAgent({
+                id: '', name: '', officialRole: '', company: activeBU.name, buId: activeBU.id,
+                status: 'ACTIVE', tier: 'TÁTICO', type: 'agent', modelProvider: 'gemini'
+            });
+            setIsAdding(false);
+            setEditingId(null);
+
+        } catch (error: any) {
+            console.error("Erro ao salvar:", error);
+            alert("Erro ao salvar: " + error.message);
+        } finally {
+            // Destrava botão (Correção do Loop Infinito)
+            if (document.getElementById('btn-save')) {
+                document.getElementById('btn-save')!.innerText = originalLabel || "Salvar Agente";
+                (document.getElementById('btn-save') as HTMLButtonElement).disabled = false;
+            }
+        }
+    };
 
     const [statusOptions, setStatusOptions] = useState<DynamicOption[]>([
         { id: 'ACTIVE', label: 'ATIVOS', colorClass: 'bg-green-500 text-white hover:bg-green-600', isSystem: true },
