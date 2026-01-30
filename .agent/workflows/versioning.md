@@ -4,7 +4,7 @@ description: Como atualizar as versões do SagB (v1.x.x)
 
 Para garantir que o sistema, o GitHub e os usuários estejam sempre sincronizados, siga este fluxo de versionamento:
 
-### 1. Escolha o Incremento (SemVer)
+### 1. Escolha o Incremento (SemVer) 1
 - **v1.1.X (Patch):** Correções de bugs, ajustes de texto ou pequenas melhorias visuais.
 - **v1.X.0 (Minor):** Novas funcionalidades que não quebram o sistema (ex: novo agente, novo módulo).
 - **X.0.0 (Major):** Mudanças estruturais grandes no banco de dados ou refatoração completa.
