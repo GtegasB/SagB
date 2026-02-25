@@ -13,6 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+<<<<<<< Updated upstream
+=======
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+>>>>>>> Stashed changes
       - run: npm install
       - run: npm run build
         env:
