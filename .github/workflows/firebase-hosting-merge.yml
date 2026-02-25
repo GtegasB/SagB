@@ -8,22 +8,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      # AQUI ESTÁ A MÁGICA: Apaga o arquivo do Windows e instala do zero
-      - run: rm -f package-lock.json && npm install
-      
+      - run: npm install
       - run: npm run build
         env:
-           VITE_GEMINI_API_KEY: "${{ secrets.VITE_GEMINI_API_KEY }}"
-           
+          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
-          repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_SAGB_GRUPOB_V1 }}'
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SAGB_GRUPOB_V1 }}
           channelId: live
           projectId: sagb-grupob-v1
