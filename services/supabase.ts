@@ -57,19 +57,14 @@ const supabaseAuthFetch = async (path: string, body?: any, accessToken?: string)
     body: body ? JSON.stringify(body) : undefined
   });
 
-  const json = await res.json().catch(() => ({}));
+ const json = await res.json().catch(() => ({}));
 
-  // Token inválido, derruba sessão local para forçar login
-  if (res.status === 401) {
+// Token inválido: derruba sessão local pra forçar login
+if (res.status === 401) {
   forceSignOut();
 }
 
-  }
-
-  if (!res.ok) {
-    throw { code: json?.error_code || json?.error || 'auth/error', message: json?.msg || json?.error_description || 'Erro de autenticação' };
-  }
-  return json;
+return json;
 };
 
 const restFetch = async (
