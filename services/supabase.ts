@@ -91,9 +91,9 @@ const restFetch = async (
   const text = await res.text();
   const data = safeJsonParse(text);
 
-  if (res.status === 401 || res.status === 403) {
-    forceSignOut();
-  }
+  if (res.status === 401) {
+  forceSignOut();
+}
 
   if (!res.ok) throw data;
   return data;
