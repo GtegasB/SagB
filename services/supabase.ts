@@ -60,8 +60,10 @@ const supabaseAuthFetch = async (path: string, body?: any, accessToken?: string)
   const json = await res.json().catch(() => ({}));
 
   // Token inválido, derruba sessão local para forçar login
-  if (res.status === 401 || res.status === 403) {
-    forceSignOut();
+  if (res.status === 401) {
+  forceSignOut();
+}
+
   }
 
   if (!res.ok) {
