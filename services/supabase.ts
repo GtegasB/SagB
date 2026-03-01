@@ -91,12 +91,10 @@ const restFetch = async (
   const text = await res.text();
   const data = safeJsonParse(text);
 
-  if (res.status === 401) {
+  if (res.status === 401 && session?.access_token) {
   forceSignOut();
 }
-
-  if (!res.ok) throw data;
-  return data;
+return json;
 };
 
 export const auth = {
