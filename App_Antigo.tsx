@@ -36,21 +36,6 @@ import metadata from './metadata.json';
 import { db, auth, onAuthStateChanged, signOut, User } from './services/supabase';
 import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, query, where, orderBy, Timestamp } from './services/supabase';
 
-// Converte datas de forma segura (Supabase, Firebase Timestamp, string ISO)
-const asDate = (v: any): Date | undefined => {
-  if (!v) return undefined;
-  if (v instanceof Date) return v;
-  if (typeof v === 'string' || typeof v === 'number') {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? undefined : d;
-  }
-  if (typeof v?.toDate === 'function') {
-    const d = v.toDate();
-    return d instanceof Date && !Number.isNaN(d.getTime()) ? d : undefined;
-  }
-  return undefined;
-};
-
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
 //const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
 const STORAGE_KEYS = {
@@ -272,7 +257,7 @@ const App: React.FC = () => {
 
       if (currentUser) {
         // Buscar perfil no banco de dados em tempo real
-        unsubscribeProfile = onSnapshot(doc(db, "users", currentUser.id), (snapshot) => {
+        unsubscribeProfile = onSnapshot(doc(db, "users", currentUser.uid), (snapshot) => {
           if (snapshot.exists()) {
             setUserProfile(snapshot.data() as UserProfile);
           } else {
@@ -290,7 +275,7 @@ const App: React.FC = () => {
               return {
                 ...data,
                 id: doc.id,
-                timestamp: (asDate(data.timestamp) ?? new Date())
+                timestamp: (data.timestamp as Timestamp).toDate()
               } as Topic;
             });
             setTopics(loadedTopics);
@@ -306,8 +291,8 @@ const App: React.FC = () => {
               return {
                 ...data,
                 id: doc.id,
-                createdAt: (asDate(data.createdAt) ?? new Date()),
-                dueDate: asDate(data.dueDate)
+                createdAt: (data.createdAt as Timestamp).toDate(),
+                dueDate: data.dueDate ? (data.dueDate as Timestamp).toDate() : undefined
               } as unknown as Task;
             });
             setTasks(loadedTasks);
@@ -323,7 +308,7 @@ const App: React.FC = () => {
               return {
                 ...data,
                 id: doc.id,
-                timestamp: (asDate(data.timestamp) ?? new Date())
+                timestamp: (data.timestamp as Timestamp).toDate()
               } as unknown as Venture;
             });
             setVentures(loadedVentures);

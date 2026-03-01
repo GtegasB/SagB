@@ -147,23 +147,8 @@ const normalizePayload = (payload: Record<string, any>) => {
   const normalized: Record<string, any> = {};
   Object.entries(payload).forEach(([key, value]) => {
     if (value === undefined) return;
-
-    // Converte datas de forma segura (Timestamp wrapper, Date, Firebase Timestamp-like)
-    const maybeDate =
-      value instanceof Timestamp
-        ? value.toDate()
-        : value instanceof Date
-          ? value
-          : typeof (value as any)?.toDate === 'function'
-            ? (value as any).toDate()
-            : null;
-
-    if (maybeDate instanceof Date && !Number.isNaN(maybeDate.getTime())) {
-      normalized[key] = maybeDate.toISOString();
-      return;
-    }
-
-    normalized[key] = value;
+    if (value instanceof Timestamp) normalized[key] = value.toDate().toISOString();
+    else normalized[key] = value;
   });
   return normalized;
 };
@@ -181,7 +166,7 @@ const convertTimestamps = (record: Record<string, any>) => {
 
 export const collection = (_db: typeof db, table: string): CollectionRef => ({ kind: 'collection', table });
 export const doc = (_dbOrCollection: typeof db | CollectionRef, tableOrId: string, id?: string): DocRef => {
-  if (typeof id !== 'undefined') return { kind: 'doc', table: tableOrId, id };
+  if (id) return { kind: 'doc', table: tableOrId, id };
   const collectionRef = _dbOrCollection as CollectionRef;
   return { kind: 'doc', table: collectionRef.table, id: tableOrId };
 };
@@ -235,13 +220,7 @@ export const onSnapshot = (ref: AnyRef, callback: (snapshot: any) => void, onErr
       }
     } catch (error) {
       if (onError) onError(error);
-      else {
-        console.error(error);
-        // Evita loading infinito quando a tabela ainda nao existe ou RLS bloqueia
-        try {
-          callback(ref.kind === 'doc' ? buildDocSnapshot(null) : buildCollectionSnapshot([]));
-        } catch {}
-      }
+      else console.error(error);
     }
   };
 
