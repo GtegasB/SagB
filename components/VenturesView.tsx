@@ -372,4 +372,4 @@ export const onAuthStateChanged = (_auth: typeof auth, callback: (user: User | n
   return () => data.subscription.unsubscribe();
 };
 
-export { Timestamp };
+export default VenturesView;
