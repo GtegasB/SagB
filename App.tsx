@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { GenerateContentResponse } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
@@ -35,21 +34,6 @@ import { MASTER_AGENTS_LIST } from './data/agents';
 import metadata from './metadata.json';
 import { db, auth, onAuthStateChanged, signOut, User } from './services/supabase';
 import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, query, where, orderBy, Timestamp } from './services/supabase';
-
-// Converte datas de forma segura (Supabase, Firebase Timestamp, string ISO)
-const asDate = (v: any): Date | undefined => {
-  if (!v) return undefined;
-  if (v instanceof Date) return v;
-  if (typeof v === 'string' || typeof v === 'number') {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? undefined : d;
-  }
-  if (typeof v?.toDate === 'function') {
-    const d = v.toDate();
-    return d instanceof Date && !Number.isNaN(d.getTime()) ? d : undefined;
-  }
-  return undefined;
-};
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
 //const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
@@ -262,6 +246,20 @@ const App: React.FC = () => {
 
   // --- VERIFICAÇÃO DE LOGIN SUPABASE ---
   useEffect(() => {
+
+// Helpers locais para migração Firebase -> Supabase
+const getUserId = (u: any): string | null => (u && ((u as any).id || (u as any).uid)) || null;
+const asDate = (v: any): Date | undefined => {
+  if (!v) return undefined;
+  if (v instanceof Date) return v;
+  if (typeof v?.toDate === 'function') return v.toDate();
+  if (typeof v === 'string' || typeof v === 'number') {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? undefined : d;
+  }
+  return undefined;
+};
+
     let unsubscribeProfile: (() => void) | undefined;
     let unsubscribeTopics: (() => void) | undefined;
     let unsubscribeTasks: (() => void) | undefined;
@@ -271,17 +269,50 @@ const App: React.FC = () => {
       setUser(currentUser);
 
       if (currentUser) {
-        // Buscar perfil no banco de dados em tempo real
-        unsubscribeProfile = onSnapshot(doc(db, "users", currentUser.id), (snapshot) => {
-          if (snapshot.exists()) {
-            setUserProfile(snapshot.data() as UserProfile);
-          } else {
-            setUserProfile(null);
-          }
-          setIsInitializing(false);
-        });
-
-        // V1.4.0 - Sincronização de Pautas (Topics)
+// Buscar perfil no banco de dados (public.users). Se não existir ainda, seguimos com um fallback.
+const userId = getUserId(currentUser);
+if (userId) {
+  unsubscribeProfile = onSnapshot(
+    doc(db, "users", userId),
+    (snapshot) => {
+      if (snapshot.exists()) {
+        setUserProfile(snapshot.data() as UserProfile);
+      } else {
+        // Perfil ainda não criado em public.users
+        setUserProfile({
+          uid: userId,
+          email: (currentUser as any)?.email || '',
+          name: '',
+          nickname: '',
+          role: 'member',
+          avatarUrl: '',
+          company: 'GrupoB',
+          tier: 'TÁTICO',
+          createdAt: new Date()
+        } as any);
+      }
+      setIsInitializing(false);
+    },
+    (err) => {
+      console.error("Erro ao carregar perfil (public.users):", err);
+      setUserProfile({
+        uid: userId,
+        email: (currentUser as any)?.email || '',
+        name: '',
+        nickname: '',
+        role: 'member',
+        avatarUrl: '',
+        company: 'GrupoB',
+        tier: 'TÁTICO',
+        createdAt: new Date()
+      } as any);
+      setIsInitializing(false);
+    }
+  );
+} else {
+  setUserProfile(null);
+  setIsInitializing(false);
+}// V1.4.0 - Sincronização de Pautas (Topics)
         unsubscribeTopics = onSnapshot(
           query(collection(db, "topics"), orderBy("timestamp", "desc")),
           (snapshot) => {
@@ -290,7 +321,7 @@ const App: React.FC = () => {
               return {
                 ...data,
                 id: doc.id,
-                timestamp: (asDate(data.timestamp) ?? new Date())
+                timestamp: asDate(data.timestamp) || new Date()
               } as Topic;
             });
             setTopics(loadedTopics);
@@ -306,7 +337,7 @@ const App: React.FC = () => {
               return {
                 ...data,
                 id: doc.id,
-                createdAt: (asDate(data.createdAt) ?? new Date()),
+                createdAt: asDate(data.createdAt) || new Date(),
                 dueDate: asDate(data.dueDate)
               } as unknown as Task;
             });
@@ -323,7 +354,7 @@ const App: React.FC = () => {
               return {
                 ...data,
                 id: doc.id,
-                timestamp: (asDate(data.timestamp) ?? new Date())
+                timestamp: asDate(data.timestamp) || new Date()
               } as unknown as Venture;
             });
             setVentures(loadedVentures);

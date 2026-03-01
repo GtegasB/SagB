@@ -1,3 +1,14 @@
+/**
+ * Supabase "shim" para manter a API parecida com Firebase/Firestore dentro do SagB,
+ * enquanto migramos o storage para Postgres.
+ *
+ * Objetivos:
+ * - Auth via Supabase Auth (email + password).
+ * - Acesso a dados via PostgREST (/rest/v1).
+ * - Manter assinaturas "onSnapshot" (aqui via polling simples) para não quebrar o app.
+ * - Normalizar (snake_case <-> camelCase) nos pontos críticos (ventures, users, tasks, topics, agents).
+ */
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
@@ -25,6 +36,16 @@ const emitAuth = (event: string, session: any) => {
   authListeners.forEach((listener) => listener(event, session));
 };
 
+const forceSignOut = () => {
+  setStoredSession(null);
+  emitAuth('SIGNED_OUT', null);
+};
+
+const safeJsonParse = (text: string) => {
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return text; }
+};
+
 const supabaseAuthFetch = async (path: string, body?: any, accessToken?: string) => {
   const res = await fetch(`${supabaseUrl}/auth/v1${path}`, {
     method: body ? 'POST' : 'GET',
@@ -37,13 +58,23 @@ const supabaseAuthFetch = async (path: string, body?: any, accessToken?: string)
   });
 
   const json = await res.json().catch(() => ({}));
+
+  // Token inválido, derruba sessão local para forçar login
+  if (res.status === 401 || res.status === 403) {
+    forceSignOut();
+  }
+
   if (!res.ok) {
     throw { code: json?.error_code || json?.error || 'auth/error', message: json?.msg || json?.error_description || 'Erro de autenticação' };
   }
   return json;
 };
 
-const restFetch = async (table: string, options: { method?: string; query?: URLSearchParams; body?: any } = {}, accessToken?: string) => {
+const restFetch = async (
+  table: string,
+  options: { method?: string; query?: URLSearchParams; body?: any; headers?: Record<string, string> } = {},
+  accessToken?: string
+) => {
   const session = getStoredSession();
   const token = accessToken || session?.access_token;
   const queryString = options.query ? `?${options.query.toString()}` : '';
@@ -54,13 +85,19 @@ const restFetch = async (table: string, options: { method?: string; query?: URLS
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${token || supabaseAnonKey}`,
       'Content-Type': 'application/json',
-      Prefer: 'return=representation'
+      Prefer: 'return=representation',
+      ...(options.headers || {})
     },
     body: options.body ? JSON.stringify(options.body) : undefined
   });
 
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  const data = safeJsonParse(text);
+
+  if (res.status === 401 || res.status === 403) {
+    forceSignOut();
+  }
+
   if (!res.ok) throw data;
   return data;
 };
@@ -92,8 +129,7 @@ export const auth = {
         headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${session.access_token}` }
       }).catch(() => null);
     }
-    setStoredSession(null);
-    emitAuth('SIGNED_OUT', null);
+    forceSignOut();
     return { error: null };
   },
 
@@ -104,7 +140,9 @@ export const auth = {
       const data = await supabaseAuthFetch('/user', undefined, session.access_token);
       return { data: { user: data }, error: null };
     } catch {
-      return { data: { user: session.user || null }, error: null };
+      // Se falhou o /user, considera sessão inválida e força login
+      forceSignOut();
+      return { data: { user: null }, error: null };
     }
   },
 
@@ -120,6 +158,7 @@ export const auth = {
   }
 };
 
+// Mantém "db" só como placeholder para a API Firestore-like
 export const db = { provider: 'supabase-rest' };
 export type User = Awaited<ReturnType<typeof auth.getUser>>['data']['user'];
 
@@ -143,33 +182,27 @@ class Timestamp {
   toJSON() { return this.value.toISOString(); }
 }
 
+/**
+ * Converte valores de payload.
+ * - Timestamp -> ISO
+ * - remove undefined
+ */
 const normalizePayload = (payload: Record<string, any>) => {
   const normalized: Record<string, any> = {};
-  Object.entries(payload).forEach(([key, value]) => {
+  Object.entries(payload || {}).forEach(([key, value]) => {
     if (value === undefined) return;
-
-    // Converte datas de forma segura (Timestamp wrapper, Date, Firebase Timestamp-like)
-    const maybeDate =
-      value instanceof Timestamp
-        ? value.toDate()
-        : value instanceof Date
-          ? value
-          : typeof (value as any)?.toDate === 'function'
-            ? (value as any).toDate()
-            : null;
-
-    if (maybeDate instanceof Date && !Number.isNaN(maybeDate.getTime())) {
-      normalized[key] = maybeDate.toISOString();
-      return;
-    }
-
-    normalized[key] = value;
+    if (value instanceof Timestamp) normalized[key] = value.toDate().toISOString();
+    else if (value instanceof Date) normalized[key] = value.toISOString();
+    else normalized[key] = value;
   });
   return normalized;
 };
 
+/**
+ * Converte strings ISO em Timestamp para manter compatibilidade com o código legada.
+ */
 const convertTimestamps = (record: Record<string, any>) => {
-  const out: Record<string, any> = { ...record };
+  const out: Record<string, any> = { ...(record || {}) };
   Object.entries(out).forEach(([key, value]) => {
     if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
       const date = new Date(value);
@@ -179,9 +212,143 @@ const convertTimestamps = (record: Record<string, any>) => {
   return out;
 };
 
+// ---------------------------
+// Normalização por tabela
+// ---------------------------
+const pick = (obj: Record<string, any>, ...keys: string[]) => {
+  for (const k of keys) {
+    const v = obj[k];
+    if (v !== undefined && v !== null) return v;
+  }
+  return undefined;
+};
+
+const normalizeRecordForTable = (table: string, record: Record<string, any>) => {
+  const r: Record<string, any> = { ...(record || {}) };
+
+  if (table === 'ventures') {
+    // DB: brand_name / logo_url / initiative / lab_status / created_at
+    r.name = pick(r, 'name', 'brandName', 'brand_name', 'brand') ?? '';
+    r.logo = pick(r, 'logo', 'logoUrl', 'logo_url') ?? '';
+    r.type = pick(r, 'type', 'initiative') ?? 'Marca';
+    r.statusLab = pick(r, 'statusLab', 'labStatus', 'lab_status') ?? 'Pendente';
+    r.status = pick(r, 'status') ?? 'DESENVOLVIMENTO';
+    r.niche = pick(r, 'niche') ?? '';
+    r.segment = pick(r, 'segment') ?? '';
+    r.sphere = pick(r, 'sphere') ?? '';
+    r.url = pick(r, 'url') ?? '';
+
+    // timestamp no app: usa created_at como fonte
+    const ts = pick(r, 'timestamp', 'created_at', 'createdAt', 'updated_at', 'updatedAt');
+    r.timestamp = ts ?? Timestamp.fromDate(new Date());
+  }
+
+  if (table === 'users') {
+    // DB: id, email, display_name, role, created_at
+    const id = pick(r, 'uid', 'id', 'user_id') ?? '';
+    r.uid = id;
+    r.email = pick(r, 'email') ?? '';
+    r.name = pick(r, 'name', 'display_name', 'displayName') ?? '';
+    r.nickname = pick(r, 'nickname') ?? '';
+    r.role = pick(r, 'role') ?? 'member';
+    r.company = pick(r, 'company') ?? 'GrupoB';
+    r.tier = pick(r, 'tier') ?? 'TÁTICO';
+    const created = pick(r, 'createdAt', 'created_at') ?? Timestamp.fromDate(new Date());
+    r.createdAt = created;
+  }
+
+  if (table === 'tasks') {
+    const created = pick(r, 'createdAt', 'created_at') ?? Timestamp.fromDate(new Date());
+    r.createdAt = created;
+    if (r.dueDate === undefined) r.dueDate = pick(r, 'due_date', 'due_date_at', 'due_at', 'dueDate');
+  }
+
+  if (table === 'topics') {
+    const ts = pick(r, 'timestamp', 'created_at', 'createdAt') ?? Timestamp.fromDate(new Date());
+    r.timestamp = ts;
+  }
+
+  return r;
+};
+
+const normalizePayloadForTable = (table: string, payload: Record<string, any>) => {
+  const p: Record<string, any> = normalizePayload(payload);
+
+  // remove campos que nunca podem ir direto pro SQL
+  delete p.id;
+
+  if (table === 'ventures') {
+    // UI -> DB columns
+    if (p.name !== undefined) { p.brand_name = p.name; delete p.name; }
+    if (p.logo !== undefined) { p.logo_url = p.logo; delete p.logo; }
+    if (p.type !== undefined) { p.initiative = p.type; delete p.type; }
+    if (p.statusLab !== undefined) { p.lab_status = p.statusLab; delete p.statusLab; }
+
+    // App usa timestamp. DB usa created_at default now(). Então não mandamos timestamp.
+    delete p.timestamp;
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'users') {
+    // Perfil "public.users"
+    if (p.uid !== undefined) { p.id = p.uid; delete p.uid; }
+    if (p.name !== undefined) { p.display_name = p.name; delete p.name; }
+    delete p.createdAt;
+  }
+
+  // Para tasks/topics/agents: se existir coluna payload no DB, empacota o extra lá dentro (mais robusto).
+  if (table === 'tasks' || table === 'topics' || table === 'agents') {
+    const knownKeys = new Set<string>([
+      'id',
+      'title',
+      'status',
+      'venture_id',
+      'ventureId',
+      'bu_id',
+      'buId',
+      'assignee',
+      'priority',
+      'description',
+      'created_at',
+      'updated_at',
+      'createdAt',
+      'updatedAt'
+    ]);
+
+    // Converte campos de relacionamento comuns
+    if (p.ventureId !== undefined && p.venture_id === undefined) { p.venture_id = p.ventureId; delete p.ventureId; }
+    if (p.buId !== undefined && p.bu_id === undefined) { p.bu_id = p.buId; delete p.buId; }
+
+    const extra: Record<string, any> = {};
+    Object.keys(p).forEach((k) => {
+      if (!knownKeys.has(k) && k !== 'payload') {
+        extra[k] = p[k];
+        delete p[k];
+      }
+    });
+
+    if (Object.keys(extra).length) {
+      p.payload = { ...(p.payload || {}), ...extra };
+    }
+
+    // Data fields (se estiverem em camelCase, guarda no payload, mas não derruba insert)
+    delete p.createdAt;
+    delete p.updatedAt;
+    delete p.timestamp;
+    delete p.dueDate;
+  }
+
+  return p;
+};
+
+// ---------------------------
+// API Firestore-like
+// ---------------------------
 export const collection = (_db: typeof db, table: string): CollectionRef => ({ kind: 'collection', table });
+
 export const doc = (_dbOrCollection: typeof db | CollectionRef, tableOrId: string, id?: string): DocRef => {
-  if (typeof id !== 'undefined') return { kind: 'doc', table: tableOrId, id };
+  if (id) return { kind: 'doc', table: tableOrId, id };
   const collectionRef = _dbOrCollection as CollectionRef;
   return { kind: 'doc', table: collectionRef.table, id: tableOrId };
 };
@@ -198,6 +365,20 @@ export const query = (collectionRef: CollectionRef, ...constraints: Array<Return
   return queryRef;
 };
 
+// Map de nomes Firestore -> SQL (quando o app usa camelCase)
+const mapFieldForTable = (table: string, field: string) => {
+  if (table === 'tasks') {
+    if (field === 'createdAt') return 'created_at';
+  }
+  if (table === 'topics') {
+    if (field === 'timestamp') return 'created_at';
+  }
+  if (table === 'ventures') {
+    if (field === 'timestamp') return 'created_at';
+  }
+  return field;
+};
+
 const runQuery = async (ref: CollectionRef | QueryRef) => {
   const params = new URLSearchParams();
   params.set('select', '*');
@@ -205,43 +386,56 @@ const runQuery = async (ref: CollectionRef | QueryRef) => {
   if (ref.kind === 'query') {
     ref.filters.forEach((f) => {
       const opMap: Record<string, string> = { '==': 'eq', '!=': 'neq', '>': 'gt', '>=': 'gte', '<': 'lt', '<=': 'lte' };
-      params.set(f.field, `${opMap[f.op] || 'eq'}.${String(f.value)}`);
+      const col = mapFieldForTable(ref.table, f.field);
+      params.set(col, `${opMap[f.op] || 'eq'}.${String(f.value)}`);
     });
 
-    if (ref.order) params.set('order', `${ref.order.field}.${ref.order.direction}`);
+    if (ref.order) {
+      const col = mapFieldForTable(ref.table, ref.order.field);
+      params.set('order', `${col}.${ref.order.direction}`);
+    }
   }
 
   return restFetch(ref.table, { method: 'GET', query: params });
 };
 
-const buildCollectionSnapshot = (records: any[]) => ({ docs: records.map((record) => ({ id: String(record.id), data: () => convertTimestamps(record) })) });
-const buildDocSnapshot = (record: any | null) => ({ exists: () => Boolean(record), data: () => (record ? convertTimestamps(record) : undefined) });
+const buildCollectionSnapshot = (records: any[], table: string) => ({
+  docs: (records || []).map((record) => ({
+    id: String(record.id),
+    data: () => normalizeRecordForTable(table, convertTimestamps(record))
+  }))
+});
 
+const buildDocSnapshot = (record: any | null, table: string) => ({
+  exists: () => Boolean(record),
+  data: () => (record ? normalizeRecordForTable(table, convertTimestamps(record)) : undefined)
+});
+
+/**
+ * onSnapshot aqui não é realtime (por enquanto).
+ * Faz polling (5s) para manter a experiência do app e simplificar migração.
+ */
 export const onSnapshot = (ref: AnyRef, callback: (snapshot: any) => void, onError?: (error: any) => void) => {
   let active = true;
 
   const emit = async () => {
     try {
       if (!active) return;
+
       if (ref.kind === 'doc') {
         const params = new URLSearchParams();
         params.set('select', '*');
         params.set('id', `eq.${ref.id}`);
+
         const rows = await restFetch(ref.table, { method: 'GET', query: params });
-        callback(buildDocSnapshot(rows?.[0] || null));
+        callback(buildDocSnapshot(rows?.[0] || null, ref.table));
       } else {
         const rows = await runQuery(ref);
-        callback(buildCollectionSnapshot(rows || []));
+        callback(buildCollectionSnapshot(rows || [], ref.table));
       }
     } catch (error) {
       if (onError) onError(error);
-      else {
-        console.error(error);
-        // Evita loading infinito quando a tabela ainda nao existe ou RLS bloqueia
-        try {
-          callback(ref.kind === 'doc' ? buildDocSnapshot(null) : buildCollectionSnapshot([]));
-        } catch {}
-      }
+      else console.error(error);
     }
   };
 
@@ -255,20 +449,47 @@ export const onSnapshot = (ref: AnyRef, callback: (snapshot: any) => void, onErr
 };
 
 export const addDoc = async (collectionRef: CollectionRef, payload: Record<string, any>) => {
-  const data = await restFetch(collectionRef.table, { method: 'POST', body: normalizePayload(payload) });
+  const body = normalizePayloadForTable(collectionRef.table, payload);
+
+  // Se tentar inserir venture já sem logo/nome, dá erro. Melhor falhar cedo.
+  if (collectionRef.table === 'ventures') {
+    if (!body.brand_name) throw { code: 'validation/error', message: 'Venture sem nome (brand_name).' };
+    if (!body.logo_url) throw { code: 'validation/error', message: 'Venture sem logo (logo_url).' };
+  }
+
+  const data = await restFetch(collectionRef.table, { method: 'POST', body });
   const inserted = Array.isArray(data) ? data[0] : data;
+
+  // Conveniência: ao criar venture, vincula user atual como admin em user_ventures (se existir).
+  if (collectionRef.table === 'ventures') {
+    const session = getStoredSession();
+    const userId = session?.user?.id;
+    if (userId && inserted?.id) {
+      try {
+        await restFetch('user_ventures', {
+          method: 'POST',
+          body: { user_id: userId, venture_id: inserted.id, role: 'admin' },
+        });
+      } catch (e) {
+        console.warn('Falha ao vincular user à venture (user_ventures).', e);
+      }
+    }
+  }
+
   return { ...doc(db, collectionRef.table, String(inserted.id)), id: String(inserted.id) };
 };
 
 export const updateDoc = async (docRef: DocRef, payload: Record<string, any>) => {
   const params = new URLSearchParams();
   params.set('id', `eq.${docRef.id}`);
-  await restFetch(docRef.table, { method: 'PATCH', query: params, body: normalizePayload(payload) });
+  const body = normalizePayloadForTable(docRef.table, payload);
+  await restFetch(docRef.table, { method: 'PATCH', query: params, body });
 };
 
 export const setDoc = async (docRef: DocRef, payload: Record<string, any>, _options?: { merge?: boolean }) => {
-  const body = { id: docRef.id, ...normalizePayload(payload) };
-  await restFetch(docRef.table, { method: 'POST', body });
+  // UPSERT: precisa header Prefer resolution=merge-duplicates e coluna PK id
+  const body = { id: docRef.id, ...normalizePayloadForTable(docRef.table, payload) };
+  await restFetch(docRef.table, { method: 'POST', body, headers: { Prefer: 'resolution=merge-duplicates,return=representation' } });
 };
 
 export const deleteDoc = async (docRef: DocRef) => {
@@ -277,6 +498,7 @@ export const deleteDoc = async (docRef: DocRef) => {
   await restFetch(docRef.table, { method: 'DELETE', query: params });
 };
 
+// Compat Firebase Auth helpers (mantidos para o Auth.tsx)
 export const signInWithEmailAndPassword = async (_auth: typeof auth, email: string, password: string) => {
   const { data } = await auth.signInWithPassword({ email, password });
   return { user: data.user };
@@ -289,6 +511,7 @@ export const createUserWithEmailAndPassword = async (_auth: typeof auth, email: 
 
 export const signOut = async (_auth: typeof auth) => auth.signOut();
 
+// Compat Firebase onAuthStateChanged
 export const onAuthStateChanged = (_auth: typeof auth, callback: (user: User | null) => void) => {
   auth.getUser().then(({ data }) => callback(data.user ?? null));
   const { data } = auth.onAuthStateChange((_event, session) => callback(session?.user ?? null));

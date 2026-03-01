@@ -1,375 +1,342 @@
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+import React, { useMemo, useState } from 'react';
+import { Venture, Agent } from '../types';
+import { SearchIcon, PlusIcon, TrashIcon, CloudUploadIcon } from './Icon';
+import { db, collection, addDoc, Timestamp } from '../services/supabase';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Supabase env vars ausentes: VITE_SUPABASE_URL e/ou VITE_SUPABASE_ANON_KEY');
+interface VenturesViewProps {
+  ventures: Venture[];
+  agents: Agent[];
+  onAddVenture: (v: Venture) => void;
+  onRemoveVenture: (id: string) => void;
 }
 
-const AUTH_STORAGE_KEY = 'sagb_supabase_session';
-const authListeners = new Set<(event: string, session: any) => void>();
+const lc = (v: any) => String(v ?? '').toLowerCase();
+const includesCI = (hay: any, needle: any) => lc(hay).includes(lc(needle));
 
-const getStoredSession = () => {
-  if (typeof localStorage === 'undefined') return null;
-  const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch { return null; }
+const ventureName = (v: any) => String(v?.name ?? v?.brandName ?? v?.brand_name ?? v?.brand ?? '');
+const ventureLogo = (v: any) => String(v?.logo ?? v?.logoUrl ?? v?.logo_url ?? '');
+
+const asDate = (v: any) => {
+  if (!v) return new Date(0);
+  if (v instanceof Date) return v;
+  if (typeof v?.toDate === 'function') return v.toDate();
+  const d = new Date(String(v));
+  return Number.isNaN(d.getTime()) ? new Date(0) : d;
 };
 
-const setStoredSession = (session: any | null) => {
-  if (typeof localStorage === 'undefined') return;
-  if (!session) localStorage.removeItem(AUTH_STORAGE_KEY);
-  else localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-};
+const VenturesView: React.FC<VenturesViewProps> = ({ ventures, agents, onAddVenture, onRemoveVenture }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
 
-const emitAuth = (event: string, session: any) => {
-  authListeners.forEach((listener) => listener(event, session));
-};
-
-const supabaseAuthFetch = async (path: string, body?: any, accessToken?: string) => {
-  const res = await fetch(`${supabaseUrl}/auth/v1${path}`, {
-    method: body ? 'POST' : 'GET',
-    headers: {
-      apikey: supabaseAnonKey,
-      Authorization: accessToken ? `Bearer ${accessToken}` : `Bearer ${supabaseAnonKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: body ? JSON.stringify(body) : undefined
+  const [newVenture, setNewVenture] = useState<Partial<Venture>>({
+    name: '',
+    status: 'DESENVOLVIMENTO',
+    type: 'Marca',
+    statusLab: 'Pendente',
+    niche: '',
+    segment: '',
+    sphere: '',
+    url: ''
   });
 
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw { code: json?.error_code || json?.error || 'auth/error', message: json?.msg || json?.error_description || 'Erro de autenticação' };
-  }
-  return json;
-};
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
 
-const restFetch = async (table: string, options: { method?: string; query?: URLSearchParams; body?: any } = {}, accessToken?: string) => {
-  const session = getStoredSession();
-  const token = accessToken || session?.access_token;
-  const queryString = options.query ? `?${options.query.toString()}` : '';
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  const res = await fetch(`${supabaseUrl}/rest/v1/${table}${queryString}`, {
-    method: options.method || 'GET',
-    headers: {
-      apikey: supabaseAnonKey,
-      Authorization: `Bearer ${token || supabaseAnonKey}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation'
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
-
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw data;
-  return data;
-};
-
-export const auth = {
-  async signInWithPassword({ email, password }: { email: string; password: string }) {
-    const data = await supabaseAuthFetch('/token?grant_type=password', { email, password });
-    const session = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user };
-    setStoredSession(session);
-    emitAuth('SIGNED_IN', session);
-    return { data: { user: data.user, session }, error: null };
-  },
-
-  async signUp({ email, password }: { email: string; password: string }) {
-    const data = await supabaseAuthFetch('/signup', { email, password });
-    const session = data.access_token ? { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user } : null;
-    if (session) {
-      setStoredSession(session);
-      emitAuth('SIGNED_IN', session);
+    if (file.size > 300000) {
+      alert('Logo muito pesado. Use uma imagem de até 300KB.');
+      return;
     }
-    return { data: { user: data.user, session }, error: null };
-  },
 
-  async signOut() {
-    const session = getStoredSession();
-    if (session?.access_token) {
-      await fetch(`${supabaseUrl}/auth/v1/logout`, {
-        method: 'POST',
-        headers: { apikey: supabaseAnonKey, Authorization: `Bearer ${session.access_token}` }
-      }).catch(() => null);
-    }
-    setStoredSession(null);
-    emitAuth('SIGNED_OUT', null);
-    return { error: null };
-  },
-
-  async getUser() {
-    const session = getStoredSession();
-    if (!session?.access_token) return { data: { user: null }, error: null };
-    try {
-      const data = await supabaseAuthFetch('/user', undefined, session.access_token);
-      return { data: { user: data }, error: null };
-    } catch {
-      return { data: { user: session.user || null }, error: null };
-    }
-  },
-
-  onAuthStateChange(callback: (event: string, session: any) => void) {
-    authListeners.add(callback);
-    return {
-      data: {
-        subscription: {
-          unsubscribe: () => authListeners.delete(callback)
-        }
-      }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      setLogoPreview(base64);
+      setNewVenture(prev => ({ ...prev, logo: base64 }));
     };
-  }
-};
-
-export const db = { provider: 'supabase-rest' };
-export type User = Awaited<ReturnType<typeof auth.getUser>>['data']['user'];
-
-type CollectionRef = { kind: 'collection'; table: string };
-type DocRef = { kind: 'doc'; table: string; id: string };
-type QueryRef = {
-  kind: 'query';
-  table: string;
-  filters: Array<{ field: string; op: string; value: any }>;
-  order?: { field: string; direction: 'asc' | 'desc' };
-};
-
-type AnyRef = CollectionRef | DocRef | QueryRef;
-
-class Timestamp {
-  private value: Date;
-  constructor(value: Date) { this.value = value; }
-  static now() { return new Timestamp(new Date()); }
-  static fromDate(date: Date) { return new Timestamp(date); }
-  toDate() { return this.value; }
-  toJSON() { return this.value.toISOString(); }
-}
-
-const normalizePayload = (payload: Record<string, any>) => {
-  const normalized: Record<string, any> = {};
-  Object.entries(payload).forEach(([key, value]) => {
-    if (value === undefined) return;
-    if (value instanceof Timestamp) normalized[key] = value.toDate().toISOString();
-    else normalized[key] = value;
-  });
-  return normalized;
-};
-
-const convertTimestamps = (record: Record<string, any>) => {
-  const out: Record<string, any> = { ...record };
-  Object.entries(out).forEach(([key, value]) => {
-    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
-      const date = new Date(value);
-      if (!Number.isNaN(date.getTime())) out[key] = Timestamp.fromDate(date);
-    }
-  });
-  return out;
-};
-const normalizeRecordForTable = (table: string, record: Record<string, any>) => {
-  const r: Record<string, any> = { ...record };
-
-  // Common: tolerate snake_case vs camelCase and ensure frequently used string fields exist.
-  const pick = (...keys: string[]) => {
-    for (const k of keys) {
-      const v = r[k];
-      if (v !== undefined && v !== null) return v;
-    }
-    return undefined;
+    reader.readAsDataURL(file);
   };
 
-  if (table === 'ventures') {
-    r.name = pick('name', 'brandName', 'brand_name', 'brand', 'title') ?? '';
-    r.brandName = pick('brandName', 'brand_name', 'name') ?? r.name;
+  const handleSave = async () => {
+    if (!newVenture.name || !newVenture.logo) {
+      alert('Nome e Logo são obrigatórios para registrar uma Venture.');
+      return;
+    }
 
-    // Logo
-    r.logo = pick('logo', 'logoUrl', 'logo_url') ?? null;
-    r.logoUrl = pick('logoUrl', 'logo_url', 'logo') ?? r.logo;
-
-    // Initiative / Type
-    r.type = pick('type', 'initiative') ?? 'Marca';
-    r.initiative = pick('initiative', 'type') ?? r.type;
-
-    // Lab status
-    r.statusLab = pick('statusLab', 'labStatus', 'lab_status') ?? 'Pendente';
-    r.labStatus = pick('labStatus', 'lab_status', 'statusLab') ?? r.statusLab;
-
-    // Other fields
-    r.status = pick('status') ?? 'DESENVOLVIMENTO';
-    r.niche = pick('niche') ?? '';
-    r.segment = pick('segment') ?? '';
-    r.sphere = pick('sphere') ?? '';
-    r.url = pick('url') ?? '';
-  }
-
-  if (table === 'agents') {
-    r.name = pick('name', 'agentName', 'title') ?? '';
-    r.officialRole = pick('officialRole', 'role', 'role_name') ?? '';
-    r.role = pick('role', 'officialRole') ?? r.officialRole;
-  }
-
-  if (table === 'users') {
-    r.email = pick('email') ?? '';
-    r.displayName = pick('display_name', 'displayName', 'name') ?? '';
-    r.role = pick('role') ?? 'member';
-    r.roleName = pick('roleName', 'role_name', 'role') ?? r.role;
-  }
-
-  return r;
-};
-
-const normalizePayloadForTable = (table: string, payload: Record<string, any>) => {
-  const p: Record<string, any> = normalizePayload(payload);
-
-  const del = (...keys: string[]) => keys.forEach((k) => { if (k in p) delete p[k]; });
-
-  // Remove Firestore-only or generated fields that cannot be inserted/updated directly in SQL tables
-  del('id', 'createdAt', 'updatedAt', 'timestamp');
-
-  if (table === 'ventures') {
-    // Map UI keys to DB columns
-    if (p.name !== undefined && p.brand_name === undefined) { p.brand_name = p.name; }
-    if (p.logo !== undefined && p.logo_url === undefined) { p.logo_url = p.logo; }
-    if (p.type !== undefined && p.initiative === undefined) { p.initiative = p.type; }
-    if (p.statusLab !== undefined && p.lab_status === undefined) { p.lab_status = p.statusLab; }
-
-    // Clean up UI-only keys that don't exist as columns
-    del('name', 'brandName', 'logo', 'logoUrl', 'type', 'statusLab', 'labStatus');
-  }
-
-  if (table === 'users') {
-    // Ensure profiles can be updated without touching auth.users
-    if (p.displayName !== undefined && p.display_name === undefined) { p.display_name = p.displayName; }
-    del('displayName');
-  }
-
-  return p;
-};
-
-
-export const collection = (_db: typeof db, table: string): CollectionRef => ({ kind: 'collection', table });
-export const doc = (_dbOrCollection: typeof db | CollectionRef, tableOrId: string, id?: string): DocRef => {
-  if (id) return { kind: 'doc', table: tableOrId, id };
-  const collectionRef = _dbOrCollection as CollectionRef;
-  return { kind: 'doc', table: collectionRef.table, id: tableOrId };
-};
-
-export const orderBy = (field: string, direction: 'asc' | 'desc' = 'asc') => ({ type: 'orderBy' as const, field, direction });
-export const where = (field: string, op: string, value: any) => ({ type: 'where' as const, field, op, value });
-
-export const query = (collectionRef: CollectionRef, ...constraints: Array<ReturnType<typeof orderBy> | ReturnType<typeof where>>): QueryRef => {
-  const queryRef: QueryRef = { kind: 'query', table: collectionRef.table, filters: [] };
-  constraints.forEach((constraint) => {
-    if (constraint.type === 'orderBy') queryRef.order = { field: constraint.field, direction: constraint.direction };
-    if (constraint.type === 'where') queryRef.filters.push({ field: constraint.field, op: constraint.op, value: constraint.value });
-  });
-  return queryRef;
-};
-
-const runQuery = async (ref: CollectionRef | QueryRef) => {
-  const params = new URLSearchParams();
-  params.set('select', '*');
-
-  if (ref.kind === 'query') {
-    ref.filters.forEach((f) => {
-      const opMap: Record<string, string> = { '==': 'eq', '!=': 'neq', '>': 'gt', '>=': 'gte', '<': 'lt', '<=': 'lte' };
-      params.set(f.field, `${opMap[f.op] || 'eq'}.${String(f.value)}`);
-    });
-
-    if (ref.order) params.set('order', `${ref.order.field}.${ref.order.direction}`);
-  }
-
-  return restFetch(ref.table, { method: 'GET', query: params });
-};
-
-const buildCollectionSnapshot = (records: any[], table?: string) => ({ docs: records.map((record) => ({ id: String(record.id), data: () => (table ? normalizeRecordForTable(table, convertTimestamps(record)) : convertTimestamps(record)) })) });
-const buildDocSnapshot = (record: any | null, table?: string) => ({ exists: () => Boolean(record), data: () => (record ? (table ? normalizeRecordForTable(table, convertTimestamps(record)) : convertTimestamps(record)) : undefined) });
-
-export const onSnapshot = (ref: AnyRef, callback: (snapshot: any) => void, onError?: (error: any) => void) => {
-  let active = true;
-
-  const emit = async () => {
     try {
-      if (!active) return;
-      if (ref.kind === 'doc') {
-        const params = new URLSearchParams();
-        params.set('select', '*');
-        params.set('id', `eq.${ref.id}`);
-        const rows = await restFetch(ref.table, { method: 'GET', query: params });
-        callback(buildDocSnapshot(rows?.[0] || null, ref.table));
-      } else {
-        const rows = await runQuery(ref);
-        callback(buildCollectionSnapshot(rows || [], ref.table));
-      }
-    } catch (error) {
-      if (onError) onError(error);
-      else console.error(error);
+      const ventureData = {
+        ...newVenture,
+        timestamp: Timestamp.fromDate(new Date())
+      } as any;
+
+      const docRef = await addDoc(collection(db, 'ventures'), ventureData);
+
+      // Atualiza state local rapidamente (o onSnapshot do App vai sincronizar depois)
+      onAddVenture({
+        ...(ventureData as Venture),
+        id: docRef.id,
+        timestamp: new Date()
+      });
+
+      setIsAdding(false);
+      setNewVenture({ name: '', status: 'DESENVOLVIMENTO', type: 'Marca', statusLab: 'Pendente', url: '' });
+      setLogoPreview(null);
+    } catch (e) {
+      console.error('Error saving venture:', e);
+      alert('Erro ao salvar Venture no banco de dados.');
     }
   };
 
-  emit();
-  const timer = setInterval(emit, 5000);
+  const filteredVentures = useMemo(() => {
+    const list = (ventures || []).filter(v => includesCI(ventureName(v), searchTerm));
+    return list.sort((a, b) => asDate(b.timestamp).getTime() - asDate(a.timestamp).getTime());
+  }, [ventures, searchTerm]);
 
-  return () => {
-    active = false;
-    clearInterval(timer);
+  const colWidths = {
+    logo: 'w-20',
+    name: 'flex-1',
+    status: 'w-32',
+    type: 'w-28',
+    statusLab: 'w-32',
+    niche: 'w-32',
+    segment: 'w-32',
+    sphere: 'w-28',
+    url: 'w-10',
+    actions: 'w-12'
   };
-};
 
-export const addDoc = async (collectionRef: CollectionRef, payload: Record<string, any>) => {
-  const body = normalizePayloadForTable(collectionRef.table, payload);
-  const data = await restFetch(collectionRef.table, { method: 'POST', body });
-  const inserted = Array.isArray(data) ? data[0] : data;
+  return (
+    <div className="flex-1 h-full bg-white flex flex-col font-nunito overflow-hidden">
+      <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-6 shrink-0 z-20">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-lg">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="text-sm font-black text-gray-800 uppercase tracking-tight">Hub de Ventures</h1>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Painel de Controle de Marcas e Projetos</p>
+          </div>
+        </div>
 
-  // Conveniência: ao criar uma venture, já vincula o usuário atual como admin nela
-  if (collectionRef.table === 'ventures') {
-    const session = getStoredSession();
-    const userId = session?.user?.id;
-    if (userId && inserted?.id) {
-      try {
-        await restFetch('user_ventures', {
-          method: 'POST',
-          body: { user_id: userId, venture_id: inserted.id, role: 'admin' },
-        });
-      } catch (e) {
-        console.warn('Falha ao vincular usuário à venture recém-criada (user_ventures).', e);
-      }
-    }
-  }
+        <div className="flex items-center gap-3">
+          <div className="flex items-center bg-gray-50 border border-transparent hover:border-gray-200 rounded-lg px-2 py-1.5 w-48 transition-all group">
+            <SearchIcon className="w-3.5 h-3.5 text-gray-400 group-hover:text-gray-600" />
+            <input
+              type="text"
+              placeholder="Buscar marca..."
+              className="bg-transparent text-xs font-medium text-gray-700 outline-none w-full ml-2 placeholder:text-gray-400"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
 
-  return { ...doc(db, collectionRef.table, String(inserted.id)), id: String(inserted.id) };
-};
+          <button
+            onClick={() => setIsAdding(true)}
+            className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase hover:bg-indigo-700 transition-all flex items-center gap-1 shadow-md"
+          >
+            Nova Venture <PlusIcon className="w-3 h-3 ml-1 text-white/50" />
+          </button>
+        </div>
+      </header>
 
-export const updateDoc = async (docRef: DocRef, payload: Record<string, any>) => {
-  const params = new URLSearchParams();
-  params.set('id', `eq.${docRef.id}`);
-  await restFetch(docRef.table, { method: 'PATCH', query: params, body: normalizePayload(payload) });
-};
+      <div className="flex items-center px-6 h-10 border-b border-gray-100 bg-gray-50/50 text-[9px] font-bold text-gray-400 uppercase tracking-widest shrink-0">
+        <div className={`${colWidths.logo} px-2`}>Logo</div>
+        <div className={`${colWidths.name} px-2`}>Nome da Marca</div>
+        <div className={`${colWidths.status} px-2`}>Status</div>
+        <div className={`${colWidths.type} px-2`}>Iniciativa</div>
+        <div className={`${colWidths.statusLab} px-2`}>Status Lab</div>
+        <div className={`${colWidths.niche} px-2`}>Nicho</div>
+        <div className={`${colWidths.segment} px-2`}>Segmento</div>
+        <div className={`${colWidths.sphere} px-2`}>Esfera</div>
+        <div className={`${colWidths.actions} text-center`}>#</div>
+      </div>
 
-export const setDoc = async (docRef: DocRef, payload: Record<string, any>, _options?: { merge?: boolean }) => {
-  const body = { id: docRef.id, ...normalizePayload(payload) };
-  await restFetch(docRef.table, { method: 'POST', body });
-};
+      <div className="flex-1 overflow-y-auto custom-scrollbar bg-white">
+        {isAdding && (
+          <div className="flex items-center px-6 py-4 border-b border-indigo-100 bg-indigo-50/20 animate-msg gap-2">
+            <div className={`${colWidths.logo} px-2`}>
+              <label className="w-10 h-10 border-2 border-dashed border-indigo-200 rounded-lg flex items-center justify-center cursor-pointer hover:bg-white transition-all overflow-hidden bg-white shadow-sm group">
+                {logoPreview ? (
+                  <img src={logoPreview} className="w-full h-full object-contain" alt="Logo preview" />
+                ) : (
+                  <CloudUploadIcon className="w-4 h-4 text-indigo-300 group-hover:text-indigo-500" />
+                )}
+                <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} />
+              </label>
+            </div>
 
-export const deleteDoc = async (docRef: DocRef) => {
-  const params = new URLSearchParams();
-  params.set('id', `eq.${docRef.id}`);
-  await restFetch(docRef.table, { method: 'DELETE', query: params });
-};
+            <div className={`${colWidths.name} px-2`}>
+              <input
+                autoFocus
+                className="w-full bg-white border border-indigo-200 rounded px-2 py-1.5 text-[11px] font-bold outline-none focus:ring-2 focus:ring-indigo-400 shadow-sm"
+                placeholder="Nome da Venture..."
+                value={newVenture.name || ''}
+                onChange={e => setNewVenture({ ...newVenture, name: e.target.value })}
+              />
+            </div>
 
-export const signInWithEmailAndPassword = async (_auth: typeof auth, email: string, password: string) => {
-  const { data } = await auth.signInWithPassword({ email, password });
-  return { user: data.user };
-};
+            <div className={`${colWidths.status} px-2`}>
+              <select
+                className="w-full bg-white border border-indigo-200 rounded px-2 py-1 text-[10px] font-black outline-none"
+                value={newVenture.status}
+                onChange={e => setNewVenture({ ...newVenture, status: e.target.value as any })}
+              >
+                <option>IDEIA</option>
+                <option>DESENVOLVIMENTO</option>
+                <option>APROVADO</option>
+              </select>
+            </div>
 
-export const createUserWithEmailAndPassword = async (_auth: typeof auth, email: string, password: string) => {
-  const { data } = await auth.signUp({ email, password });
-  return { user: data.user };
-};
+            <div className={`${colWidths.type} px-2`}>
+              <select
+                className="w-full bg-white border border-indigo-200 rounded px-2 py-1 text-[10px] outline-none"
+                value={newVenture.type}
+                onChange={e => setNewVenture({ ...newVenture, type: e.target.value as any })}
+              >
+                <option>Marca</option>
+                <option>Projeto</option>
+              </select>
+            </div>
 
-export const signOut = async (_auth: typeof auth) => auth.signOut();
+            <div className={`${colWidths.statusLab} px-2`}>
+              <select
+                className="w-full bg-white border border-indigo-200 rounded px-2 py-1 text-[10px] outline-none"
+                value={newVenture.statusLab}
+                onChange={e => setNewVenture({ ...newVenture, statusLab: e.target.value as any })}
+              >
+                <option>Pendente</option>
+                <option>Validado</option>
+                <option>Próximo Teste</option>
+              </select>
+            </div>
 
-export const onAuthStateChanged = (_auth: typeof auth, callback: (user: User | null) => void) => {
-  auth.getUser().then(({ data }) => callback(data.user ?? null));
-  const { data } = auth.onAuthStateChange((_event, session) => callback(session?.user ?? null));
-  return () => data.subscription.unsubscribe();
+            <div className={`${colWidths.niche} px-2`}>
+              <input
+                className="w-full bg-white border border-indigo-200 rounded px-2 py-1 text-[10px] outline-none"
+                placeholder="Nicho..."
+                value={newVenture.niche || ''}
+                onChange={e => setNewVenture({ ...newVenture, niche: e.target.value })}
+              />
+            </div>
+
+            <div className={`${colWidths.segment} px-2`}>
+              <input
+                className="w-full bg-white border border-indigo-200 rounded px-2 py-1 text-[10px] outline-none"
+                placeholder="Segmento..."
+                value={newVenture.segment || ''}
+                onChange={e => setNewVenture({ ...newVenture, segment: e.target.value })}
+              />
+            </div>
+
+            <div className={`${colWidths.sphere} px-2`}>
+              <input
+                className="w-full bg-white border border-indigo-200 rounded px-2 py-1 text-[10px] outline-none"
+                placeholder="Esfera..."
+                value={newVenture.sphere || ''}
+                onChange={e => setNewVenture({ ...newVenture, sphere: e.target.value })}
+              />
+            </div>
+
+            <div className={`${colWidths.url} px-2`}>
+              <input
+                className="w-full bg-white border border-indigo-200 rounded px-2 py-1 text-[10px] outline-none"
+                placeholder="https://..."
+                value={newVenture.url || ''}
+                onChange={e => setNewVenture({ ...newVenture, url: e.target.value })}
+              />
+            </div>
+
+            <div className={`${colWidths.actions} flex justify-center gap-2`}>
+              <button onClick={handleSave} className="bg-green-500 text-white px-3 py-1 rounded text-[10px] font-black hover:bg-green-600 shadow-sm">SALVAR</button>
+              <button onClick={() => setIsAdding(false)} className="bg-gray-100 text-gray-500 px-3 py-1 rounded text-[10px] font-black hover:bg-gray-200 shadow-sm">X</button>
+            </div>
+          </div>
+        )}
+
+        {filteredVentures.length === 0 && !isAdding ? (
+          <div className="flex flex-col items-center justify-center h-64 opacity-30">
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest text-center px-10">
+              Nenhuma Venture registrada.<br />Use o botão + para começar a organizar seu ecossistema.
+            </p>
+          </div>
+        ) : (
+          filteredVentures.map(venture => {
+            const name = ventureName(venture) || 'Sem nome';
+            const logo = ventureLogo(venture);
+            const agentCount = (agents || []).filter(a => a.ventureId === venture.id).length;
+
+            return (
+              <div key={venture.id} className="group flex items-center px-6 py-4 border-b border-gray-50 hover:bg-indigo-50/10 transition-all h-16 animate-msg">
+                <div className={`${colWidths.logo} px-2`}>
+                  <div className="w-10 h-10 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center p-1.5 overflow-hidden shadow-sm">
+                    {logo ? (
+                      <img src={logo} alt={name} className="w-full h-full object-contain" />
+                    ) : (
+                      <div className="text-[9px] font-black text-gray-400">--</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className={`${colWidths.name} px-2 min-w-0`}>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-xs font-black text-gray-800 tracking-tight uppercase truncate">{name}</span>
+                    <span className="text-[8px] bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded font-black uppercase tracking-widest border border-indigo-100">
+                      {agentCount} Agentes
+                    </span>
+                  </div>
+                  <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest truncate">{venture.segment || 'Segmento não definido'}</p>
+                </div>
+
+                <div className={`${colWidths.status} px-2`}>
+                  <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest text-center block ${
+                    venture.status === 'APROVADO' ? 'bg-green-100 text-green-700'
+                      : venture.status === 'DESENVOLVIMENTO' ? 'bg-amber-100 text-amber-700'
+                      : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {venture.status}
+                  </span>
+                </div>
+
+                <div className={`${colWidths.type} px-2`}>
+                  <span className="text-[9px] font-black bg-purple-100 text-purple-700 px-2 py-1 rounded uppercase tracking-tighter block text-center">
+                    {venture.type}
+                  </span>
+                </div>
+
+                <div className={`${colWidths.statusLab} px-2`}>
+                  <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest text-center block border ${
+                    venture.statusLab === 'Validado' ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                      : venture.statusLab === 'Próximo Teste' ? 'bg-orange-50 text-orange-600 border-orange-100'
+                      : 'bg-gray-50 text-gray-400 border-gray-100'
+                  }`}>
+                    {venture.statusLab}
+                  </span>
+                </div>
+
+                <div className={`${colWidths.niche} px-2 text-[10px] font-bold text-gray-600 truncate`}>{venture.niche || '--'}</div>
+                <div className={`${colWidths.segment} px-2 text-[10px] font-bold text-gray-600 truncate`}>{venture.segment || '--'}</div>
+                <div className={`${colWidths.sphere} px-2 text-[10px] font-black text-gray-400 uppercase tracking-widest truncate`}>{venture.sphere || '--'}</div>
+
+                <div className={`${colWidths.actions} flex justify-center opacity-0 group-hover:opacity-100 transition-opacity`}>
+                  <button
+                    onClick={() => onRemoveVenture(venture.id)}
+                    className="text-gray-300 hover:text-red-500 transition-colors p-2"
+                    title="Remover Venture"
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
 };
 
 export default VenturesView;
