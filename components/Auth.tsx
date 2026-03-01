@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { auth, db, doc, setDoc, signInWithEmailAndPassword, createUserWithEmailAndPassword } from '../services/firebase';
+import { auth, db, doc, setDoc, signInWithEmailAndPassword, createUserWithEmailAndPassword } from '../services/supabase';
 import { SendIcon } from './Icon';
 
 interface AuthProps {
@@ -41,7 +41,7 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
 
-                // CRIAR PERFIL NO FIRESTORE
+                // CRIAR PERFIL NO BANCO DE DADOS
                 const rawUserProfile = {
                     uid: user.uid,
                     email: user.email || '',
@@ -69,7 +69,7 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
             else if (err.code === 'auth/email-already-in-use') setError('Este e-mail já está em uso.');
             else if (err.code === 'auth/weak-password') setError('A senha deve ter pelo menos 6 caracteres.');
             else if (err.code === 'auth/configuration-not-found') setError('Configuração não encontrada. Newton, você REALMENTE ativou a "Identity Toolkit API" no Google Cloud Library para este projeto?');
-            else setError(`Erro ao autenticar (${err.code}). Verifique sua conexão e se o login por e-mail está ativo no Firebase.`);
+            else setError(`Erro ao autenticar (${err.code}). Verifique sua conexão e se o login por e-mail está ativo no Supabase.`);
         } finally {
             setLoading(false);
         }
@@ -88,6 +88,11 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                     <p className="text-gray-400 text-xs font-bold uppercase tracking-[0.2em]">
                         {isLogin ? 'Painel de Gestão Estratégica' : 'Cadastre-se para acessar o ecossistema'}
                     </p>
+                    {isLogin && (
+                        <span className="mt-3 inline-flex rounded-full bg-violet-100 text-violet-700 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em]">
+                            GERAC
+                        </span>
+                    )}
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">

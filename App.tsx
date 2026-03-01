@@ -33,8 +33,8 @@ import {
 } from './services/gemini';
 import { MASTER_AGENTS_LIST } from './data/agents';
 import metadata from './metadata.json';
-import { db, auth, onAuthStateChanged, signOut, User } from './services/firebase';
-import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, query, where, orderBy, Timestamp } from 'firebase/firestore';
+import { db, auth, onAuthStateChanged, signOut, User } from './services/supabase';
+import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, query, where, orderBy, Timestamp } from './services/supabase';
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
 //const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
@@ -52,9 +52,9 @@ const STORAGE_KEYS = {
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
 
-// IMAGENS ESTÁVEIS (ATUALIZADAS V5.3 - FIREBASE LINKS)
-const PIETRO_IMAGE = "https://firebasestorage.googleapis.com/v0/b/sagb-grupob-v1.firebasestorage.app/o/Douglas%20Rodrigues%2FPietro%20Carboni%20Foto%20Avatar.png?alt=media&token=082e13ca-7cc8-4316-bd9e-24af3b08deb2";
-const DOUGLAS_IMAGE = "https://firebasestorage.googleapis.com/v0/b/sagb-grupob-v1.firebasestorage.app/o/Douglas%20Rodrigues%2FScreenshot_79.png?alt=media&token=1b6c2884-ae4d-49de-9d03-f0a38e0cfc27";
+// IMAGENS ESTÁVEIS (ATUALIZADAS V5.3 - CDN LINKS)
+const PIETRO_IMAGE = "https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&q=80&w=200&h=200";
+const DOUGLAS_IMAGE = "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&q=80&w=200&h=200";
 const CASSIO_IMAGE = "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=200&h=200";
 
 const INITIAL_BUSINESS_UNITS: BusinessUnit[] = [
@@ -245,7 +245,7 @@ const App: React.FC = () => {
   // V1.7.8 - Governance Deep Link State
   const [governanceTargetId, setGovernanceTargetId] = useState<string | null>(null);
 
-  // --- VERIFICAÇÃO DE LOGIN FIREBASE ---
+  // --- VERIFICAÇÃO DE LOGIN SUPABASE ---
   useEffect(() => {
     let unsubscribeProfile: (() => void) | undefined;
     let unsubscribeTopics: (() => void) | undefined;
@@ -256,7 +256,7 @@ const App: React.FC = () => {
       setUser(currentUser);
 
       if (currentUser) {
-        // Buscar perfil no Firestore em tempo real
+        // Buscar perfil no banco de dados em tempo real
         unsubscribeProfile = onSnapshot(doc(db, "users", currentUser.uid), (snapshot) => {
           if (snapshot.exists()) {
             setUserProfile(snapshot.data() as UserProfile);
@@ -447,7 +447,7 @@ const App: React.FC = () => {
       await addDoc(collection(db, "topics"), newTopic);
     } catch (e) {
       console.error("Error adding topic:", e);
-      alert("Erro ao salvar pauta no Firestore.");
+      alert("Erro ao salvar pauta no banco de dados.");
     }
   };
 
@@ -659,25 +659,25 @@ const App: React.FC = () => {
     }
   }, [activeBU]);
 
-  // --- FIRESTORE SYNC (SUBSTITUI LOCALSTORAGE PARA AGENTES) ---
+  // --- DATABASE SYNC (SUBSTITUI LOCALSTORAGE PARA AGENTES) ---
   useEffect(() => {
-    // Carrega agentes SOMENTE do Firestore (Fonte da Verdade)
+    // Carrega agentes SOMENTE do banco de dados (Fonte da Verdade)
     const unsubscribe = onSnapshot(collection(db, 'agents'), (snapshot) => {
-      const firestoreAgents = snapshot.docs.map(doc => ({
+      const remoteAgents = snapshot.docs.map(doc => ({
         ...doc.data(),
         id: doc.id
       })) as Agent[];
 
-      setActivatedAgents(firestoreAgents);
+      setActivatedAgents(remoteAgents);
     }, (error) => {
-      console.error("Erro ao conectar no Firestore:", error);
+      console.error("Erro ao conectar no banco de dados:", error);
     });
 
     return () => unsubscribe();
   }, []);
 
   // --- SAVE STATE ---
-  // --- SAVE STATE (LOCALSTORAGE REMOVIDO PARA AGENTES - AGORA É FIRESTORE) ---
+  // --- SAVE STATE (LOCALSTORAGE REMOVIDO PARA AGENTES - AGORA É BANCO REMOTO) ---
   // useEffect(() => { localStorage.setItem(STORAGE_KEYS.AGENTS, JSON.stringify(activatedAgents)); }, [activatedAgents]); 
 
   useEffect(() => { localStorage.setItem(STORAGE_KEYS.CHAT, JSON.stringify(messages)); }, [messages]);
@@ -949,7 +949,7 @@ const App: React.FC = () => {
   const safeBU = activeBU || INITIAL_BUSINESS_UNITS[0];
 
   return (
-    <div className="flex h-screen bg-white font-nunito text-bitrix-text overflow-hidden">
+    <div className="flex h-screen bg-violet-200 font-nunito text-bitrix-text overflow-hidden">
       {!isImmersiveMode && (
         <Sidebar
           activeTab={activeTab}
@@ -962,7 +962,7 @@ const App: React.FC = () => {
           userProfile={userProfile}
         />
       )}
-      <main className="flex-1 flex flex-col overflow-hidden relative bg-[#F9FAFB]">{renderContent()}</main>
+      <main className="flex-1 flex flex-col overflow-hidden relative bg-violet-100">{renderContent()}</main>
     </div>
   );
 };

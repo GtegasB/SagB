@@ -1,4 +1,8 @@
+<<<<<<< ours
 ﻿name: Build and Deploy (GitHub Pages)
+=======
+name: Build (Supabase stack)
+>>>>>>> theirs
 
 on:
   pull_request:
@@ -9,12 +13,15 @@ on:
 
 permissions:
   contents: read
+<<<<<<< ours
   pages: write
   id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
+=======
+>>>>>>> theirs
 
 jobs:
   build:
@@ -37,6 +44,7 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+<<<<<<< ours
         run: npm run build
 
       - name: Upload artifact
@@ -56,3 +64,13 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+=======
+          VITE_DEEPSEEK_API_KEY: ${{ secrets.VITE_DEEPSEEK_API_KEY }}
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: ./dist
+>>>>>>> theirs

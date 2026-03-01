@@ -42,7 +42,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         name: userProfile?.name || "Douglas Rodrigues",
         nickname: userProfile?.nickname || userProfile?.name?.split(' ')[0] || "Rodrigues",
         role: userProfile?.role || "Chairman",
-        avatar: userProfile?.avatarUrl || "https://firebasestorage.googleapis.com/v0/b/sagb-grupob-v1.firebasestorage.app/o/Douglas%20Rodrigues%2FScreenshot_79.png?alt=media&token=1b6c2884-ae4d-49de-9d03-f0a38e0cfc27"
+        avatar: userProfile?.avatarUrl || "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&q=80&w=200&h=200"
     }), [userProfile]);
 
     const HUMAN_GREETINGS = [

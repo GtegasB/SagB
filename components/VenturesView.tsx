@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Venture, Agent } from '../types';
 import { Avatar } from './Avatar';
 import { SearchIcon, PlusIcon, TrashIcon, CloudUploadIcon, XIcon } from './Icon';
-import { db, collection, addDoc, deleteDoc, doc, Timestamp } from '../services/firebase';
+import { db, collection, addDoc, deleteDoc, doc, Timestamp } from '../services/supabase';
 
 interface VenturesViewProps {
     ventures: Venture[];
@@ -65,7 +65,7 @@ const VenturesView: React.FC<VenturesViewProps> = ({ ventures, agents, onAddVent
             setLogoPreview(null);
         } catch (e) {
             console.error("Error saving venture:", e);
-            alert("Erro ao salvar Venture no Firestore.");
+            alert("Erro ao salvar Venture no banco de dados.");
         }
     };
 

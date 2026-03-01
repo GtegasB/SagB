@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Agent, BusinessUnit, AgentStatus, AgentTier, ModelProvider, Venture } from '../types';
 import { Avatar } from './Avatar';
 import { PaperclipIcon, PlusIcon, SearchIcon, ChevronDownIcon, XIcon, TrashIcon, PencilIcon, CloudUploadIcon, BotIcon, BackIcon } from './Icon';
-import { db, auth } from '../services/firebase';
-import { collection, addDoc, updateDoc, doc, setDoc, Timestamp } from 'firebase/firestore';
+import { db, auth } from '../services/supabase';
+import { collection, addDoc, updateDoc, doc, setDoc, Timestamp } from '../services/supabase';
 
 interface AgentFactoryProps {
     onNavigateToEcosystem: () => void;
@@ -115,7 +115,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                 (payload[key] === undefined || payload[key] === null) && delete payload[key]
             );
 
-            // SALVAMENTO NO FIRESTORE (Cria coleção automaticamente se não existir)
+            // SALVAMENTO NO BANCO DE DADOS (Cria coleção automaticamente se não existir)
             await setDoc(doc(db, "agents", agentId), payload, { merge: true });
 
             // Sucesso
@@ -295,7 +295,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         // VERIFICAÇÃO DE TAMANHO DA IMAGEM (V1.5.0 - Rigidez Total)
         const photoLimit = 400000; // 400KB
         if ((newAgent.avatarUrl?.length || 0) > photoLimit || (newAgent.ambientPhotoUrl?.length || 0) > photoLimit) {
-            alert(`⚠️ ESCALA EXCEDIDA: Uma das imagens é muito pesada (>400KB). \n\nO Firestore tem um limite total de 1MB por agente. Por favor, use imagens menores ou comprimas.`);
+            alert(`⚠️ ESCALA EXCEDIDA: Uma das imagens é muito pesada (>400KB). \n\nO banco de dados tem um limite total de 1MB por agente. Por favor, use imagens menores ou comprimas.`);
             return;
         }
 
@@ -319,7 +319,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
             ? agents.find(a => a.id === editingId)?.universalId
             : generateAutoId();
 
-        // LIMPEZA DE PAYLOAD: O Firestore não aceita valores 'undefined'
+        // LIMPEZA DE PAYLOAD: O banco de dados não aceita valores 'undefined'
         const rawPayload = {
             ...newAgent,
             company: selectedBU ? selectedBU.name : 'GrupoB',
@@ -331,14 +331,14 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
             active: true
         };
 
-        // Remove undefined and null fields to avoid Firestore 'invalid-argument'
+        // Remove undefined and null fields to avoid banco de dados 'invalid-argument'
         const payload = Object.fromEntries(
             Object.entries(rawPayload).filter(([_, v]) => v !== undefined && v !== null)
         );
 
-        console.log("DEBUG: Payload Preparado para Firestore:", payload);
+        console.log("DEBUG: Payload Preparado para banco de dados:", payload);
 
-        // --- FIREBASE INTEGRATION (COM TIMEOUT PARA OFFLINE MODE) ---
+        // --- SUPABASE INTEGRATION (COM TIMEOUT PARA OFFLINE MODE) ---
         try {
             // Validação de Autenticação antes de salvar
             if (!auth.currentUser) {
@@ -348,36 +348,36 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
             }
 
             // Promise wrapper para forçar timeout de 10 segundos
-            const saveToFirestore = async () => {
+            const saveToDatabase = async () => {
                 try {
                     if (editingId) {
                         await updateDoc(doc(db, "agents", editingId), payload);
-                        alert("✅ Agente atualizado com sucesso no Firestore!");
+                        alert("✅ Agente atualizado com sucesso no banco de dados!");
                     } else {
                         console.log("Tentando criar agente em 'agents'...", payload);
                         const docRef = await addDoc(collection(db, "agents"), payload);
-                        alert(`✅ Sucesso! Agente criado no Firestore.\nID: ${docRef.id}\nColeção: agents`);
+                        alert(`✅ Sucesso! Agente criado no banco de dados.\nID: ${docRef.id}\nColeção: agents`);
                         await updateDoc(docRef, { id: docRef.id });
                         payload.id = docRef.id;
                     }
                 } catch (e: any) {
-                    console.error("Firestore Save Error:", e);
+                    console.error("banco de dados Save Error:", e);
                     throw e; // Repassa para o catch externo
                 }
             };
 
             // V1.5.0 - Removido Promise.race para evitar silenciar erros reais e facilitar debug no Mac
-            await saveToFirestore();
+            await saveToDatabase();
 
         } catch (error: any) {
-            console.error("Firestore Info:", error);
+            console.error("banco de dados Info:", error);
             if (error.message === "TIMEOUT") {
                 // SUCESSO OFFLINE: Se demorar, assume que salvou localmente (Persistence cuida do resto)
                 console.warn("Salvando em modo Offline (Timeout)");
                 alert("⚠️ Conexão lenta: Seu agente foi salvo no dispositivo e será sincronizado assim que possível.");
             }
             else {
-                console.error("Erro Crítico Firestore:", error);
+                console.error("Erro Crítico banco de dados:", error);
                 alert(`Erro ao salvar no banco de dados (${error.code || error.message}). Verifique as permissões com o Newton.`);
                 setIsSaving(false);
                 return; // Bloqueia se der erro real

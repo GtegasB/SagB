@@ -38,7 +38,9 @@ O sistema opera sob o conceito de **"Cluster View"**, permitindo visão orbital 
 3.  **Configure as Variáveis de Ambiente**
     Crie um arquivo `.env` na raiz e adicione suas chaves (não inclusas no repo por segurança):
     ```env
-    VITE_GOOGLE_API_KEY=sua_chave_aqui
+    VITE_SUPABASE_URL=https://seu-projeto.supabase.co
+    VITE_SUPABASE_ANON_KEY=sua_chave_anon_aqui
+    VITE_GEMINI_API_KEY=sua_chave_aqui
     VITE_DEEPSEEK_API_KEY=sua_chave_aqui
     ```
 
@@ -58,7 +60,39 @@ Certos módulos possuem "Golden Seal" e não devem ter sua lógica alterada sem 
 *   **Frontend:** React 18+, TypeScript, TailwindCSS.
 *   **AI Core:** Google GenAI SDK (Gemini 2.0 Flash Exp) & DeepSeek API (V3).
 *   **Build:** Vite.
-*   **Deploy:** Firebase Hosting (configurado).
+*   **Deploy:** Netlify (integração nativa recomendada) + GitHub Actions (backup opcional).
 
 ---
 *Desenvolvido pela Arquitetura de Sistemas GrupoB.*
+
+
+## 🚀 Deploy (Netlify)
+
+### Opção 1 — Integração nativa da Netlify (recomendado)
+1. Na Netlify, clique em **Add new site > Import an existing project** e conecte este repositório.
+2. Configure:
+   - **Build command:** `npm run build`
+   - **Publish directory:** `dist`
+3. Em **Site configuration > Environment variables**, adicione:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_GEMINI_API_KEY`
+   - `VITE_DEEPSEEK_API_KEY`
+4. Faça deploy.
+
+Depois da primeira configuração, os próximos deploys são automáticos a cada `push` na branch publicada (normalmente `main`).
+
+O arquivo `netlify.toml` já inclui build/publish e redirect SPA (`/* -> /index.html`).
+
+### Opção 2 — Backup via GitHub Actions
+Existe também um workflow de deploy na Netlify via Actions (`.github/workflows/netlify-deploy.yml`):
+- PR: gera preview deploy
+- push em `main`: deploy de produção
+
+Secrets necessários no GitHub Actions:
+- `NETLIFY_AUTH_TOKEN`
+- `NETLIFY_SITE_ID`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_GEMINI_API_KEY`
+- `VITE_DEEPSEEK_API_KEY`
