@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { GenerateContentResponse } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 import { SendIcon, MicIcon, StopCircleIcon, PaperclipIcon, XIcon, FileTextIcon } from './components/Icon';
@@ -18,7 +18,7 @@ import GovernanceView from './components/GovernanceView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView';
 import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
-import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, Venture, BusinessUnit, BusinessBlueprint, AgentTier, AgentStatus, Task, UserProfile } from './types';
+import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, Venture, BusinessUnit, BusinessBlueprint, AgentTier, AgentStatus, Task, UserProfile, GovernanceCulture, ComplianceRule, VaultItem, KnowledgeNode, WorkspaceMember } from './types';
 import {
   sendMessageStream,
   startMainSession,
@@ -224,7 +224,47 @@ const App: React.FC = () => {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [ventures, setVentures] = useState<Venture[]>([]); // NEW STATE v1.5.0
+  const [cultureEntries, setCultureEntries] = useState<GovernanceCulture[]>([]);
+  const [complianceRules, setComplianceRules] = useState<ComplianceRule[]>([]);
+  const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
+  const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
   const [input, setInput] = useState('');
+
+  const filteredCultureEntries = useMemo(
+    () => cultureEntries.filter(entry => entry.status !== 'deleted'),
+    [cultureEntries]
+  );
+
+  const latestCultureEntry = useMemo(() => {
+    if (filteredCultureEntries.length === 0) return null;
+    return [...filteredCultureEntries].sort((a, b) => {
+      const aTime = a.updatedAt instanceof Date ? a.updatedAt.getTime() : new Date(a.updatedAt).getTime();
+      const bTime = b.updatedAt instanceof Date ? b.updatedAt.getTime() : new Date(b.updatedAt).getTime();
+      return bTime - aTime;
+    })[0];
+  }, [filteredCultureEntries]);
+
+  const GLOBAL_COMPLIANCE_CODE = 'GOVERNANCE.GLOBAL.DEFAULT';
+  const activeComplianceRule = useMemo(() => {
+    const relevant = complianceRules.filter(rule => rule.code === GLOBAL_COMPLIANCE_CODE && rule.status !== 'deleted');
+    if (relevant.length === 0) return null;
+    return [...relevant].sort((a, b) => {
+      const aTime = a.updatedAt instanceof Date ? a.updatedAt.getTime() : new Date(a.updatedAt).getTime();
+      const bTime = b.updatedAt instanceof Date ? b.updatedAt.getTime() : new Date(b.updatedAt).getTime();
+      return bTime - aTime;
+    })[0];
+  }, [complianceRules]);
+
+  const activeVaultEntries = useMemo(
+    () => vaultItems.filter(item => item.status !== 'deleted' && item.status !== 'archived'),
+    [vaultItems]
+  );
+
+  const visibleKnowledgeNodes = useMemo(
+    () => knowledgeNodes.filter(node => node.status !== 'archived' && node.status !== 'deleted'),
+    [knowledgeNodes]
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -236,6 +276,22 @@ const App: React.FC = () => {
   const audioChunksRef = useRef<Blob[]>([]);
   const [attachment, setAttachment] = useState<{ data: string, mimeType: string, preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const activeWorkspaceId = userProfile?.workspaceId || workspaceMembers[0]?.workspaceId || (typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_active_workspace_v1') : null);
+
+  useEffect(() => {
+    if (activeWorkspaceId && typeof localStorage !== 'undefined') {
+      localStorage.setItem('grupob_active_workspace_v1', activeWorkspaceId);
+    }
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!userProfile || userProfile.workspaceId || workspaceMembers.length === 0) return;
+    const derivedWorkspace = workspaceMembers[0].workspaceId;
+    if (derivedWorkspace) {
+      setUserProfile(prev => prev ? { ...prev, workspaceId: derivedWorkspace } : prev);
+    }
+  }, [userProfile, workspaceMembers]);
 
   // Seleção de Agente para Onboarding (Vem do Ecossistema)
   const [agentToOnboard, setAgentToOnboard] = useState<Agent | null>(null);
@@ -382,6 +438,29 @@ if (userId) {
     };
   }, []);
 
+  useEffect(() => {
+    const uid = (user as any)?.id || (user as any)?.uid;
+    if (!uid) {
+      setWorkspaceMembers([]);
+      return;
+    }
+
+    const workspaceQuery = query(
+      collection(db, "workspace_members"),
+      where('userId', '==', uid)
+    );
+
+    const unsubscribe = onSnapshot(workspaceQuery, (snapshot) => {
+      const memberships = snapshot.docs.map(doc => {
+        const data = doc.data() as WorkspaceMember;
+        return { ...data, id: doc.id };
+      });
+      setWorkspaceMembers(memberships);
+    }, (error) => console.error('Erro ao carregar workspace members:', error));
+
+    return () => unsubscribe();
+  }, [user]);
+
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -438,6 +517,68 @@ if (userId) {
     localStorage.setItem(STORAGE_KEYS.NAV_TAB, activeTab);
     localStorage.setItem(STORAGE_KEYS.NAV_BU, activeBU.id);
   }, [activeTab, activeBU]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setCultureEntries([]);
+      setComplianceRules([]);
+      setVaultItems([]);
+      setKnowledgeNodes([]);
+      return;
+    }
+
+    const cultureQuery = query(
+      collection(db, 'governance_global_culture'),
+      where('workspaceId', '==', activeWorkspaceId),
+      orderBy('updatedAt', 'desc')
+    );
+
+    const complianceQuery = query(
+      collection(db, 'governance_compliance_rules'),
+      where('workspaceId', '==', activeWorkspaceId),
+      orderBy('updatedAt', 'desc')
+    );
+
+    const vaultQuery = query(
+      collection(db, 'vault_items'),
+      where('workspaceId', '==', activeWorkspaceId),
+      orderBy('createdAt', 'desc')
+    );
+
+    const knowledgeQuery = query(
+      collection(db, 'knowledge_nodes'),
+      where('workspaceId', '==', activeWorkspaceId),
+      orderBy('parentId', 'asc'),
+      orderBy('orderIndex', 'asc')
+    );
+
+    const unsubscribeCulture = onSnapshot(cultureQuery, (snapshot) => {
+      const rows = snapshot.docs.map(doc => doc.data() as GovernanceCulture);
+      setCultureEntries(rows);
+    }, (error) => console.error('Erro ao carregar cultura global:', error));
+
+    const unsubscribeCompliance = onSnapshot(complianceQuery, (snapshot) => {
+      const rows = snapshot.docs.map(doc => doc.data() as ComplianceRule);
+      setComplianceRules(rows);
+    }, (error) => console.error('Erro ao carregar compliance:', error));
+
+    const unsubscribeVault = onSnapshot(vaultQuery, (snapshot) => {
+      const rows = snapshot.docs.map(doc => doc.data() as VaultItem);
+      setVaultItems(rows);
+    }, (error) => console.error('Erro ao carregar vault:', error));
+
+    const unsubscribeKnowledge = onSnapshot(knowledgeQuery, (snapshot) => {
+      const rows = snapshot.docs.map(doc => ({ ...(doc.data() as KnowledgeNode), id: doc.id }));
+      setKnowledgeNodes(rows);
+    }, (error) => console.error('Erro ao carregar knowledge nodes:', error));
+
+    return () => {
+      unsubscribeCulture();
+      unsubscribeCompliance();
+      unsubscribeVault();
+      unsubscribeKnowledge();
+    };
+  }, [activeWorkspaceId]);
 
   const handleSelectBU = (bu: BusinessUnit) => {
     setIsTransitioning(true);
@@ -636,6 +777,186 @@ if (userId) {
     }
   }
 
+  const handleSaveCultureEntry = async ({ contentMd, title, summary }: { contentMd: string; title?: string; summary?: string; }) => {
+    if (!activeWorkspaceId) {
+      alert('Workspace não definido. Atualize seu perfil ou associação.');
+      return;
+    }
+    const now = new Date();
+    try {
+      if (latestCultureEntry) {
+        await updateDoc(doc(db, "governance_global_culture", latestCultureEntry.id), {
+          contentMd,
+          title: title ?? latestCultureEntry.title,
+          summary: summary ?? latestCultureEntry.summary ?? '',
+          version: (latestCultureEntry.version ?? 1) + 1,
+          updatedBy: userProfile?.uid || null,
+          updated_at: now
+        });
+      } else {
+        await addDoc(collection(db, "governance_global_culture"), {
+          workspaceId: activeWorkspaceId,
+          title: title || 'Cultura Global',
+          summary: summary || '',
+          contentMd,
+          version: 1,
+          status: 'active',
+          createdBy: userProfile?.uid || null,
+          updatedBy: userProfile?.uid || null,
+          created_at: now,
+          updated_at: now
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao salvar Cultura Global:', error);
+      alert('Falha ao salvar Cultura Global.');
+    }
+  };
+
+  const handleSaveComplianceMarkdown = async (markdown: string) => {
+    if (!activeWorkspaceId) {
+      alert('Workspace não definido. Atualize seu perfil ou associação.');
+      return;
+    }
+    const now = new Date();
+    try {
+      if (activeComplianceRule) {
+        await updateDoc(doc(db, "governance_compliance_rules", activeComplianceRule.id), {
+          ruleMd: markdown,
+          version: (activeComplianceRule.version ?? 1) + 1,
+          updatedBy: userProfile?.uid || null,
+          updated_at: now
+        });
+      } else {
+        await addDoc(collection(db, "governance_compliance_rules"), {
+          workspaceId: activeWorkspaceId,
+          code: GLOBAL_COMPLIANCE_CODE,
+          title: 'Diretrizes & Compliance',
+          description: 'Regras e protocolos globais do ecossistema GrupoB.',
+          severity: 'medium',
+          scope: 'global',
+          ruleMd: markdown,
+          version: 1,
+          status: 'active',
+          createdBy: userProfile?.uid || null,
+          updatedBy: userProfile?.uid || null,
+          created_at: now,
+          updated_at: now
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao salvar Compliance:', error);
+      alert('Falha ao salvar Diretrizes & Compliance.');
+    }
+  };
+
+  const handleCreateVaultRecord = async (item: { name: string; provider: string; env: string; itemType: string; ownerEmail?: string; storagePath?: string; secretRef?: string; rotatePolicy?: string; payload?: Record<string, any>; }) => {
+    if (!activeWorkspaceId) {
+      alert('Workspace não definido. Atualize seu perfil ou associação.');
+      return;
+    }
+    const now = new Date();
+    try {
+      await addDoc(collection(db, "vault_items"), {
+        workspaceId: activeWorkspaceId,
+        name: item.name,
+        provider: item.provider,
+        env: item.env,
+        itemType: item.itemType,
+        ownerEmail: item.ownerEmail || '',
+        storagePath: item.storagePath || '',
+        secretRef: item.secretRef || '',
+        rotatePolicy: item.rotatePolicy || '',
+        payload: item.payload || {},
+        status: 'active',
+        createdBy: userProfile?.uid || null,
+        updatedBy: userProfile?.uid || null,
+        created_at: now,
+        updated_at: now
+      });
+    } catch (error) {
+      console.error('Erro ao registrar item no cofre:', error);
+      alert('Falha ao salvar item no Cofre Black.');
+    }
+  };
+
+  const handleDeleteVaultRecord = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "vault_items", id), {
+        status: 'deleted',
+        updatedBy: userProfile?.uid || null,
+        updated_at: new Date()
+      });
+    } catch (error) {
+      console.error('Erro ao remover item do cofre:', error);
+      alert('Falha ao remover item do Cofre Black.');
+    }
+  };
+
+  const handleCreateKnowledgeNode = async ({ title, nodeType, parentId = null, contentMd = '', linkUrl }: { title: string; nodeType: KnowledgeNode['nodeType']; parentId?: string | null; contentMd?: string; linkUrl?: string; }) => {
+    if (!activeWorkspaceId) {
+      alert('Workspace não definido. Atualize seu perfil ou associação.');
+      return;
+    }
+    const now = new Date();
+    const siblings = visibleKnowledgeNodes.filter(node => (node.parentId ?? null) === (parentId ?? null));
+    const nextOrderIndex = siblings.length > 0 ? Math.max(...siblings.map(node => node.orderIndex ?? 0)) + 1 : 1;
+    try {
+      const docRef = await addDoc(collection(db, "knowledge_nodes"), {
+        workspaceId: activeWorkspaceId,
+        parentId: parentId ?? null,
+        nodeType,
+        title,
+        contentMd,
+        linkUrl: linkUrl || null,
+        orderIndex: nextOrderIndex,
+        version: 1,
+        visibility: 'internal',
+        status: 'active',
+        createdBy: userProfile?.uid || null,
+        updatedBy: userProfile?.uid || null,
+        created_at: now,
+        updated_at: now
+      });
+      return docRef.id;
+    } catch (error) {
+      console.error('Erro ao criar nó de conhecimento:', error);
+      alert('Falha ao criar novo item na base de conhecimento.');
+    }
+  };
+
+  const handleUpdateKnowledgeNode = async (id: string, updates: Partial<KnowledgeNode>) => {
+    try {
+      const payload: Record<string, any> = {
+        updatedBy: userProfile?.uid || null,
+        updated_at: new Date()
+      };
+      if (updates.title !== undefined) payload.title = updates.title;
+      if (updates.contentMd !== undefined) payload.contentMd = updates.contentMd;
+      if (updates.linkUrl !== undefined) payload.linkUrl = updates.linkUrl;
+      if (updates.orderIndex !== undefined) payload.orderIndex = updates.orderIndex;
+      if (updates.visibility !== undefined) payload.visibility = updates.visibility;
+      if (updates.parentId !== undefined) payload.parentId = updates.parentId;
+      await updateDoc(doc(db, "knowledge_nodes", id), payload);
+    } catch (error) {
+      console.error('Erro ao atualizar nó de conhecimento:', error);
+      alert('Falha ao atualizar página/metodologia.');
+    }
+  };
+
+  const handleDeleteKnowledgeNode = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "knowledge_nodes", id), {
+        status: 'archived',
+        updatedBy: userProfile?.uid || null,
+        updated_at: new Date()
+      });
+    } catch (error) {
+      console.error('Erro ao arquivar nó de conhecimento:', error);
+      alert('Falha ao arquivar item da base de conhecimento.');
+    }
+  };
+
   // --- AUDIO & FILE HANDLERS ---
   const handleToggleRecording = async () => {
     if (isRecording) {
@@ -832,6 +1153,17 @@ if (userId) {
           onAddUnit={handleAddBusinessUnit}
           targetAgentId={governanceTargetId} // Prop de Direcionamento
           onClearTarget={() => setGovernanceTargetId(null)} // Limpeza após uso
+          cultureEntry={latestCultureEntry}
+          complianceMarkdown={activeComplianceRule?.ruleMd || ''}
+          onSaveCulture={handleSaveCultureEntry}
+          onSaveCompliance={handleSaveComplianceMarkdown}
+          vaultItems={activeVaultEntries}
+          onCreateVaultItem={handleCreateVaultRecord}
+          onDeleteVaultItem={handleDeleteVaultRecord}
+          knowledgeNodes={visibleKnowledgeNodes}
+          onCreateKnowledgeNode={handleCreateKnowledgeNode}
+          onUpdateKnowledgeNode={handleUpdateKnowledgeNode}
+          onDeleteKnowledgeNode={handleDeleteKnowledgeNode}
         />
       );
 

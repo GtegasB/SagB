@@ -81,7 +81,116 @@ export interface Venture {
   timestamp: Date;
 }
 
+export interface GovernanceCulture {
+  id: string;
+  workspaceId: string;
+  title: string;
+  summary?: string;
+  contentMd: string;
+  version: number;
+  effectiveFrom?: Date;
+  effectiveTo?: Date;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  payload?: Record<string, any>;
+}
+
+export interface ComplianceRule {
+  id: string;
+  workspaceId: string;
+  code: string;
+  title: string;
+  description?: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  scope: 'global' | 'product' | 'repo' | 'environment';
+  subject?: string;
+  ruleMd: string;
+  version: number;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  payload?: Record<string, any>;
+}
+
+export interface VaultItem {
+  id: string;
+  workspaceId: string;
+  name: string;
+  provider: string;
+  env: string;
+  itemType: string;
+  ownerEmail?: string;
+  storagePath?: string;
+  secretRef?: string;
+  rotatePolicy?: string;
+  lastRotatedAt?: Date;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  payload?: Record<string, any>;
+}
+
+export interface KnowledgeNode {
+  id: string;
+  workspaceId: string;
+  parentId?: string | null;
+  nodeType: 'folder' | 'doc' | 'link';
+  slug?: string;
+  title: string;
+  contentMd?: string;
+  linkUrl?: string;
+  orderIndex: number;
+  version: number;
+  visibility: 'internal' | 'restricted' | 'public';
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  payload?: Record<string, any>;
+}
+
+export interface KnowledgeAttachment {
+  id: string;
+  workspaceId: string;
+  nodeId: string;
+  bucket: string;
+  path: string;
+  filename: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  checksum?: string;
+  version: number;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  payload?: Record<string, any>;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  role: 'owner' | 'admin' | 'staff' | 'viewer';
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  payload?: Record<string, any>;
+}
+
 export interface Agent {
+
   id: string; // ID Local React (UUID)
   universalId?: string; // ID Oficial SAGB (ex: ca001gpb)
   name: string;
@@ -153,7 +262,9 @@ export interface UserProfile {
   nickname: string;
   role: string;
   company: string;
+  workspaceId?: string;
   avatarUrl?: string;
   tier: AgentTier;
   createdAt: Date;
 }
+

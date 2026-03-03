@@ -207,6 +207,15 @@ const convertTimestamps = (record: Record<string, any>) => {
   return out;
 };
 
+const camelToSnake = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+const asJsDate = (value: any): Date | undefined => {
+  if (!value) return undefined;
+  if (value instanceof Timestamp) return value.toDate();
+  if (value instanceof Date) return value;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+};
+
 // ---------------------------
 // Normalização por tabela
 // ---------------------------
@@ -248,19 +257,157 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     r.role = pick(r, 'role') ?? 'member';
     r.company = pick(r, 'company') ?? 'GrupoB';
     r.tier = pick(r, 'tier') ?? 'TÁTICO';
-    const created = pick(r, 'createdAt', 'created_at') ?? Timestamp.fromDate(new Date());
-    r.createdAt = created;
+    r.workspaceId = pick(r, 'workspaceId', 'workspace_id') ?? null;
+    const created = pick(r, 'createdAt', 'created_at');
+    r.createdAt = asJsDate(created) ?? new Date();
   }
 
   if (table === 'tasks') {
-    const created = pick(r, 'createdAt', 'created_at') ?? Timestamp.fromDate(new Date());
-    r.createdAt = created;
-    if (r.dueDate === undefined) r.dueDate = pick(r, 'due_date', 'due_date_at', 'due_at', 'dueDate');
+    const created = pick(r, 'createdAt', 'created_at');
+    r.createdAt = asJsDate(created) ?? new Date();
+    const due = pick(r, 'dueDate', 'due_date', 'due_date_at', 'due_at');
+    r.dueDate = due ? asJsDate(due) : undefined;
   }
 
   if (table === 'topics') {
-    const ts = pick(r, 'timestamp', 'created_at', 'createdAt') ?? Timestamp.fromDate(new Date());
-    r.timestamp = ts;
+    const ts = pick(r, 'timestamp', 'created_at', 'createdAt');
+    r.timestamp = asJsDate(ts) ?? new Date();
+  }
+
+  if (table === 'governance_global_culture') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      title: r.title,
+      summary: r.summary ?? undefined,
+      contentMd: r.content_md ?? '',
+      version: r.version ?? 1,
+      effectiveFrom: asJsDate(pick(r, 'effective_from', 'effectiveFrom')),
+      effectiveTo: asJsDate(pick(r, 'effective_to', 'effectiveTo')),
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      createdBy: r.created_by ?? undefined,
+      updatedBy: r.updated_by ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'governance_compliance_rules') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      code: r.code,
+      title: r.title,
+      description: r.description ?? undefined,
+      severity: (r.severity ?? 'medium') as any,
+      scope: (r.scope ?? 'global') as any,
+      subject: r.subject ?? undefined,
+      ruleMd: r.rule_md ?? '',
+      version: r.version ?? 1,
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      createdBy: r.created_by ?? undefined,
+      updatedBy: r.updated_by ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'vault_items') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      name: r.name,
+      provider: r.provider,
+      env: r.env,
+      itemType: r.item_type,
+      ownerEmail: r.owner_email ?? undefined,
+      storagePath: r.storage_path ?? undefined,
+      secretRef: r.secret_ref ?? undefined,
+      rotatePolicy: r.rotate_policy ?? undefined,
+      lastRotatedAt: asJsDate(r.last_rotated_at ?? r.lastRotatedAt),
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      createdBy: r.created_by ?? undefined,
+      updatedBy: r.updated_by ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'knowledge_nodes') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      parentId: r.parent_id ?? null,
+      nodeType: r.node_type,
+      slug: r.slug ?? undefined,
+      title: r.title,
+      contentMd: r.content_md ?? undefined,
+      linkUrl: r.link_url ?? undefined,
+      orderIndex: Number(r.order_index ?? 0),
+      version: Number(r.version ?? 1),
+      visibility: (r.visibility ?? 'internal') as any,
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      createdBy: r.created_by ?? undefined,
+      updatedBy: r.updated_by ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'knowledge_attachments') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      nodeId: r.node_id,
+      bucket: r.bucket,
+      path: r.path,
+      filename: r.filename,
+      mimeType: r.mime_type ?? undefined,
+      sizeBytes: r.size_bytes ? Number(r.size_bytes) : undefined,
+      checksum: r.checksum ?? undefined,
+      version: Number(r.version ?? 1),
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      createdBy: r.created_by ?? undefined,
+      updatedBy: r.updated_by ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'audit_events') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      action: r.action,
+      actorType: r.actor_type,
+      actorId: r.actor_id ?? undefined,
+      actorLabel: r.actor_label ?? undefined,
+      diff: r.diff ?? null,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'workspace_members') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      userId: r.user_id,
+      role: r.role ?? 'viewer',
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      createdBy: r.created_by ?? undefined,
+      updatedBy: r.updated_by ?? undefined,
+      payload: r.payload ?? undefined
+    };
   }
 
   return r;
@@ -289,6 +436,7 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     // Perfil "public.users"
     if (p.uid !== undefined) { p.id = p.uid; delete p.uid; }
     if (p.name !== undefined) { p.display_name = p.name; delete p.name; }
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
     delete p.createdAt;
   }
 
@@ -334,6 +482,72 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     delete p.dueDate;
   }
 
+  if (table === 'governance_global_culture') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.contentMd !== undefined) { p.content_md = p.contentMd; delete p.contentMd; }
+    if (p.effectiveFrom !== undefined) { p.effective_from = p.effectiveFrom; delete p.effectiveFrom; }
+    if (p.effectiveTo !== undefined) { p.effective_to = p.effectiveTo; delete p.effectiveTo; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'governance_compliance_rules') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.ruleMd !== undefined) { p.rule_md = p.ruleMd; delete p.ruleMd; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'vault_items') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.itemType !== undefined) { p.item_type = p.itemType; delete p.itemType; }
+    if (p.ownerEmail !== undefined) { p.owner_email = p.ownerEmail; delete p.ownerEmail; }
+    if (p.storagePath !== undefined) { p.storage_path = p.storagePath; delete p.storagePath; }
+    if (p.secretRef !== undefined) { p.secret_ref = p.secretRef; delete p.secretRef; }
+    if (p.rotatePolicy !== undefined) { p.rotate_policy = p.rotatePolicy; delete p.rotatePolicy; }
+    if (p.lastRotatedAt !== undefined) { p.last_rotated_at = p.lastRotatedAt; delete p.lastRotatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'knowledge_nodes') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.parentId !== undefined) { p.parent_id = p.parentId; delete p.parentId; }
+    if (p.nodeType !== undefined) { p.node_type = p.nodeType; delete p.nodeType; }
+    if (p.contentMd !== undefined) { p.content_md = p.contentMd; delete p.contentMd; }
+    if (p.linkUrl !== undefined) { p.link_url = p.linkUrl; delete p.linkUrl; }
+    if (p.orderIndex !== undefined) { p.order_index = p.orderIndex; delete p.orderIndex; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'knowledge_attachments') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.nodeId !== undefined) { p.node_id = p.nodeId; delete p.nodeId; }
+    if (p.mimeType !== undefined) { p.mime_type = p.mimeType; delete p.mimeType; }
+    if (p.sizeBytes !== undefined) { p.size_bytes = p.sizeBytes; delete p.sizeBytes; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'audit_events') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.entityType !== undefined) { p.entity_type = p.entityType; delete p.entityType; }
+    if (p.entityId !== undefined) { p.entity_id = p.entityId; delete p.entityId; }
+    if (p.actorType !== undefined) { p.actor_type = p.actorType; delete p.actorType; }
+    if (p.actorId !== undefined) { p.actor_id = p.actorId; delete p.actorId; }
+    if (p.actorLabel !== undefined) { p.actor_label = p.actorLabel; delete p.actorLabel; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'workspace_members') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.userId !== undefined) { p.user_id = p.userId; delete p.userId; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
   return p;
 };
 
@@ -370,6 +584,9 @@ const mapFieldForTable = (table: string, field: string) => {
   }
   if (table === 'ventures') {
     if (field === 'timestamp') return 'created_at';
+  }
+  if (/[A-Z]/.test(field)) {
+    return camelToSnake(field);
   }
   return field;
 };
