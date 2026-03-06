@@ -562,6 +562,10 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (p.contentMd !== undefined) { p.content_md = p.contentMd; delete p.contentMd; }
     if (p.effectiveFrom !== undefined) { p.effective_from = p.effectiveFrom; delete p.effectiveFrom; }
     if (p.effectiveTo !== undefined) { p.effective_to = p.effectiveTo; delete p.effectiveTo; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
     delete p.createdAt;
     delete p.updatedAt;
   }
@@ -569,6 +573,10 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
   if (table === 'governance_compliance_rules') {
     if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
     if (p.ruleMd !== undefined) { p.rule_md = p.ruleMd; delete p.ruleMd; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
     delete p.createdAt;
     delete p.updatedAt;
   }
@@ -581,6 +589,10 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (p.secretRef !== undefined) { p.secret_ref = p.secretRef; delete p.secretRef; }
     if (p.rotatePolicy !== undefined) { p.rotate_policy = p.rotatePolicy; delete p.rotatePolicy; }
     if (p.lastRotatedAt !== undefined) { p.last_rotated_at = p.lastRotatedAt; delete p.lastRotatedAt; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
     delete p.createdAt;
     delete p.updatedAt;
   }
@@ -592,6 +604,10 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (p.contentMd !== undefined) { p.content_md = p.contentMd; delete p.contentMd; }
     if (p.linkUrl !== undefined) { p.link_url = p.linkUrl; delete p.linkUrl; }
     if (p.orderIndex !== undefined) { p.order_index = p.orderIndex; delete p.orderIndex; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
     delete p.createdAt;
     delete p.updatedAt;
   }
@@ -601,6 +617,10 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (p.nodeId !== undefined) { p.node_id = p.nodeId; delete p.nodeId; }
     if (p.mimeType !== undefined) { p.mime_type = p.mimeType; delete p.mimeType; }
     if (p.sizeBytes !== undefined) { p.size_bytes = p.sizeBytes; delete p.sizeBytes; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
     delete p.createdAt;
     delete p.updatedAt;
   }
@@ -612,6 +632,10 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (p.actorType !== undefined) { p.actor_type = p.actorType; delete p.actorType; }
     if (p.actorId !== undefined) { p.actor_id = p.actorId; delete p.actorId; }
     if (p.actorLabel !== undefined) { p.actor_label = p.actorLabel; delete p.actorLabel; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
     delete p.createdAt;
     delete p.updatedAt;
   }
@@ -619,6 +643,10 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
   if (table === 'workspace_members') {
     if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
     if (p.userId !== undefined) { p.user_id = p.userId; delete p.userId; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
     delete p.createdAt;
     delete p.updatedAt;
   }
