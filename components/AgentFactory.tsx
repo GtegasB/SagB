@@ -341,7 +341,8 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         // --- SUPABASE INTEGRATION (COM TIMEOUT PARA OFFLINE MODE) ---
         try {
             // Validação de Autenticação antes de salvar
-            if (!auth.currentUser) {
+            const currentUser = (auth as any).currentUser || (await auth.getUser()).data.user;
+            if (!currentUser) {
                 alert("Sessão expirada. Por favor, saia e entre novamente.");
                 setIsSaving(false);
                 return;

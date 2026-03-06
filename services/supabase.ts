@@ -148,6 +148,11 @@ const restFetch = async (
 };
 
 export const auth = {
+  get currentUser() {
+    const session = getStoredSession();
+    return session?.user ?? null;
+  },
+
   async signInWithPassword({ email, password }: { email: string; password: string }) {
     try {
       const data = await supabaseAuthFetch('/token?grant_type=password', { email, password });
