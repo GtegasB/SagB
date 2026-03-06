@@ -46,6 +46,37 @@ const safeJsonParse = (text: string) => {
   try { return JSON.parse(text); } catch { return text; }
 };
 
+type ShimError = Error & {
+  code: string;
+  status?: number;
+  details?: any;
+};
+
+const createShimError = (params: { code: string; message: string; status?: number; details?: any }): ShimError => {
+  const error = new Error(params.message) as ShimError;
+  error.code = params.code;
+  error.status = params.status;
+  error.details = params.details;
+  return error;
+};
+
+const pickErrorMessage = (data: any, fallback: string) => {
+  return data?.msg || data?.message || data?.error_description || data?.error || fallback;
+};
+
+const resolveAuthErrorCode = (path: string, status: number, data: any) => {
+  const msg = String(pickErrorMessage(data, '')).toLowerCase();
+  if (path.includes('/token') && (status === 400 || status === 401)) return 'auth/invalid-credentials';
+  if (path.includes('/signup')) {
+    if (msg.includes('already') || msg.includes('registered')) return 'auth/email-already-in-use';
+    if (msg.includes('password') && (msg.includes('least') || msg.includes('weak'))) return 'auth/weak-password';
+    if (msg.includes('email')) return 'auth/invalid-email';
+  }
+  if (msg.includes('invalid login credentials')) return 'auth/invalid-credentials';
+  if (msg.includes('email')) return 'auth/invalid-email';
+  return `auth/http-${status}`;
+};
+
 const supabaseAuthFetch = async (path: string, body?: any, accessToken?: string) => {
   const res = await fetch(`${supabaseUrl}/auth/v1${path}`, {
     method: body ? 'POST' : 'GET',
@@ -57,14 +88,23 @@ const supabaseAuthFetch = async (path: string, body?: any, accessToken?: string)
     body: body ? JSON.stringify(body) : undefined
   });
 
- const json = await res.json().catch(() => ({}));
+  const json = await res.json().catch(() => ({}));
 
-// Token inválido: derruba sessão local pra forçar login
-if (res.status === 401) {
-  forceSignOut();
-}
+  // Token inválido: derruba sessão local pra forçar login
+  if (res.status === 401) {
+    forceSignOut();
+  }
 
-return json;
+  if (!res.ok) {
+    throw createShimError({
+      code: resolveAuthErrorCode(path, res.status, json),
+      message: pickErrorMessage(json, `Supabase auth request failed (${res.status}).`),
+      status: res.status,
+      details: json
+    });
+  }
+
+  return json;
 };
 
 const restFetch = async (
@@ -92,28 +132,52 @@ const restFetch = async (
   const data = safeJsonParse(text);
 
   if (res.status === 401 && session?.access_token) {
-  forceSignOut();
-}
-return json;
+    forceSignOut();
+  }
+
+  if (!res.ok) {
+    throw createShimError({
+      code: `supabase/http-${res.status}`,
+      message: pickErrorMessage(data, `Supabase request failed (${res.status}) on table ${table}.`),
+      status: res.status,
+      details: data
+    });
+  }
+
+  return data;
 };
 
 export const auth = {
   async signInWithPassword({ email, password }: { email: string; password: string }) {
-    const data = await supabaseAuthFetch('/token?grant_type=password', { email, password });
-    const session = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user };
-    setStoredSession(session);
-    emitAuth('SIGNED_IN', session);
-    return { data: { user: data.user, session }, error: null };
+    try {
+      const data = await supabaseAuthFetch('/token?grant_type=password', { email, password });
+      if (!data?.access_token || !data?.user) {
+        return {
+          data: { user: null, session: null },
+          error: createShimError({ code: 'auth/invalid-credentials', message: 'Credenciais inválidas.' })
+        };
+      }
+      const session = { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user };
+      setStoredSession(session);
+      emitAuth('SIGNED_IN', session);
+      return { data: { user: data.user, session }, error: null };
+    } catch (error) {
+      return { data: { user: null, session: null }, error };
+    }
   },
 
   async signUp({ email, password }: { email: string; password: string }) {
-    const data = await supabaseAuthFetch('/signup', { email, password });
-    const session = data.access_token ? { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user } : null;
-    if (session) {
-      setStoredSession(session);
-      emitAuth('SIGNED_IN', session);
+    try {
+      const data = await supabaseAuthFetch('/signup', { email, password });
+      const session = data.access_token ? { access_token: data.access_token, refresh_token: data.refresh_token, user: data.user } : null;
+      if (session) {
+        setStoredSession(session);
+        emitAuth('SIGNED_IN', session);
+      }
+      return { data: { user: data.user ?? null, session }, error: null };
+    } catch (error) {
+      return { data: { user: null, session: null }, error };
     }
-    return { data: { user: data.user, session }, error: null };
   },
 
   async signOut() {
@@ -163,7 +227,7 @@ type QueryRef = {
   kind: 'query';
   table: string;
   filters: Array<{ field: string; op: string; value: any }>;
-  order?: { field: string; direction: 'asc' | 'desc' };
+  orders: Array<{ field: string; direction: 'asc' | 'desc' }>;
 };
 
 type AnyRef = CollectionRef | DocRef | QueryRef;
@@ -272,6 +336,9 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
   if (table === 'topics') {
     const ts = pick(r, 'timestamp', 'created_at', 'createdAt');
     r.timestamp = asJsDate(ts) ?? new Date();
+    const due = pick(r, 'dueDate', 'due_date', 'due_date_at', 'due_at');
+    const dueDate = asJsDate(due);
+    r.dueDate = dueDate ? dueDate.toISOString().slice(0, 10) : (typeof due === 'string' ? due : undefined);
   }
 
   if (table === 'governance_global_culture') {
@@ -455,13 +522,21 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
       'description',
       'created_at',
       'updated_at',
+      'due_date',
       'createdAt',
-      'updatedAt'
+      'updatedAt',
+      'dueDate'
     ]);
 
     // Converte campos de relacionamento comuns
     if (p.ventureId !== undefined && p.venture_id === undefined) { p.venture_id = p.ventureId; delete p.ventureId; }
     if (p.buId !== undefined && p.bu_id === undefined) { p.bu_id = p.buId; delete p.buId; }
+    if ((table === 'tasks' || table === 'topics') && p.dueDate !== undefined && p.due_date === undefined) {
+      p.due_date = p.dueDate;
+    }
+    if (table === 'topics' && p.timestamp !== undefined && p.created_at === undefined) {
+      p.created_at = p.timestamp;
+    }
 
     const extra: Record<string, any> = {};
     Object.keys(p).forEach((k) => {
@@ -566,9 +641,9 @@ export const orderBy = (field: string, direction: 'asc' | 'desc' = 'asc') => ({ 
 export const where = (field: string, op: string, value: any) => ({ type: 'where' as const, field, op, value });
 
 export const query = (collectionRef: CollectionRef, ...constraints: Array<ReturnType<typeof orderBy> | ReturnType<typeof where>>): QueryRef => {
-  const queryRef: QueryRef = { kind: 'query', table: collectionRef.table, filters: [] };
+  const queryRef: QueryRef = { kind: 'query', table: collectionRef.table, filters: [], orders: [] };
   constraints.forEach((constraint) => {
-    if (constraint.type === 'orderBy') queryRef.order = { field: constraint.field, direction: constraint.direction };
+    if (constraint.type === 'orderBy') queryRef.orders.push({ field: constraint.field, direction: constraint.direction });
     if (constraint.type === 'where') queryRef.filters.push({ field: constraint.field, op: constraint.op, value: constraint.value });
   });
   return queryRef;
@@ -578,9 +653,11 @@ export const query = (collectionRef: CollectionRef, ...constraints: Array<Return
 const mapFieldForTable = (table: string, field: string) => {
   if (table === 'tasks') {
     if (field === 'createdAt') return 'created_at';
+    if (field === 'dueDate') return 'due_date';
   }
   if (table === 'topics') {
     if (field === 'timestamp') return 'created_at';
+    if (field === 'dueDate') return 'due_date';
   }
   if (table === 'ventures') {
     if (field === 'timestamp') return 'created_at';
@@ -602,9 +679,11 @@ const runQuery = async (ref: CollectionRef | QueryRef) => {
       params.set(col, `${opMap[f.op] || 'eq'}.${String(f.value)}`);
     });
 
-    if (ref.order) {
-      const col = mapFieldForTable(ref.table, ref.order.field);
-      params.set('order', `${col}.${ref.order.direction}`);
+    if (ref.orders.length > 0) {
+      const orderValue = ref.orders
+        .map((item) => `${mapFieldForTable(ref.table, item.field)}.${item.direction}`)
+        .join(',');
+      params.set('order', orderValue);
     }
   }
 
@@ -623,14 +702,39 @@ const buildDocSnapshot = (record: any | null, table: string) => ({
   data: () => (record ? normalizeRecordForTable(table, convertTimestamps(record)) : undefined)
 });
 
+const getBasePollingMs = (ref: AnyRef) => {
+  const table = ref.table;
+  if (table === 'agents' || table === 'workspace_members') return 15000;
+  if (
+    table === 'governance_global_culture' ||
+    table === 'governance_compliance_rules' ||
+    table === 'vault_items' ||
+    table === 'knowledge_nodes'
+  ) return 20000;
+  if (table === 'topics' || table === 'tasks' || table === 'ventures') return 8000;
+  return ref.kind === 'doc' ? 7000 : 10000;
+};
+
 /**
  * onSnapshot aqui não é realtime (por enquanto).
- * Faz polling (5s) para manter a experiência do app e simplificar migração.
+ * Faz polling adaptativo para reduzir custo de rede sem quebrar a experiência.
  */
 export const onSnapshot = (ref: AnyRef, callback: (snapshot: any) => void, onError?: (error: any) => void) => {
   let active = true;
+  let inFlight = false;
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const getPollingMs = () => {
+    const baseMs = getBasePollingMs(ref);
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return Math.max(baseMs * 3, 30000);
+    }
+    return baseMs;
+  };
 
   const emit = async () => {
+    if (inFlight) return;
+    inFlight = true;
     try {
       if (!active) return;
 
@@ -648,15 +752,33 @@ export const onSnapshot = (ref: AnyRef, callback: (snapshot: any) => void, onErr
     } catch (error) {
       if (onError) onError(error);
       else console.error(error);
+    } finally {
+      inFlight = false;
     }
   };
 
+  const schedule = () => {
+    if (timer) clearInterval(timer);
+    timer = setInterval(emit, getPollingMs());
+  };
+
+  const handleVisibilityChange = () => {
+    if (!active) return;
+    schedule();
+  };
+
   emit();
-  const timer = setInterval(emit, 5000);
+  schedule();
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
 
   return () => {
     active = false;
-    clearInterval(timer);
+    if (timer) clearInterval(timer);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }
   };
 };
 
@@ -712,12 +834,14 @@ export const deleteDoc = async (docRef: DocRef) => {
 
 // Compat Firebase Auth helpers (mantidos para o Auth.tsx)
 export const signInWithEmailAndPassword = async (_auth: typeof auth, email: string, password: string) => {
-  const { data } = await auth.signInWithPassword({ email, password });
+  const { data, error } = await auth.signInWithPassword({ email, password });
+  if (error) throw error;
   return { user: data.user };
 };
 
 export const createUserWithEmailAndPassword = async (_auth: typeof auth, email: string, password: string) => {
-  const { data } = await auth.signUp({ email, password });
+  const { data, error } = await auth.signUp({ email, password });
+  if (error) throw error;
   return { user: data.user };
 };
 

@@ -12,13 +12,17 @@ export default defineConfig(({ mode }) => {
   return {
     base: basePath,
     plugins: [react()],
-
-    // Compatibilidade para libs que ainda consultam process.env no runtime do browser
-    // Atenção: tudo que entrar aqui vira parte do bundle e pode ser visto no frontend
-    define: {
-      'process.env': {
-        API_KEY: env.VITE_GEMINI_API_KEY || '',
-        VITE_DEEPSEEK_API_KEY: env.VITE_DEEPSEEK_API_KEY || ''
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined
+            if (id.includes('react-markdown')) return 'markdown'
+            if (id.includes('@google/genai')) return 'ai-sdk'
+            if (id.includes('react') || id.includes('scheduler')) return 'react-vendor'
+            return 'vendor'
+          }
+        }
       }
     },
 

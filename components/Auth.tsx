@@ -40,11 +40,12 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                 }
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
+                const userId = (user as any)?.id || (user as any)?.uid;
 
                 // CRIAR PERFIL NO BANCO DE DADOS
                 const rawUserProfile = {
-                    uid: user.uid,
-                    email: user.email || '',
+                    uid: userId,
+                    email: (user as any)?.email || '',
                     name: name || '',
                     nickname: (name || '').split(' ')[0] || 'User',
                     role: role || 'Colaborador',
@@ -58,13 +59,18 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                     Object.entries(rawUserProfile).filter(([_, v]) => v !== undefined)
                 );
 
-                await setDoc(doc(db, "users", user.uid), payload);
+                if (!userId) {
+                    throw { code: 'auth/invalid-user', message: 'Usuário criado sem ID válido.' };
+                }
+
+                await setDoc(doc(db, "users", userId), payload);
             }
             onAuthSuccess();
         } catch (err: any) {
             console.error(err);
             if (err.code === 'auth/user-not-found') setError('Usuário não encontrado.');
             else if (err.code === 'auth/wrong-password') setError('Senha incorreta.');
+            else if (err.code === 'auth/invalid-credentials') setError('E-mail ou senha inválidos.');
             else if (err.code === 'auth/invalid-email') setError('E-mail inválido.');
             else if (err.code === 'auth/email-already-in-use') setError('Este e-mail já está em uso.');
             else if (err.code === 'auth/weak-password') setError('A senha deve ter pelo menos 6 caracteres.');

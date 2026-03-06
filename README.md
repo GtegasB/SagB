@@ -40,13 +40,13 @@ O sistema opera sob o conceito de **"Cluster View"**, permitindo visão orbital 
     ```env
     VITE_SUPABASE_URL=https://seu-projeto.supabase.co
     VITE_SUPABASE_ANON_KEY=sua_chave_anon_aqui
-    VITE_GEMINI_API_KEY=sua_chave_aqui
-    VITE_DEEPSEEK_API_KEY=sua_chave_aqui
+    GEMINI_API_KEY=sua_chave_gemini_aqui
+    DEEPSEEK_API_KEY=sua_chave_deepseek_aqui
     ```
 
 4.  **Rode o projeto**
     ```bash
-    npm run dev
+    netlify dev
     ```
 
 ## 🔒 Protocolo de Segurança (Golden Seal)
@@ -76,8 +76,8 @@ Certos módulos possuem "Golden Seal" e não devem ter sua lógica alterada sem 
 3. Em **Site configuration > Environment variables**, adicione:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
-   - `VITE_GEMINI_API_KEY`
-   - `VITE_DEEPSEEK_API_KEY`
+   - `GEMINI_API_KEY`
+   - `DEEPSEEK_API_KEY`
 4. Faça deploy.
 
 Depois da primeira configuração, os próximos deploys são automáticos a cada `push` na branch publicada (normalmente `main`).
@@ -94,5 +94,3 @@ Secrets necessários no GitHub Actions:
 - `NETLIFY_SITE_ID`
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
-- `VITE_GEMINI_API_KEY`
-- `VITE_DEEPSEEK_API_KEY`

@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { GenerateContentResponse } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 import { SendIcon, MicIcon, StopCircleIcon, PaperclipIcon, XIcon, FileTextIcon } from './components/Icon';
 import Sidebar from './components/Sidebar';
@@ -1028,6 +1027,8 @@ if (userId) {
 
   // --- DATABASE SYNC (SUBSTITUI LOCALSTORAGE PARA AGENTES) ---
   useEffect(() => {
+    if (!user) return;
+
     // Carrega agentes SOMENTE do banco de dados (Fonte da Verdade)
     const unsubscribe = onSnapshot(collection(db, 'agents'), (snapshot) => {
       const remoteAgents = snapshot.docs.map(doc => ({
@@ -1041,7 +1042,7 @@ if (userId) {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   // --- SAVE STATE ---
   // --- SAVE STATE (LOCALSTORAGE REMOVIDO PARA AGENTES - AGORA É BANCO REMOTO) ---
@@ -1087,7 +1088,7 @@ if (userId) {
 
       for await (const chunk of stream) {
         // Handle Text
-        const chunkText = (chunk as GenerateContentResponse).text || '';
+        const chunkText = (chunk as { text?: string }).text || '';
         if (chunkText) {
           fullText += chunkText;
           setMessages(prev => prev.map(msg => msg.id === botMsgId ? { ...msg, text: fullText } : msg));

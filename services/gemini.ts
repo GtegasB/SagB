@@ -1,17 +1,117 @@
-
-import { GoogleGenAI, Chat, Type, Content } from "@google/genai";
 import {
   GLOBAL_LAYER,
   CONTEXT_LAYER,
   PIETRO_CORE,
   CASSIO_CORE,
-  KLAUS_CORE,
-  NEWTON_CORE
+  KLAUS_CORE
 } from "../data/prompts";
+import { callAiProxy } from "./aiProxy";
 
-// ==================================================================================
-// 🧠 MONTADOR DE DNA (3 CAMADAS + COMPLIANCE)
-// ==================================================================================
+type ChatPart = {
+  text?: string;
+  inlineData?: {
+    mimeType: string;
+    data: string;
+  };
+};
+
+type ChatHistoryItem = {
+  role: 'user' | 'model';
+  parts: ChatPart[];
+};
+
+type StreamChunk = { text: string };
+
+type SessionSendPayload = {
+  message: string | Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>;
+};
+
+const normalizeMessageParts = (message: SessionSendPayload['message']): ChatPart[] => {
+  if (typeof message === 'string') {
+    return [{ text: message }];
+  }
+
+  return message
+    .map((part) => {
+      if (part?.inlineData?.mimeType && part?.inlineData?.data) {
+        return { inlineData: { mimeType: part.inlineData.mimeType, data: part.inlineData.data } };
+      }
+      if (typeof part?.text === 'string') {
+        return { text: part.text };
+      }
+      return null;
+    })
+    .filter((part): part is ChatPart => Boolean(part));
+};
+
+const normalizeHistory = (history?: any[]): ChatHistoryItem[] => {
+  if (!Array.isArray(history)) return [];
+
+  return history
+    .map((item) => {
+      const role = item?.role === 'model' ? 'model' : item?.role === 'user' ? 'user' : null;
+      if (!role || !Array.isArray(item?.parts)) return null;
+      const parts = item.parts
+        .map((part: any) => {
+          if (typeof part?.text === 'string') return { text: part.text };
+          if (part?.inlineData?.mimeType && part?.inlineData?.data) {
+            return { inlineData: { mimeType: part.inlineData.mimeType, data: part.inlineData.data } };
+          }
+          return null;
+        })
+        .filter((part: ChatPart | null): part is ChatPart => Boolean(part));
+
+      if (parts.length === 0) return null;
+      return { role, parts } as ChatHistoryItem;
+    })
+    .filter((item: ChatHistoryItem | null): item is ChatHistoryItem => Boolean(item));
+};
+
+const singleChunkStream = async function* (text: string): AsyncGenerator<StreamChunk> {
+  yield { text: text || '' };
+};
+
+class BackendChatSession {
+  private history: ChatHistoryItem[];
+  private modelId: string;
+  private systemInstruction: string;
+  private temperature: number;
+
+  constructor(options: {
+    modelId: string;
+    systemInstruction: string;
+    temperature: number;
+    history?: ChatHistoryItem[];
+  }) {
+    this.history = [...(options.history || [])];
+    this.modelId = options.modelId;
+    this.systemInstruction = options.systemInstruction;
+    this.temperature = options.temperature;
+  }
+
+  async sendMessageStream({ message }: SessionSendPayload) {
+    const response = await callAiProxy<{ text: string }>('gemini_chat', {
+      modelId: this.modelId,
+      systemInstruction: this.systemInstruction,
+      temperature: this.temperature,
+      history: this.history,
+      message
+    });
+
+    const userTurn: ChatHistoryItem = {
+      role: 'user',
+      parts: normalizeMessageParts(message)
+    };
+
+    this.history.push(userTurn);
+    this.history.push({
+      role: 'model',
+      parts: [{ text: response.text || '' }]
+    });
+
+    return singleChunkStream(response.text || '');
+  }
+}
 
 const buildInstruction = (coreIdentity: string, agentKey?: string): string => {
   const storedConstitution = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_constitution_v1') : null;
@@ -20,9 +120,8 @@ const buildInstruction = (coreIdentity: string, agentKey?: string): string => {
   const storedContext = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_context_v1') : null;
   const context = storedContext || CONTEXT_LAYER;
 
-  // NOVO: COMPLIANCE LAYER
   const storedCompliance = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_compliance_v1') : null;
-  const compliance = storedCompliance ? `[DIRETRIZES E COMPLIANCE GLOBAL - OBRIGATÓRIO]:\n${storedCompliance}` : "";
+  const compliance = storedCompliance ? `[DIRETRIZES E COMPLIANCE GLOBAL - OBRIGATORIO]:\n${storedCompliance}` : "";
 
   let identity = coreIdentity;
   if (agentKey) {
@@ -47,67 +146,35 @@ export const createKlausInstruction = (): string => buildInstruction(KLAUS_CORE,
 
 export { GLOBAL_LAYER as GLOBAL_GOVERNANCE_RULES, DEFAULT_PIETRO_PROMPT, DEFAULT_CASSIO_PROMPT, KLAUS_PROMPT, NEWTON_PROMPT } from "../data/prompts";
 
-// ==================================================================================
-// 🔴 ZONA DE INFRAESTRUTURA (CONEXÃO GOOGLE)
-// ==================================================================================
-
-let client: GoogleGenAI | null = null;
-let mainChatSession: Chat | null = null;
-
-const getClient = (): GoogleGenAI => {
-  if (!client) {
-    let apiKey = process.env.API_KEY || "";
-    apiKey = apiKey.replace(/"/g, '').trim();
-
-    if (!apiKey || apiKey.length < 10) {
-      console.error("CRITICAL: Google API Key invalida ou vazia. Verifique vite.config.ts.");
-    } else {
-      console.log("DEBUG: Inicializando Gemini com chave prefixo:", apiKey.substring(0, 8));
-    }
-
-    try {
-      client = new GoogleGenAI({ apiKey: apiKey });
-    } catch (e) {
-      console.error("DEBUG: Erro ao instanciar GoogleGenAI:", e);
-      throw e;
-    }
-  }
-  return client;
-};
+let mainChatSession: BackendChatSession | null = null;
 
 export const startMainSession = (context: string = "", customInstruction: string | null = null) => {
-  const ai = getClient();
-
   const instruction = `
 ${customInstruction || createPietroInstruction()}
-[SITUAÇÃO DA SALA]:
+[SITUACAO DA SALA]:
 ${context || 'Sala de Comando Central.'}
 `.trim();
 
-  mainChatSession = ai.chats.create({
-    model: 'gemini-2.5-flash',
-    config: {
-      systemInstruction: instruction,
-      temperature: 0.2
-    }
+  mainChatSession = new BackendChatSession({
+    modelId: 'gemini-2.5-flash',
+    systemInstruction: instruction,
+    temperature: 0.2
   });
+
   return mainChatSession;
 };
 
 export const startPietroSession = (participantsContext: string = "") => {
   return startMainSession(participantsContext, createPietroInstruction());
-}
+};
 
 export const startKlausSession = () => {
-  const ai = getClient();
-  return ai.chats.create({
-    model: 'gemini-2.5-flash',
-    config: {
-      systemInstruction: createKlausInstruction(),
-      temperature: 0.3
-    }
+  return new BackendChatSession({
+    modelId: 'gemini-2.5-flash',
+    systemInstruction: createKlausInstruction(),
+    temperature: 0.3
   });
-}
+};
 
 export const sendMessageStream = async (message: string, participantsContext: string = "") => {
   if (!mainChatSession) startPietroSession(participantsContext);
@@ -116,40 +183,33 @@ export const sendMessageStream = async (message: string, participantsContext: st
   return mainChatSession.sendMessageStream({ message });
 };
 
-// ATUALIZAÇÃO V2.1.0 - Suporte a Global Compliance Injection
 export const startAgentSession = (
   agentId: string,
   systemInstruction: string,
   knowledgeBase: string[] = [],
   modelId: string = 'gemini-2.5-flash',
-  history?: Content[],
+  history?: any[],
   userContext?: { name: string, nickname: string, role: string },
-  ragContext?: string, // Documentos recuperados automaticamente
-  longTermMemory?: string, // Memória consolidada
-  docsInventory?: string // NOVO: Lista de nomes de documentos acessíveis
+  ragContext?: string,
+  longTermMemory?: string,
+  docsInventory?: string
 ) => {
-  const ai = getClient();
-
   const storedConstitution = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_constitution_v1') : null;
   const constitution = storedConstitution || GLOBAL_LAYER;
 
-  // COMPLIANCE INJECTION
   const storedCompliance = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_compliance_v1') : null;
-  const compliance = storedCompliance ? `\n[PROTOCOLOS DE COMPLIANCE E SEGURANÇA (BLOQUEIO)]:\n${storedCompliance}\n` : "";
+  const compliance = storedCompliance ? `\n[PROTOCOLOS DE COMPLIANCE E SEGURANCA (BLOQUEIO)]:\n${storedCompliance}\n` : "";
 
-  // Memória de Sessão (Manual/Legado) - Agora o RAG Context tem prioridade, mas mantemos para compatibilidade
   const kbContext = knowledgeBase.length > 0
-    ? `\n[MEMÓRIA DE SESSÃO / ARQUIVOS ANEXADOS]:\n${knowledgeBase.map((k, i) => `--- DOC ${i + 1} ---\n${k}`).join('\n')}\n`
+    ? `\n[MEMORIA DE SESSAO / ARQUIVOS ANEXADOS]:\n${knowledgeBase.map((k, i) => `--- DOC ${i + 1} ---\n${k}`).join('\n')}\n`
     : "";
 
-  // INJEÇÃO DE INTERLOCUTOR
   const userInjection = userContext
     ? `\n[INTERLOCUTOR ATUAL]:\nNome: ${userContext.name}\nComo chamar: ${userContext.nickname}\nCargo: ${userContext.role}\nOBS: Trate-o sempre pelo apelido ou sobrenome de forma natural.`
     : "";
 
-  // INJEÇÃO DE INVENTÁRIO (O QUE EU SEI QUE EXISTE)
   const inventoryInjection = docsInventory
-    ? `\n[MEUS DOCUMENTOS E ACESSOS VINCULADOS]:\nVocê tem permissão de leitura nos seguintes documentos do Cofre:\n${docsInventory}\n(O conteúdo será fornecido sob demanda se relevante).`
+    ? `\n[MEUS DOCUMENTOS E ACESSOS VINCULADOS]:\nVoce tem permissao de leitura nos seguintes documentos do Cofre:\n${docsInventory}\n(O conteudo sera fornecido sob demanda se relevante).`
     : "";
 
   const finalInstruction = `
@@ -169,110 +229,50 @@ ${ragContext || ""}
 
 ${kbContext}
 
-[PROTOCOLO DE ORQUESTRAÇÃO / SUMMON]:
-Se o usuário pedir explicitamente para "chamar", "convocar" ou "colocar" outra pessoa/agente na conversa:
-1. Responda confirmando a ação naturalmente (Ex: "Certo, chamando o Pietro agora.").
-2. IMEDIATAMENTE APÓS a confirmação, adicione a tag oculta: <<<CALL: Nome do Agente>>>
-Exemplo: "Entendido, Rodrigues. O Klaus entrará na sala. <<<CALL: Klaus Wagner>>>"
-Não simule o diálogo do novo agente ainda. Apenas emita o comando.
+[PROTOCOLO DE ORQUESTRACAO / SUMMON]:
+Se o usuario pedir explicitamente para "chamar", "convocar" ou "colocar" outra pessoa/agente na conversa:
+1. Responda confirmando a acao naturalmente (Ex: "Certo, chamando o Pietro agora.").
+2. IMEDIATAMENTE APOS a confirmacao, adicione a tag oculta: <<<CALL: Nome do Agente>>>
+Exemplo: "Entendido, Rodrigues. O Klaus entrara na sala. <<<CALL: Klaus Wagner>>>"
+Nao simule o dialogo do novo agente ainda. Apenas emita o comando.
 
 [ID DO AGENTE]: ${agentId}
 `.trim();
 
-  return ai.chats.create({
-    model: modelId,
-    config: {
-      systemInstruction: finalInstruction,
-      temperature: 0.4
-    },
-    history: history
+  return new BackendChatSession({
+    modelId,
+    systemInstruction: finalInstruction,
+    temperature: 0.4,
+    history: normalizeHistory(history)
   });
 };
 
-// NOVA FUNÇÃO: CONSOLIDAR MEMÓRIA (TREINAMENTO)
 export const consolidateChatMemory = async (chatHistory: string): Promise<string> => {
-  const ai = getClient();
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `
-ATENÇÃO SISTEMA DE TREINAMENTO:
-Você é um auditor de qualidade de IA.
-Analise o histórico de conversa abaixo entre o Usuário (Rodrigues) e o Agente.
-Extraia APENAS novos fatos, correções de comportamento, regras de negócio ou preferências que o usuário ensinou ao agente.
-Ignore cumprimentos ou conversa fiada.
-Se não houver nada relevante para aprender, retorne "Nenhum aprendizado novo".
-
-HISTÓRICO:
-${chatHistory}
-
-SAÍDA:
-Lista concisa de aprendizados (bullet points).
-`.trim(),
-      config: {
-        temperature: 0.1
-      }
-    });
+    const response = await callAiProxy<{ text: string }>('consolidate_chat_memory', { chatHistory });
     return response.text || "";
   } catch (e) {
-    console.error("Erro ao consolidar memória", e);
+    console.error("Erro ao consolidar memoria", e);
     return "";
   }
 };
 
 export const generateTitleOptions = async (messagesText: string): Promise<string[]> => {
-  const ai = getClient();
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `
-ATENÇÃO: Você é um assistente executivo.
-Analise a conversa e sugira 3 opções de Títulos.
-PADRÃO: "PalavraChave | Descrição".
-CONVERSA:
-${messagesText}
-Retorne JSON Array de strings.
-`.trim(),
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING }
-        },
-        temperature: 0.4
-      }
-    });
-    const titles = JSON.parse(response.text || "[]");
-    return Array.isArray(titles) ? titles.slice(0, 3) : ["Geral | Nova Conversa", "Pauta | Assunto Pendente", "Sistema | Discussão Aberta"];
+    const response = await callAiProxy<{ titles: string[] }>('generate_title_options', { messagesText });
+    const titles = Array.isArray(response.titles) ? response.titles : [];
+    return titles.slice(0, 3);
   } catch (e) {
     console.error("Erro no Auto-Title", e);
-    return ["Sistema | Nova Pauta", "Geral | Conversa", "Pendente | Tópico"];
+    return ["Sistema | Nova Pauta", "Geral | Conversa", "Pendente | Topico"];
   }
 };
 
 export const generateTaskSuggestions = async (contextText: string): Promise<string[]> => {
-  const ai = getClient();
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `
-ATENÇÃO: Sugira 3 nomes curtos para Tarefa (Pauta) baseados no contexto.
-Comece com Verbo no Infinitivo.
-CONTEXTO:
-${contextText}
-Retorne JSON Array de strings.
-`.trim(),
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: { type: Type.STRING }
-        },
-        temperature: 0.4
-      }
-    });
-    const tasks = JSON.parse(response.text || "[]");
-    return Array.isArray(tasks) ? tasks.slice(0, 3) : [];
+    const response = await callAiProxy<{ tasks: string[] }>('generate_task_suggestions', { contextText });
+    const tasks = Array.isArray(response.tasks) ? response.tasks : [];
+    return tasks.slice(0, 3);
   } catch (e) {
     console.error("Erro no Auto-Task", e);
     return [];
@@ -280,72 +280,16 @@ Retorne JSON Array de strings.
 };
 
 export const transcribeAudio = async (base64Audio: string, mimeType: string = 'audio/webm'): Promise<string> => {
-  const ai = getClient();
-  const promptText = "Transcreva o áudio fielmente.";
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: {
-        parts: [
-          { inlineData: { mimeType: mimeType, data: base64Audio } },
-          { text: promptText }
-        ]
-      },
-      config: { temperature: 0.0 }
-    });
+    const response = await callAiProxy<{ text: string }>('transcribe_audio', { base64Audio, mimeType });
     return response.text || "";
   } catch (error) {
-    console.warn("Gemini 2.0 Flash Audio failed...", error);
+    console.warn("Gemini audio transcription failed", error);
     return "";
   }
 };
 
-const AGENT_SCHEMA = {
-  type: Type.OBJECT,
-  properties: {
-    name: { type: Type.STRING },
-    universalId: { type: Type.STRING },
-    version: { type: Type.STRING },
-    company: { type: Type.STRING },
-    officialRole: { type: Type.STRING },
-    overview: {
-      type: Type.OBJECT,
-      properties: {
-        centralPhrase: { type: Type.STRING },
-        impactROI: { type: Type.STRING },
-        centralPrinciple: { type: Type.STRING }
-      }
-    },
-    decisionRoadmap: {
-      type: Type.ARRAY,
-      items: { type: Type.OBJECT, properties: { fatalQuestion: { type: Type.STRING } } }
-    },
-    protocols: {
-      type: Type.ARRAY,
-      items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, action: { type: Type.STRING } } }
-    },
-    firewall: {
-      type: Type.OBJECT,
-      properties: {
-        prohibited: { type: Type.ARRAY, items: { type: Type.STRING } },
-        escalation: { type: Type.STRING }
-      }
-    },
-    fullPrompt: { type: Type.STRING }
-  },
-  required: ["name", "version", "officialRole", "overview", "decisionRoadmap", "protocols", "firewall", "fullPrompt"]
-};
-
 export const createAgentFromScratch = async (prompt: string) => {
-  const ai = getClient();
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: `ARQUITETO PIETRO: Gere o DNA V1.0 para: "${prompt}".`,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: AGENT_SCHEMA,
-      temperature: 0.2
-    }
-  });
-  return JSON.parse(response.text || "{}");
+  const response = await callAiProxy<{ agent: Record<string, any> }>('create_agent_from_scratch', { prompt });
+  return response.agent || {};
 };
