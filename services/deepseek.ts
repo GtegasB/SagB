@@ -7,6 +7,9 @@ export interface DeepSeekMessage {
 
 const MAX_MESSAGES = 24;
 const MAX_TOTAL_CHARS = 24000;
+const MAX_SYSTEM_CHARS = 16000;
+const PRIMARY_MAX_TOKENS = 1200;
+const FALLBACK_MAX_TOKENS = 700;
 
 const compactHistory = (messages: DeepSeekMessage[]): DeepSeekMessage[] => {
   const cleaned = (messages || [])
@@ -54,21 +57,63 @@ const toUserFacingError = (rawMessage: string): string => {
   return '[ERRO DE CONEXÃO COM DEEPSEEK. VERIFIQUE LOGS DO NETLIFY PARA DETALHE.]';
 };
 
+const isTimeoutLikeError = (rawMessage: string): boolean => {
+  const lower = (rawMessage || '').toLowerCase();
+  return lower.includes('timed out') || lower.includes('timeout') || lower.includes('504');
+};
+
+const compactSystemInstruction = (systemInstruction: string): string => {
+  const normalized = String(systemInstruction || '').trim();
+  if (normalized.length <= MAX_SYSTEM_CHARS) return normalized;
+  return normalized.slice(0, MAX_SYSTEM_CHARS);
+};
+
+const truncateMessageContent = (messages: DeepSeekMessage[], maxCharsPerMessage: number): DeepSeekMessage[] => (
+  messages.map((message) => {
+    const content = String(message.content || '');
+    if (content.length <= maxCharsPerMessage) return message;
+    return { ...message, content: content.slice(content.length - maxCharsPerMessage) };
+  })
+);
+
+const requestDeepSeek = async (
+  messages: DeepSeekMessage[],
+  systemInstruction: string,
+  maxTokens: number
+) => callAiProxy<{ text: string }>('deepseek_chat', {
+  messages,
+  systemInstruction,
+  maxTokens
+});
+
 export async function* streamDeepSeekResponse(
   messages: DeepSeekMessage[],
   systemInstruction: string
 ) {
+  const compactedSystemInstruction = compactSystemInstruction(systemInstruction);
   try {
     const compactedMessages = compactHistory(messages);
-    const response = await callAiProxy<{ text: string }>('deepseek_chat', {
-      messages: compactedMessages,
-      systemInstruction
-    });
+    const response = await requestDeepSeek(compactedMessages, compactedSystemInstruction, PRIMARY_MAX_TOKENS);
 
     yield { text: response.text || '' };
   } catch (error) {
-    const message = String((error as any)?.message || '');
-    console.error('DeepSeek proxy request failed', message || error);
-    yield { text: `\n\n${toUserFacingError(message)}` };
+    const firstMessage = String((error as any)?.message || '');
+
+    if (isTimeoutLikeError(firstMessage)) {
+      try {
+        const reducedMessages = truncateMessageContent(compactHistory(messages).slice(-10), 1200);
+        const retryResponse = await requestDeepSeek(reducedMessages, compactedSystemInstruction, FALLBACK_MAX_TOKENS);
+        yield { text: retryResponse.text || '' };
+        return;
+      } catch (retryError) {
+        const retryMessage = String((retryError as any)?.message || '');
+        console.error('DeepSeek proxy request failed after retry', retryMessage || retryError);
+        yield { text: `\n\n${toUserFacingError(retryMessage || firstMessage)}` };
+        return;
+      }
+    }
+
+    console.error('DeepSeek proxy request failed', firstMessage || error);
+    yield { text: `\n\n${toUserFacingError(firstMessage)}` };
   }
 }

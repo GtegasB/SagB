@@ -64,7 +64,7 @@ const requestDeepSeekCompletion = async (payload) => {
           messages: fullMessages,
           stream: false,
           temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.5,
-          max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 2000
+          max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 1200
         })
       });
 
