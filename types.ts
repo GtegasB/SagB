@@ -176,6 +176,22 @@ export interface KnowledgeAttachment {
   payload?: Record<string, any>;
 }
 
+export interface AgentMemory {
+  id: string;
+  workspaceId: string;
+  agentId: string;
+  sessionId?: string | null;
+  memoryType: 'learning' | 'fact' | 'preference' | 'constraint' | 'summary';
+  content: string;
+  confidence?: number;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  payload?: Record<string, any>;
+}
+
 export interface WorkspaceMember {
   id: string;
   workspaceId: string;

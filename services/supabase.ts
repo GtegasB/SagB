@@ -542,6 +542,24 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     };
   }
 
+  if (table === 'agent_memories') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      agentId: String(r.agent_id ?? ''),
+      sessionId: r.session_id ?? null,
+      memoryType: r.memory_type ?? 'learning',
+      content: String(r.content ?? ''),
+      confidence: r.confidence !== undefined && r.confidence !== null ? Number(r.confidence) : undefined,
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      createdBy: r.created_by ?? undefined,
+      updatedBy: r.updated_by ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
   if (table === 'chat_sessions') {
     return {
       id: String(r.id),
@@ -872,6 +890,19 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     delete p.updatedAt;
   }
 
+  if (table === 'agent_memories') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
+    if (p.sessionId !== undefined) { p.session_id = p.sessionId; delete p.sessionId; }
+    if (p.memoryType !== undefined) { p.memory_type = p.memoryType; delete p.memoryType; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
   if (table === 'chat_sessions') {
     if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
     if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
@@ -1080,7 +1111,7 @@ const getBasePollingMs = (ref: AnyRef) => {
   const table = ref.table;
   if (table === 'chat_messages') return 2500;
   if (table === 'chat_sessions') return 4000;
-  if (table === 'agents' || table === 'workspace_members' || table === 'agent_configs') return 15000;
+  if (table === 'agents' || table === 'workspace_members' || table === 'agent_configs' || table === 'agent_memories') return 15000;
   if (
     table === 'governance_global_culture' ||
     table === 'governance_compliance_rules' ||

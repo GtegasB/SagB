@@ -163,6 +163,7 @@ const App: React.FC = () => {
 
   const [activatedAgents, setActivatedAgents] = useState<Agent[]>([]);
   const [agentConfigsByAgentId, setAgentConfigsByAgentId] = useState<Record<string, { fullPrompt?: string; globalDocuments?: Agent['globalDocuments']; docCount?: number }>>({});
+  const [agentMemoriesByAgentId, setAgentMemoriesByAgentId] = useState<Record<string, string[]>>({});
   const [messages, setMessages] = useState<Message[]>([]);
   const [mainChatSessionId, setMainChatSessionId] = useState<string | null>(null);
   const [blueprints, setBlueprints] = useState<Record<string, BusinessBlueprint>>({});
@@ -582,6 +583,7 @@ if (userId) {
       setVaultItems([]);
       setKnowledgeNodes([]);
       setAgentConfigsByAgentId({});
+      setAgentMemoriesByAgentId({});
       return;
     }
 
@@ -598,6 +600,7 @@ if (userId) {
     );
 
     const agentConfigsQuery = query(collection(db, 'agent_configs'), orderBy('updatedAt', 'desc'));
+    const agentMemoriesQuery = query(collection(db, 'agent_memories'), orderBy('createdAt', 'desc'));
 
     const unsubscribeCulture = onSnapshot(cultureQuery, (snapshot) => {
       const rows = snapshot.docs.map(doc => doc.data() as GovernanceCulture);
@@ -634,12 +637,30 @@ if (userId) {
       setAgentConfigsByAgentId(mapped);
     }, (error) => console.error('Erro ao carregar agent_configs:', error));
 
+    const unsubscribeAgentMemories = onSnapshot(agentMemoriesQuery, (snapshot) => {
+      const rows = scopeGovernanceRowsByWorkspace(snapshot.docs.map(doc => doc.data() as any));
+      const mapped: Record<string, string[]> = {};
+      rows.forEach((row) => {
+        const targetAgentId = String(row.agentId || row.agent_id || '').trim();
+        const content = String(row.content || '').trim();
+        const status = normalizeStatus(row.status);
+        if (!targetAgentId || !content) return;
+        if (status === 'archived' || status === 'deleted') return;
+        if (!mapped[targetAgentId]) mapped[targetAgentId] = [];
+        if (!mapped[targetAgentId].includes(content)) {
+          mapped[targetAgentId].push(content);
+        }
+      });
+      setAgentMemoriesByAgentId(mapped);
+    }, (error) => console.error('Erro ao carregar agent_memories:', error));
+
     return () => {
       unsubscribeCulture();
       unsubscribeCompliance();
       unsubscribeVault();
       unsubscribeKnowledge();
       unsubscribeAgentConfigs();
+      unsubscribeAgentMemories();
     };
   }, [user, activeWorkspaceId, memberWorkspaceIds]);
 
@@ -1153,12 +1174,16 @@ if (userId) {
 
       const hydratedAgents = remoteAgents.map((agent) => {
         const config = agentConfigsByAgentId[agent.id] || (agent.universalId ? agentConfigsByAgentId[agent.universalId] : undefined);
-        if (!config) return agent;
+        const memories = agentMemoriesByAgentId[agent.id]
+          || (agent.universalId ? agentMemoriesByAgentId[agent.universalId] : undefined)
+          || agent.learnedMemory
+          || [];
         return {
           ...agent,
-          fullPrompt: config.fullPrompt ?? agent.fullPrompt ?? '',
-          globalDocuments: config.globalDocuments ?? agent.globalDocuments,
-          docCount: config.docCount ?? agent.docCount
+          fullPrompt: config?.fullPrompt ?? agent.fullPrompt ?? '',
+          globalDocuments: config?.globalDocuments ?? agent.globalDocuments,
+          docCount: config?.docCount ?? agent.docCount,
+          learnedMemory: Array.from(new Set(memories.filter(Boolean)))
         };
       });
 
@@ -1168,7 +1193,7 @@ if (userId) {
     });
 
     return () => unsubscribe();
-  }, [user, agentConfigsByAgentId]);
+  }, [user, agentConfigsByAgentId, agentMemoriesByAgentId]);
 
   // --- SAVE STATE ---
 

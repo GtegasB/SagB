@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import { Agent, Message, Sender, BusinessUnit, AgentTier, AgentStatus, Topic, PersonaConfig, UserProfile } from '../types';
 import { startAgentSession, generateTitleOptions, transcribeAudio, generateTaskSuggestions, consolidateChatMemory } from '../services/gemini';
 import { streamDeepSeekResponse, DeepSeekMessage } from '../services/deepseek';
-import { retrieveRelevantContext, retrieveLearnedMemory, addDocumentToAgent, addLearningToAgent } from '../services/knowledge';
+import { retrieveRelevantContext, retrieveLearnedMemory } from '../services/knowledge';
 import { db, collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '../services/supabase';
 import { SendIcon, NewChatIcon, MicIcon, StopCircleIcon, BackIcon, FolderIcon, PlusIcon, FileTextIcon, CloudUploadIcon, PaperclipIcon, XIcon, BookIcon, BotIcon, PencilIcon, CheckIcon, TrashIcon } from './Icon';
 import { Avatar } from './Avatar';
@@ -716,17 +716,63 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         }
     };
 
+    const extractLearningItems = (rawLearning: string): string[] => {
+        const cleaned = String(rawLearning || '').trim();
+        if (!cleaned) return [];
+        if (/nenhum aprendizado novo/i.test(cleaned)) return [];
+
+        const lines = cleaned
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => line.replace(/^[-*•\d\.\)\s]+/, '').trim())
+            .filter(Boolean);
+
+        if (lines.length === 0) return [];
+        if (lines.length === 1) return [lines[0]];
+        return Array.from(new Set(lines));
+    };
+
     const handleConsolidateLearning = async () => {
         if (!selectedAgent || activeMessages.length < 5) return;
         setIsTraining(true);
         const historyText = activeMessages.map(m => `${m.sender}: ${m.text}`).join('\n');
         const learnings = await consolidateChatMemory(historyText);
 
-        if (learnings && learnings !== "Nenhum aprendizado novo") {
-            const updatedAgent = addLearningToAgent(selectedAgent, learnings);
+        const learningItems = extractLearningItems(learnings || '');
+        if (learningItems.length > 0) {
+            if (useSupabaseChat && workspaceId) {
+                await Promise.all(
+                    learningItems.map((item) =>
+                        addDoc(collection(db, "agent_memories"), {
+                            workspaceId,
+                            agentId: selectedAgent.id,
+                            sessionId: currentSessionId,
+                            memoryType: 'learning',
+                            content: item,
+                            confidence: 0.7,
+                            status: 'active',
+                            createdAt: new Date(),
+                            updatedAt: new Date(),
+                            createdBy: ownerUserId,
+                            updatedBy: ownerUserId,
+                            payload: { source: 'consolidate_chat_memory' }
+                        }).catch((error) => {
+                            console.error("Erro ao persistir aprendizado em agent_memories:", error);
+                        })
+                    )
+                );
+            }
+
+            const mergedLearnedMemory = Array.from(new Set([
+                ...(selectedAgent.learnedMemory || []),
+                ...learningItems
+            ]));
+
+            const updatedAgent = { ...selectedAgent, learnedMemory: mergedLearnedMemory };
             onUpdateAgents(dynamicAgents.map(a => a.id === updatedAgent.id ? updatedAgent : a));
             setSelectedAgent(updatedAgent);
-            alert("Memória consolidada com sucesso!");
+            alert("Memória consolidada e salva no Supabase com sucesso!");
         } else {
             alert("Nada de novo para aprender nesta conversa.");
         }
