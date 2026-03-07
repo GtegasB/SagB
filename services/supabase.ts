@@ -518,10 +518,6 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
       'id',
       'title',
       'status',
-      'venture_id',
-      'ventureId',
-      'bu_id',
-      'buId',
       'assignee',
       'priority',
       'description',
@@ -533,9 +529,28 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
       'dueDate'
     ]);
 
-    // Converte campos de relacionamento comuns
-    if (p.ventureId !== undefined && p.venture_id === undefined) { p.venture_id = p.ventureId; delete p.ventureId; }
-    if (p.buId !== undefined && p.bu_id === undefined) { p.bu_id = p.buId; delete p.buId; }
+    if (table === 'tasks' || table === 'topics') {
+      knownKeys.add('venture_id');
+      knownKeys.add('ventureId');
+      knownKeys.add('bu_id');
+      knownKeys.add('buId');
+    }
+
+    // Converte campos de relacionamento apenas para tabelas que suportam esse schema.
+    if ((table === 'tasks' || table === 'topics') && p.ventureId !== undefined && p.venture_id === undefined) {
+      p.venture_id = p.ventureId;
+      delete p.ventureId;
+    }
+    if ((table === 'tasks' || table === 'topics') && p.buId !== undefined && p.bu_id === undefined) {
+      p.bu_id = p.buId;
+      delete p.buId;
+    }
+
+    // Em agents, preserva em payload para evitar erro de coluna inexistente (ex.: bu_id).
+    if (table === 'agents') {
+      delete p.bu_id;
+      delete p.venture_id;
+    }
     if ((table === 'tasks' || table === 'topics') && p.dueDate !== undefined && p.due_date === undefined) {
       p.due_date = p.dueDate;
     }
