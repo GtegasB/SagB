@@ -165,10 +165,10 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
     // --- AUTO-OPEN FORCED AGENT ---
     useEffect(() => {
-        if (forcedAgent) {
+        if (forcedAgent && forcedAgent.id !== selectedAgent?.id) {
             handleOpenAgent(forcedAgent);
         }
-    }, [forcedAgent]);
+    }, [forcedAgent, selectedAgent?.id]);
 
     // --- RE-INIT SESSION ON MODEL CHANGE ---
     useEffect(() => {
@@ -351,16 +351,15 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
 
     const handleOpenAgent = (agent: Agent) => {
+        if (agent.status === 'PLANNED') return;
+
         setSelectedAgent(agent);
-        if (agent.status !== 'PLANNED') {
-            setCurrentSessionId(null);
-            setActiveMessages([]);
-            setTitleOptions(null);
-            setTaskSuggestions(null);
-            setAttachment(null);
-            setActiveParticipants([]);
-            return;
-        }
+        setCurrentSessionId(null);
+        setActiveMessages([]);
+        setTitleOptions(null);
+        setTaskSuggestions(null);
+        setAttachment(null);
+        setActiveParticipants([]);
     };
 
     useEffect(() => {

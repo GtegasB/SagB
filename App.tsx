@@ -230,6 +230,7 @@ const App: React.FC = () => {
   const [attachment, setAttachment] = useState<{ data: string, mimeType: string, preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uiPrefsHydrated, setUiPrefsHydrated] = useState(false);
+  const uiPrefsHydratedUserRef = useRef<string | null>(null);
 
   const userPayload = useMemo<Record<string, any>>(() => {
     const payload = (userProfile as any)?.payload;
@@ -492,7 +493,13 @@ if (userId) {
 
   // --- PREFERÊNCIAS DE UI VIA SUPABASE (users.payload.uiPrefs) ---
   useEffect(() => {
-    if (!user) return;
+    const uid = userProfile?.uid || (user as any)?.id || (user as any)?.uid;
+    if (!uid) {
+      uiPrefsHydratedUserRef.current = null;
+      setUiPrefsHydrated(false);
+      return;
+    }
+    if (uiPrefsHydrated && uiPrefsHydratedUserRef.current === uid) return;
 
     let allUnits = [...INITIAL_BUSINESS_UNITS];
     const customUnits = Array.isArray(uiPrefs.customUnits) ? uiPrefs.customUnits : [];
@@ -516,8 +523,15 @@ if (userId) {
       setActiveTab('home');
     }
 
+    uiPrefsHydratedUserRef.current = uid;
     setUiPrefsHydrated(true);
-  }, [user, uiPrefs]);
+  }, [user, userProfile?.uid, uiPrefs, uiPrefsHydrated]);
+
+  useEffect(() => {
+    if (activeTab !== 'chat-room' && chatTargetAgent) {
+      setChatTargetAgent(null);
+    }
+  }, [activeTab, chatTargetAgent]);
 
   const saveUiPrefs = useCallback(async (updates: Partial<AppUiPrefs>) => {
     const uid = userProfile?.uid || (user as any)?.id || (user as any)?.uid;
@@ -1428,7 +1442,7 @@ if (userId) {
       );
 
       // NOVA ROTA: EQUIPE GLOBAL (VISÃO DE TODOS OS AGENTES PARA CHAT)
-      case 'team': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} viewMode="global" userProfile={userProfile} activeWorkspaceId={activeWorkspaceId} />;
+      case 'team': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} viewMode="global" userProfile={userProfile} activeWorkspaceId={activeWorkspaceId} />;
 
       // RESTORED: CHAT ROOM (Systemic Vision Logic) with onConvertToTopic prop
       case 'chat-room': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} userProfile={userProfile} activeWorkspaceId={activeWorkspaceId} />;
