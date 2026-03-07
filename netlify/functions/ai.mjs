@@ -17,6 +17,8 @@ const pickDeepSeekKey = () => {
   return (process.env.DEEPSEEK_API_KEY || process.env.VITE_DEEPSEEK_API_KEY || '').trim();
 };
 
+const hasGeminiKey = () => Boolean(pickGeminiKey());
+
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const createHttpError = (statusCode, message) => {
@@ -31,6 +33,69 @@ const getGeminiClient = () => {
     throw new Error('Missing Gemini API key in function environment.');
   }
   return new GoogleGenAI({ apiKey: key });
+};
+
+const requestDeepSeekCompletion = async (payload) => {
+  const apiKey = pickDeepSeekKey();
+  if (!apiKey) {
+    throw createHttpError(500, 'Missing DeepSeek API key in function environment.');
+  }
+
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  const fullMessages = [
+    { role: 'system', content: payload.systemInstruction || '' },
+    ...messages
+  ];
+
+  const maxAttempts = 3;
+  const transientStatus = new Set([408, 409, 429, 500, 502, 503, 504]);
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: payload.model || 'deepseek-chat',
+          messages: fullMessages,
+          stream: false,
+          temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.5,
+          max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 2000
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        const requestId = response.headers.get('x-request-id') || '';
+        const suffix = requestId ? ` [request_id=${requestId}]` : '';
+        const message = `DeepSeek request failed (${response.status})${suffix}: ${errText}`;
+
+        if (transientStatus.has(response.status) && attempt < maxAttempts) {
+          await wait(300 * attempt);
+          continue;
+        }
+
+        throw createHttpError(response.status, message);
+      }
+
+      const data = await response.json().catch(() => ({}));
+      return data?.choices?.[0]?.message?.content || '';
+    } catch (error) {
+      lastError = error;
+      const statusCode = Number(error?.statusCode || 0);
+      if (attempt < maxAttempts && transientStatus.has(statusCode)) {
+        await wait(300 * attempt);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError || createHttpError(500, 'DeepSeek request failed unexpectedly.');
 };
 
 const normalizeMessageParts = (message) => {
@@ -138,66 +203,8 @@ const handleGeminiChat = async (payload) => {
 };
 
 const handleDeepSeekChat = async (payload) => {
-  const apiKey = pickDeepSeekKey();
-  if (!apiKey) {
-    throw createHttpError(500, 'Missing DeepSeek API key in function environment.');
-  }
-
-  const messages = Array.isArray(payload.messages) ? payload.messages : [];
-  const fullMessages = [
-    { role: 'system', content: payload.systemInstruction || '' },
-    ...messages
-  ];
-
-  const maxAttempts = 3;
-  const transientStatus = new Set([408, 409, 429, 500, 502, 503, 504]);
-  let lastError = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: payload.model || 'deepseek-chat',
-          messages: fullMessages,
-          stream: false,
-          temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.5,
-          max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 2000
-        })
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        const requestId = response.headers.get('x-request-id') || '';
-        const suffix = requestId ? ` [request_id=${requestId}]` : '';
-        const message = `DeepSeek request failed (${response.status})${suffix}: ${errText}`;
-
-        if (transientStatus.has(response.status) && attempt < maxAttempts) {
-          await wait(300 * attempt);
-          continue;
-        }
-
-        throw createHttpError(response.status, message);
-      }
-
-      const data = await response.json().catch(() => ({}));
-      return { text: data?.choices?.[0]?.message?.content || '' };
-    } catch (error) {
-      lastError = error;
-      const statusCode = Number(error?.statusCode || 0);
-      if (attempt < maxAttempts && transientStatus.has(statusCode)) {
-        await wait(300 * attempt);
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  throw lastError || createHttpError(500, 'DeepSeek request failed unexpectedly.');
+  const text = await requestDeepSeekCompletion(payload);
+  return { text };
 };
 
 const handleTranscribeAudio = async (payload) => {
@@ -220,12 +227,8 @@ const handleTranscribeAudio = async (payload) => {
 };
 
 const handleConsolidateChatMemory = async (payload) => {
-  const ai = getGeminiClient();
   const chatHistory = payload.chatHistory || '';
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: `
+  const prompt = `
 ATENCAO SISTEMA DE TREINAMENTO:
 Voce e um auditor de qualidade de IA.
 Analise o historico de conversa abaixo entre o Usuario (Rodrigues) e o Agente.
@@ -238,7 +241,24 @@ ${chatHistory}
 
 SAIDA:
 Lista concisa de aprendizados (bullet points).
-`.trim(),
+`.trim();
+
+  if (!hasGeminiKey()) {
+    const text = await requestDeepSeekCompletion({
+      model: 'deepseek-chat',
+      systemInstruction: 'Voce e um auditor de aprendizagem de agentes.',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      maxTokens: 2000
+    });
+    return { text };
+  }
+
+  const ai = getGeminiClient();
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: prompt,
     config: { temperature: 0.1 }
   });
 
@@ -246,19 +266,32 @@ Lista concisa de aprendizados (bullet points).
 };
 
 const handleGenerateTitleOptions = async (payload) => {
-  const ai = getGeminiClient();
   const messagesText = payload.messagesText || '';
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: `
+  const prompt = `
 ATENCAO: Voce e um assistente executivo.
 Analise a conversa e sugira 3 opcoes de Titulos.
 PADRAO: "PalavraChave | Descricao".
 CONVERSA:
 ${messagesText}
 Retorne JSON Array de strings.
-`.trim(),
+`.trim();
+
+  if (!hasGeminiKey()) {
+    const text = await requestDeepSeekCompletion({
+      model: 'deepseek-chat',
+      systemInstruction: 'Responda estritamente no formato solicitado.',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.4,
+      maxTokens: 700
+    });
+    return { titles: parseJsonArray(text, []) };
+  }
+
+  const ai = getGeminiClient();
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: prompt,
     config: {
       responseMimeType: 'application/json',
       responseSchema: {
@@ -273,18 +306,31 @@ Retorne JSON Array de strings.
 };
 
 const handleGenerateTaskSuggestions = async (payload) => {
-  const ai = getGeminiClient();
   const contextText = payload.contextText || '';
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: `
+  const prompt = `
 ATENCAO: Sugira 3 nomes curtos para Tarefa (Pauta) baseados no contexto.
 Comece com Verbo no Infinitivo.
 CONTEXTO:
 ${contextText}
 Retorne JSON Array de strings.
-`.trim(),
+`.trim();
+
+  if (!hasGeminiKey()) {
+    const text = await requestDeepSeekCompletion({
+      model: 'deepseek-chat',
+      systemInstruction: 'Responda estritamente no formato solicitado.',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.4,
+      maxTokens: 700
+    });
+    return { tasks: parseJsonArray(text, []) };
+  }
+
+  const ai = getGeminiClient();
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: prompt,
     config: {
       responseMimeType: 'application/json',
       responseSchema: {
@@ -299,8 +345,19 @@ Retorne JSON Array de strings.
 };
 
 const handleCreateAgentFromScratch = async (payload) => {
-  const ai = getGeminiClient();
   const prompt = payload.prompt || '';
+  if (!hasGeminiKey()) {
+    const text = await requestDeepSeekCompletion({
+      model: 'deepseek-chat',
+      systemInstruction: 'Voce e um arquiteto de agentes. Retorne apenas JSON valido.',
+      messages: [{ role: 'user', content: `ARQUITETO PIETRO: Gere o DNA V1.0 para: "${prompt}".` }],
+      temperature: 0.2,
+      maxTokens: 3500
+    });
+    return { agent: parseJsonObject(text, {}) };
+  }
+
+  const ai = getGeminiClient();
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
