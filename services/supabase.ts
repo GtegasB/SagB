@@ -535,6 +535,47 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
       knownKeys.add('bu_id');
       knownKeys.add('buId');
     }
+
+    if (table === 'agents') {
+      [
+        'name',
+        'official_role',
+        'officialRole',
+        'company',
+        'tier',
+        'division',
+        'sector',
+        'salary',
+        'collaborator_type',
+        'collaboratorType',
+        'model_provider',
+        'modelProvider',
+        'avatar_url',
+        'avatarUrl',
+        'ambient_photo_url',
+        'ambientPhotoUrl',
+        'universal_id',
+        'universalId',
+        'full_prompt',
+        'fullPrompt',
+        'version',
+        'active',
+        'workspace_id',
+        'workspaceId',
+        'venture_id',
+        'ventureId',
+        'bu_id',
+        'buId',
+        'created_by',
+        'createdBy',
+        'updated_by',
+        'updatedBy',
+        'start_date',
+        'startDate',
+        'doc_count',
+        'docCount'
+      ].forEach((k) => knownKeys.add(k));
+    }
     // Converte campos de relacionamento apenas para tabelas que suportam esse schema.
     if ((table === 'tasks' || table === 'topics') && p.ventureId !== undefined && p.venture_id === undefined) {
       p.venture_id = p.ventureId;
@@ -547,6 +588,46 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
 
     // Em agents, preserva em payload para evitar erro de coluna inexistente (ex.: bu_id).
     if (table === 'agents') {
+      if (p.officialRole !== undefined && p.official_role === undefined) {
+        p.official_role = p.officialRole;
+        delete p.officialRole;
+      }
+      if (p.collaboratorType !== undefined && p.collaborator_type === undefined) {
+        p.collaborator_type = p.collaboratorType;
+        delete p.collaboratorType;
+      }
+      if (p.modelProvider !== undefined && p.model_provider === undefined) {
+        p.model_provider = p.modelProvider;
+        delete p.modelProvider;
+      }
+      if (p.avatarUrl !== undefined && p.avatar_url === undefined) {
+        p.avatar_url = p.avatarUrl;
+        delete p.avatarUrl;
+      }
+      if (p.ambientPhotoUrl !== undefined && p.ambient_photo_url === undefined) {
+        p.ambient_photo_url = p.ambientPhotoUrl;
+        delete p.ambientPhotoUrl;
+      }
+      if (p.universalId !== undefined && p.universal_id === undefined) {
+        p.universal_id = p.universalId;
+        delete p.universalId;
+      }
+      if (p.fullPrompt !== undefined && p.full_prompt === undefined) {
+        p.full_prompt = p.fullPrompt;
+        delete p.fullPrompt;
+      }
+      if (p.workspaceId !== undefined && p.workspace_id === undefined) {
+        p.workspace_id = p.workspaceId;
+        delete p.workspaceId;
+      }
+      if (p.ventureId !== undefined && p.venture_id === undefined) {
+        p.venture_id = p.ventureId;
+        delete p.ventureId;
+      }
+      if (p.buId !== undefined && p.bu_id === undefined) {
+        p.bu_id = p.buId;
+        delete p.buId;
+      }
       if (p.createdBy !== undefined && p.created_by === undefined) {
         p.created_by = p.createdBy;
         delete p.createdBy;
@@ -555,8 +636,14 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
         p.updated_by = p.updatedBy;
         delete p.updatedBy;
       }
-      delete p.bu_id;
-      delete p.venture_id;
+      if (p.startDate !== undefined && p.start_date === undefined) {
+        p.start_date = p.startDate;
+        delete p.startDate;
+      }
+      if (p.docCount !== undefined && p.doc_count === undefined) {
+        p.doc_count = p.docCount;
+        delete p.docCount;
+      }
     }
     if ((table === 'tasks' || table === 'topics') && p.dueDate !== undefined && p.due_date === undefined) {
       p.due_date = p.dueDate;
@@ -757,7 +844,7 @@ const insertWithSchemaFallback = async (table: string, initialBody: Record<strin
   const body: Record<string, any> = { ...initialBody };
   const removed = new Set<string>();
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
       return await restFetch(table, { method: 'POST', body });
     } catch (error: any) {
