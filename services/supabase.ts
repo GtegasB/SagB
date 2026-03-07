@@ -324,6 +324,9 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     r.workspaceId = pick(r, 'workspaceId', 'workspace_id') ?? null;
     const created = pick(r, 'createdAt', 'created_at');
     r.createdAt = asJsDate(created) ?? new Date();
+    const updated = pick(r, 'updatedAt', 'updated_at');
+    r.updatedAt = updated ? asJsDate(updated) : undefined;
+    r.payload = (r.payload && typeof r.payload === 'object') ? r.payload : {};
   }
 
   if (table === 'tasks') {
@@ -620,7 +623,9 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (p.uid !== undefined) { p.id = p.uid; delete p.uid; }
     if (p.name !== undefined) { p.display_name = p.name; delete p.name; }
     if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
     delete p.createdAt;
+    delete p.updatedAt;
   }
 
   // Para tasks/topics/agents: se existir coluna payload no DB, empacota o extra lá dentro (mais robusto).
@@ -1237,11 +1242,7 @@ export const updateDoc = async (docRef: DocRef, payload: Record<string, any>) =>
   const params = new URLSearchParams();
   params.set('id', `eq.${docRef.id}`);
   const body = normalizePayloadForTable(docRef.table, payload);
-  if (docRef.table === 'agents') {
-    await patchWithSchemaFallback(docRef.table, params, body);
-    return;
-  }
-  await restFetch(docRef.table, { method: 'PATCH', query: params, body });
+  await patchWithSchemaFallback(docRef.table, params, body);
 };
 
 export const setDoc = async (docRef: DocRef, payload: Record<string, any>, _options?: { merge?: boolean }) => {

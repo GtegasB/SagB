@@ -550,8 +550,7 @@ if (userId) {
     };
 
     await updateDoc(doc(db, "users", uid), {
-      payload: mergedPayload,
-      updatedAt: new Date()
+      payload: mergedPayload
     });
   }, [userProfile, user]);
 

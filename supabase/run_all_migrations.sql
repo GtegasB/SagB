@@ -218,4 +218,12 @@ create index if not exists idx_agent_memories_agent on public.agent_memories(age
 create index if not exists idx_agent_memories_session on public.agent_memories(session_id);
 create index if not exists idx_agent_memories_created_at on public.agent_memories(created_at desc);
 
+-- Compatibilidade de schema legado (users sem payload)
+alter table if exists public.users
+  add column if not exists payload jsonb;
+
+update public.users
+set payload = '{}'::jsonb
+where payload is null;
+
 select 'All governance tables created successfully!' as result;
