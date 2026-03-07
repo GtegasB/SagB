@@ -535,11 +535,6 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
       knownKeys.add('bu_id');
       knownKeys.add('buId');
     }
-    if (table === 'agents') {
-      knownKeys.add('workspace_id');
-      knownKeys.add('workspaceId');
-    }
-
     // Converte campos de relacionamento apenas para tabelas que suportam esse schema.
     if ((table === 'tasks' || table === 'topics') && p.ventureId !== undefined && p.venture_id === undefined) {
       p.venture_id = p.ventureId;
@@ -552,9 +547,13 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
 
     // Em agents, preserva em payload para evitar erro de coluna inexistente (ex.: bu_id).
     if (table === 'agents') {
-      if (p.workspaceId !== undefined && p.workspace_id === undefined) {
-        p.workspace_id = p.workspaceId;
-        delete p.workspaceId;
+      if (p.createdBy !== undefined && p.created_by === undefined) {
+        p.created_by = p.createdBy;
+        delete p.createdBy;
+      }
+      if (p.updatedBy !== undefined && p.updated_by === undefined) {
+        p.updated_by = p.updatedBy;
+        delete p.updatedBy;
       }
       delete p.bu_id;
       delete p.venture_id;
@@ -746,6 +745,53 @@ const runQuery = async (ref: CollectionRef | QueryRef) => {
   return restFetch(ref.table, { method: 'GET', query: params });
 };
 
+const parseMissingColumn = (error: any, table: string): string | null => {
+  const raw = String(error?.details?.message || error?.message || '');
+  const m = raw.match(/Could not find the '([^']+)' column of '([^']+)'/i);
+  if (!m) return null;
+  if (m[2] && m[2] !== table) return null;
+  return m[1] || null;
+};
+
+const insertWithSchemaFallback = async (table: string, initialBody: Record<string, any>) => {
+  const body: Record<string, any> = { ...initialBody };
+  const removed = new Set<string>();
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      return await restFetch(table, { method: 'POST', body });
+    } catch (error: any) {
+      if (error?.status !== 400) throw error;
+
+      const missingColumn = parseMissingColumn(error, table);
+      if (!missingColumn || removed.has(missingColumn)) throw error;
+
+      if (Object.prototype.hasOwnProperty.call(body, missingColumn)) {
+        const value = body[missingColumn];
+        delete body[missingColumn];
+
+        // Tenta preservar o valor em payload quando possível.
+        if (missingColumn !== 'payload') {
+          body.payload = {
+            ...(body.payload && typeof body.payload === 'object' ? body.payload : {}),
+            [missingColumn]: value
+          };
+        }
+        removed.add(missingColumn);
+        continue;
+      }
+
+      // Se a coluna ausente não está no body atual, não há como remediar aqui.
+      throw error;
+    }
+  }
+
+  throw createShimError({
+    code: 'supabase/http-400',
+    message: `Falha ao inserir em ${table} após tentativas de compatibilidade de schema.`
+  });
+};
+
 const buildCollectionSnapshot = (records: any[], table: string) => ({
   docs: (records || []).map((record) => ({
     id: String(record.id),
@@ -847,7 +893,20 @@ export const addDoc = async (collectionRef: CollectionRef, payload: Record<strin
     if (!body.logo_url) throw { code: 'validation/error', message: 'Venture sem logo (logo_url).' };
   }
 
-  const data = await restFetch(collectionRef.table, { method: 'POST', body });
+  if (collectionRef.table === 'agents') {
+    const session = getStoredSession();
+    const userId = session?.user?.id;
+    if (userId && body.created_by === undefined && body.createdBy === undefined) {
+      body.created_by = userId;
+    }
+    if (userId && body.updated_by === undefined && body.updatedBy === undefined) {
+      body.updated_by = userId;
+    }
+  }
+
+  const data = collectionRef.table === 'agents'
+    ? await insertWithSchemaFallback(collectionRef.table, body)
+    : await restFetch(collectionRef.table, { method: 'POST', body });
   const inserted = Array.isArray(data) ? data[0] : data;
 
   // Conveniência: ao criar venture, vincula user atual como admin em user_ventures (se existir).
