@@ -636,7 +636,10 @@ if (userId) {
       setAgentConfigsByAgentId(mapped);
     }, (error) => console.error('Erro ao carregar agent_configs:', error));
 
-    const unsubscribeAgentMemories = onSnapshot(agentMemoriesQuery, (snapshot) => {
+    let unsubscribeAgentMemories: () => void = () => {};
+    let agentMemoriesSubscriptionDisabled = false;
+    unsubscribeAgentMemories = onSnapshot(agentMemoriesQuery, (snapshot) => {
+      if (agentMemoriesSubscriptionDisabled) return;
       const rows = scopeGovernanceRowsByWorkspace(snapshot.docs.map(doc => doc.data() as any));
       const mapped: Record<string, string[]> = {};
       rows.forEach((row) => {
@@ -651,7 +654,17 @@ if (userId) {
         }
       });
       setAgentMemoriesByAgentId(mapped);
-    }, (error) => console.error('Erro ao carregar agent_memories:', error));
+    }, (error) => {
+      const rawMessage = String((error as any)?.details?.message || (error as any)?.message || error || '');
+      if (/Could not find the table 'public\.agent_memories'/i.test(rawMessage)) {
+        agentMemoriesSubscriptionDisabled = true;
+        setAgentMemoriesByAgentId({});
+        console.warn('Tabela public.agent_memories ainda nao existe no Supabase. Assinatura de memorias desativada ate aplicar migration.');
+        unsubscribeAgentMemories();
+        return;
+      }
+      console.error('Erro ao carregar agent_memories:', error);
+    });
 
     return () => {
       unsubscribeCulture();
