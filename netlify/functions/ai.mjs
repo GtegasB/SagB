@@ -154,9 +154,6 @@ const handleDeepSeekChat = async (payload) => {
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort('deepseek-timeout'), 45000);
-
     try {
       const response = await fetch('https://api.deepseek.com/chat/completions', {
         method: 'POST',
@@ -170,10 +167,8 @@ const handleDeepSeekChat = async (payload) => {
           stream: false,
           temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.5,
           max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 2000
-        }),
-        signal: controller.signal
+        })
       });
-      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errText = await response.text();
@@ -192,21 +187,6 @@ const handleDeepSeekChat = async (payload) => {
       const data = await response.json().catch(() => ({}));
       return { text: data?.choices?.[0]?.message?.content || '' };
     } catch (error) {
-      clearTimeout(timeoutId);
-
-      const isAbort =
-        error?.name === 'AbortError' ||
-        String(error?.message || '').toLowerCase().includes('abort');
-      if (isAbort) {
-        const timeoutErr = createHttpError(504, 'DeepSeek request timed out after 45s.');
-        if (attempt < maxAttempts) {
-          lastError = timeoutErr;
-          await wait(300 * attempt);
-          continue;
-        }
-        throw timeoutErr;
-      }
-
       lastError = error;
       const statusCode = Number(error?.statusCode || 0);
       if (attempt < maxAttempts && transientStatus.has(statusCode)) {
