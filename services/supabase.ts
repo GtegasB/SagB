@@ -346,6 +346,53 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     r.dueDate = dueDate ? dueDate.toISOString().slice(0, 10) : (typeof due === 'string' ? due : undefined);
   }
 
+  if (table === 'agents') {
+    const payload = (r.payload && typeof r.payload === 'object') ? (r.payload as Record<string, any>) : {};
+    const status = String(pick(r, 'status') ?? pick(payload, 'status') ?? 'ACTIVE').toUpperCase();
+    const name = String(pick(r, 'name') ?? pick(payload, 'name') ?? '').trim();
+    const officialRole = String(
+      pick(
+        r,
+        'officialRole',
+        'official_role',
+        'description'
+      ) ?? ''
+    ).trim();
+    const officialRolePayload = String(pick(payload, 'officialRole', 'official_role', 'description') ?? '').trim();
+    const globalDocuments = pick(r, 'globalDocuments', 'global_documents') ?? pick(payload, 'globalDocuments', 'global_documents');
+    const fallbackId = pick(r, 'id') ?? pick(payload, 'id') ?? '';
+
+    return {
+      ...r,
+      id: String(fallbackId),
+      universalId: String(pick(r, 'universalId', 'universal_id') ?? pick(payload, 'universalId', 'universal_id') ?? fallbackId),
+      name: name || 'Sem Nome',
+      officialRole: officialRole || officialRolePayload || 'Sem Cargo',
+      company: String(pick(r, 'company') ?? pick(payload, 'company') ?? 'GrupoB'),
+      buId: pick(r, 'buId', 'bu_id') ?? pick(payload, 'buId', 'bu_id') ?? undefined,
+      ventureId: pick(r, 'ventureId', 'venture_id') ?? pick(payload, 'ventureId', 'venture_id') ?? undefined,
+      tier: pick(r, 'tier') ?? pick(payload, 'tier') ?? 'OPERACIONAL',
+      active: status !== 'PLANNED' && status !== 'BLOCKED',
+      status,
+      version: String(pick(r, 'version') ?? pick(payload, 'version') ?? '1.0'),
+      fullPrompt: String(pick(r, 'fullPrompt', 'full_prompt') ?? pick(payload, 'fullPrompt', 'full_prompt') ?? ''),
+      sector: String(pick(r, 'sector') ?? pick(payload, 'sector') ?? officialRole ?? officialRolePayload ?? ''),
+      division: pick(r, 'division') ?? pick(payload, 'division') ?? undefined,
+      collaboratorType: pick(r, 'collaboratorType', 'collaborator_type') ?? pick(payload, 'collaboratorType', 'collaborator_type') ?? undefined,
+      salary: pick(r, 'salary') ?? pick(payload, 'salary') ?? undefined,
+      startDate: pick(r, 'startDate', 'start_date') ?? pick(payload, 'startDate', 'start_date') ?? undefined,
+      docCount: Number(
+        pick(r, 'docCount', 'doc_count') ??
+        pick(payload, 'docCount', 'doc_count') ??
+        (Array.isArray(globalDocuments) ? globalDocuments.length : 0)
+      ),
+      avatarUrl: pick(r, 'avatarUrl', 'avatar_url') ?? pick(payload, 'avatarUrl', 'avatar_url') ?? undefined,
+      ambientPhotoUrl: pick(r, 'ambientPhotoUrl', 'ambient_photo_url') ?? pick(payload, 'ambientPhotoUrl', 'ambient_photo_url') ?? undefined,
+      modelProvider: pick(r, 'modelProvider', 'model_provider') ?? pick(payload, 'modelProvider', 'model_provider') ?? 'gemini',
+      globalDocuments: Array.isArray(globalDocuments) ? globalDocuments : []
+    };
+  }
+
   if (table === 'governance_global_culture') {
     return {
       id: String(r.id),
