@@ -53,7 +53,8 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [draftContent, setDraftContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isCreatingPage, setIsCreatingPage] = useState(false);
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
 
   useEffect(() => {
@@ -117,13 +118,13 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
     return selectedNode.parentId ?? null;
   };
 
-  const handleAddPage = async () => {
-    setIsCreating(true);
+  const handleAddPage = async (parentId?: string | null) => {
+    setIsCreatingPage(true);
     try {
       const newId = await onCreateNode({
         title: 'Nova Página',
         nodeType: 'doc',
-        parentId: resolveParentId(),
+        parentId: parentId ?? resolveParentId(),
         contentMd: '# Nova Página\n\nComece a escrever aqui...'
       });
       if (typeof newId === 'string') {
@@ -134,7 +135,31 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
       console.error('Erro ao criar nova página:', error);
       alert('Falha ao criar página. Verifique seu acesso ao workspace.');
     } finally {
-      setIsCreating(false);
+      setIsCreatingPage(false);
+    }
+  };
+
+  const handleAddFolder = async (parentId?: string | null) => {
+    setIsCreatingFolder(true);
+    try {
+      const newId = await onCreateNode({
+        title: 'Nova Pasta',
+        nodeType: 'folder',
+        parentId: parentId ?? resolveParentId()
+      });
+      if (typeof newId === 'string') {
+        setSelectedNodeId(newId);
+        setExpandedNodes(prev => {
+          const next = new Set(prev);
+          next.add(newId);
+          return next;
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao criar nova pasta:', error);
+      alert('Falha ao criar pasta. Verifique seu acesso ao workspace.');
+    } finally {
+      setIsCreatingFolder(false);
     }
   };
 
@@ -161,11 +186,7 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
 
     const handleClick = (event: React.MouseEvent) => {
       event.stopPropagation();
-      if (node.nodeType === 'folder') {
-        handleToggleNode(node.id);
-      } else {
-        handleSelectNode(node.id);
-      }
+      handleSelectNode(node.id);
     };
 
     return (
@@ -179,9 +200,16 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
           style={{ paddingLeft: `${level * 12 + 12}px` }}
         >
           {node.nodeType === 'folder' && (
-            <span className="text-gray-400">
+            <button
+              type="button"
+              className="text-gray-400 p-0.5 rounded hover:bg-gray-200"
+              onClick={(event) => {
+                event.stopPropagation();
+                handleToggleNode(node.id);
+              }}
+            >
               {isExpanded ? <ChevronDownIcon className="w-3 h-3" /> : <ChevronRightIcon className="w-3 h-3" />}
-            </span>
+            </button>
           )}
 
           <span className={`shrink-0 ${isSelected ? 'text-white' : 'text-gray-400'}`}>
@@ -205,6 +233,12 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
   };
 
   const isDoc = selectedNode?.nodeType === 'doc';
+  const isFolder = selectedNode?.nodeType === 'folder';
+  const selectedTypeLabel = selectedNode?.nodeType === 'folder'
+    ? 'Pasta'
+    : selectedNode?.nodeType === 'link'
+      ? 'Link'
+      : 'Documento';
 
   return (
     <div className="flex h-full bg-white font-nunito animate-msg overflow-hidden">
@@ -216,18 +250,32 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
             </button>
           )}
           <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex-1">Base de Conhecimento</span>
-          <button
-            onClick={handleAddPage}
-            disabled={isCreating}
-            className={`
-              flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded-md shadow-sm
-              text-[9px] font-bold uppercase tracking-wider transition-all
-              ${isCreating ? 'opacity-60 cursor-not-allowed' : 'hover:bg-gray-50 text-gray-600'}
-            `}
-          >
-            <PlusIcon className="w-3 h-3" />
-            {isCreating ? 'Criando...' : 'Página'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleAddFolder(null)}
+              disabled={isCreatingFolder}
+              className={`
+                flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded-md shadow-sm
+                text-[9px] font-bold uppercase tracking-wider transition-all
+                ${isCreatingFolder ? 'opacity-60 cursor-not-allowed' : 'hover:bg-gray-50 text-gray-600'}
+              `}
+            >
+              <FolderIcon className="w-3 h-3" />
+              {isCreatingFolder ? 'Criando...' : 'Pasta'}
+            </button>
+            <button
+              onClick={() => handleAddPage(null)}
+              disabled={isCreatingPage}
+              className={`
+                flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded-md shadow-sm
+                text-[9px] font-bold uppercase tracking-wider transition-all
+                ${isCreatingPage ? 'opacity-60 cursor-not-allowed' : 'hover:bg-gray-50 text-gray-600'}
+              `}
+            >
+              <PlusIcon className="w-3 h-3" />
+              {isCreatingPage ? 'Criando...' : 'Página'}
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
@@ -250,7 +298,7 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
             <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
               <span>Metodologia</span>
               <span>/</span>
-              <span>{selectedNode?.nodeType === 'folder' ? 'Pasta' : 'Documento'}</span>
+              <span>{selectedTypeLabel}</span>
             </div>
           </div>
         </header>
@@ -287,9 +335,47 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
                 </button>
               </div>
             </div>
+          ) : selectedNode && isFolder ? (
+            <div className="max-w-3xl space-y-6">
+              <p className="text-sm text-gray-600">
+                Pasta selecionada. Crie páginas e subpastas para estruturar sua metodologia.
+              </p>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => handleAddFolder(selectedNode.id)}
+                  disabled={isCreatingFolder}
+                  className={`
+                    px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all
+                    ${isCreatingFolder ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}
+                  `}
+                >
+                  {isCreatingFolder ? 'Criando...' : 'Nova Subpasta'}
+                </button>
+                <button
+                  onClick={() => handleAddPage(selectedNode.id)}
+                  disabled={isCreatingPage}
+                  className={`
+                    px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all
+                    ${isCreatingPage ? 'bg-gray-300 text-gray-600 cursor-not-allowed' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}
+                  `}
+                >
+                  {isCreatingPage ? 'Criando...' : 'Nova Página'}
+                </button>
+                <button
+                  onClick={handleArchive}
+                  disabled={isArchiving}
+                  className={`
+                    px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all
+                    ${isArchiving ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}
+                  `}
+                >
+                  {isArchiving ? 'Arquivando...' : 'Arquivar Pasta'}
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="max-w-2xl text-sm text-gray-500">
-              <p>Selecione uma página para editar o conteúdo ou crie uma nova página na lateral.</p>
+              <p>Selecione uma página para editar o conteúdo ou crie pasta/subpasta na lateral.</p>
             </div>
           )}
         </div>

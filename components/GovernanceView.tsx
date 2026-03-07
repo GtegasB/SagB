@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Agent, BusinessUnit, GovernanceCulture, ComplianceRule, VaultItem, KnowledgeNode } from '../types';
 import { BackIcon, BookIcon, CloudUploadIcon, CloudDownloadIcon, LockIcon, ScaleIcon, SearchIcon, FolderIcon, PlusIcon, FileTextIcon, TrashIcon, CheckIcon, XIcon } from './Icon';
-import { addDocumentToAgent } from '../services/knowledge'; // Importação do serviço
 
 import MethodologyView from './MethodologyView';
 import { Avatar } from './Avatar'; // IMPORTAÇÃO DO AVATAR
@@ -65,15 +64,34 @@ interface VaultDocument {
     source?: 'vault' | 'methodology';
 }
 
-
-// MOCK DAS METODOLOGIAS (Para seleção)
-const SYSTEM_METHODOLOGIES: VaultDocument[] = [
-        { id: 'sys-met-uau', title: 'Metodologia: Jornada U.A.U (Completa)', content: 'Protocolos de Atendimento UAU...', uploadedAt: '', type: 'METHODOLOGY', mimeType: 'text/markdown', source: 'methodology' },
-    { id: 'sys-met-mav', title: 'Metodologia: M.A.V (Máquina de Vendas)', content: 'Processos de Vendas MAV...', uploadedAt: '', type: 'METHODOLOGY', mimeType: 'text/markdown', source: 'methodology' },
-    { id: 'sys-met-gerac', title: 'Framework: GERAC (Gestão)', content: 'Pilares de Gestão e Cultura...', uploadedAt: '', type: 'METHODOLOGY', mimeType: 'text/markdown', source: 'methodology' },
-    { id: 'sys-met-dr', title: 'Método: Decisão & Resultado', content: 'Foco em ROI e Execução...', uploadedAt: '', type: 'METHODOLOGY', mimeType: 'text/markdown', source: 'methodology' },
-    { id: 'sys-met-client', title: 'Árvore Clientológica (Estrutura)', content: 'Mapeamento de Clientes...', uploadedAt: '', type: 'METHODOLOGY', mimeType: 'text/markdown', source: 'methodology' }
-];
+const DEFAULT_METHODLOGY_ROOT_TITLE = 'Metodologias Gerais';
+const DEFAULT_METHODOLOGY_BLUEPRINT = [
+  {
+    folderTitle: 'Jornada U.A.U',
+    docTitle: 'Metodologia: Jornada U.A.U (Completa)',
+    content: '# Jornada U.A.U (Completa)\n\nMapeie aqui os rituais, etapas e checkpoints da jornada U.A.U.'
+  },
+  {
+    folderTitle: 'M.A.V',
+    docTitle: 'Metodologia: M.A.V (Máquina de Vendas)',
+    content: '# M.A.V (Máquina de Vendas)\n\nDefina funil, ritos comerciais, critérios de passagem e playbooks.'
+  },
+  {
+    folderTitle: 'GERAC',
+    docTitle: 'Framework: GERAC (Gestão)',
+    content: '# Framework GERAC (Gestão)\n\nDocumente princípios, rotinas, indicadores e governança de execução.'
+  },
+  {
+    folderTitle: 'Decisão & Resultado',
+    docTitle: 'Método: Decisão & Resultado',
+    content: '# Método Decisão & Resultado\n\nDescreva critérios decisórios, impacto esperado e medição de resultado.'
+  },
+  {
+    folderTitle: 'Clientologia',
+    docTitle: 'Árvore Clientológica (Estrutura)',
+    content: '# Árvore Clientológica (Estrutura)\n\nEstruture ICP, segmentações, personas e árvore de valor do cliente.'
+  }
+] as const;
 
 
 const GovernanceView: React.FC<GovernanceViewProps> = ({ 
@@ -113,8 +131,10 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
   const [vaultSearchTerm, setVaultSearchTerm] = useState(''); 
   const [previewDoc, setPreviewDoc] = useState<VaultDocument | null>(null); // Visualizador
   const [isUploadingVault, setIsUploadingVault] = useState(false);
+  const [isBootstrappingMethodology, setIsBootstrappingMethodology] = useState(false);
+  const methodologyBootstrapAttemptedRef = useRef(false);
 
-    const vaultDocuments = useMemo<VaultDocument[]>(() => {
+  const vaultDocuments = useMemo<VaultDocument[]>(() => {
     return vaultItems.map(item => {
       const payload = (item.payload || {}) as Record<string, any>;
       const uploadedAt = item.updatedAt instanceof Date ? item.updatedAt.toISOString() : '';
@@ -132,10 +152,36 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
     });
   }, [vaultItems]);
 
+  const methodologyDocuments = useMemo<VaultDocument[]>(() => {
+    return knowledgeNodes.map((node) => {
+      const updatedAt = node.updatedAt instanceof Date ? node.updatedAt.toISOString() : '';
+      const previewContent = node.contentMd || '';
+      const safeContent = previewContent
+        || (node.nodeType === 'folder'
+          ? `Pasta de metodologia: ${node.title}`
+          : `Documento metodológico: ${node.title}`);
+
+      return {
+        id: node.id,
+        title: node.title,
+        content: safeContent,
+        uploadedAt: updatedAt,
+        type: 'METHODOLOGY',
+        mimeType: 'text/markdown',
+        payload: {
+          ...(node.payload || {}),
+          nodeType: node.nodeType,
+          parentId: node.parentId ?? null,
+          previewData: previewContent
+        },
+        source: 'methodology'
+      } as VaultDocument;
+    });
+  }, [knowledgeNodes]);
 
   const availableKnowledgeDocs = useMemo(() => {
-    return [...vaultDocuments, ...SYSTEM_METHODOLOGIES];
-  }, [vaultDocuments]);
+    return [...vaultDocuments, ...methodologyDocuments];
+  }, [vaultDocuments, methodologyDocuments]);
 
   // Intelligence Editor State
 
@@ -158,6 +204,75 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
     if (!isUnlocked) return;
     setComplianceDraft(complianceMarkdown || "");
   }, [isUnlocked, complianceMarkdown]);
+
+  useEffect(() => {
+    if (!isUnlocked || isBootstrappingMethodology || methodologyBootstrapAttemptedRef.current) return;
+
+    const existingTitles = new Set(
+      knowledgeNodes.map((node) => node.title.trim().toLowerCase())
+    );
+    const missingBlueprintDocs = DEFAULT_METHODOLOGY_BLUEPRINT.filter(
+      (item) => !existingTitles.has(item.docTitle.trim().toLowerCase())
+    );
+    if (missingBlueprintDocs.length === 0) return;
+
+    let cancelled = false;
+
+    const runBootstrap = async () => {
+      methodologyBootstrapAttemptedRef.current = true;
+      setIsBootstrappingMethodology(true);
+      try {
+        let rootId: string | null =
+          knowledgeNodes.find((node) => node.title === DEFAULT_METHODLOGY_ROOT_TITLE && node.nodeType === 'folder')?.id || null;
+
+        if (!rootId) {
+          const createdRoot = await Promise.resolve(onCreateKnowledgeNode({
+            title: DEFAULT_METHODLOGY_ROOT_TITLE,
+            nodeType: 'folder',
+            parentId: null
+          }));
+          if (typeof createdRoot === 'string') rootId = createdRoot;
+        }
+
+        for (const item of DEFAULT_METHODOLOGY_BLUEPRINT) {
+          if (cancelled) return;
+
+          let folderId: string | null =
+            knowledgeNodes.find((node) =>
+              node.nodeType === 'folder'
+              && node.title === item.folderTitle
+              && (node.parentId ?? null) === (rootId ?? null)
+            )?.id || null;
+
+          if (!folderId) {
+            const createdFolder = await Promise.resolve(onCreateKnowledgeNode({
+              title: item.folderTitle,
+              nodeType: 'folder',
+              parentId: rootId
+            }));
+            if (typeof createdFolder === 'string') folderId = createdFolder;
+          }
+
+          const docExists = existingTitles.has(item.docTitle.trim().toLowerCase());
+          if (docExists) continue;
+
+          await Promise.resolve(onCreateKnowledgeNode({
+            title: item.docTitle,
+            nodeType: 'doc',
+            parentId: folderId ?? rootId,
+            contentMd: item.content
+          }));
+        }
+      } catch (error) {
+        console.error('Erro ao inicializar metodologias padrão:', error);
+      } finally {
+        if (!cancelled) setIsBootstrappingMethodology(false);
+      }
+    };
+
+    void runBootstrap();
+    return () => { cancelled = true; };
+  }, [isUnlocked, knowledgeNodes, onCreateKnowledgeNode, isBootstrappingMethodology]);
 
 
   // AUTO-NAVIGATE TO AGENT EDITOR ON UNLOCK (Deep Link Logic)
@@ -322,17 +437,26 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
       if (!editingAgent) return;
 
       const currentDocs = editingAgent.globalDocuments || [];
-      const exists = currentDocs.some(d => d.title === doc.title); 
+      const targetId = String(doc.id || doc.title).trim();
+      const exists = currentDocs.some(d =>
+        String(d.id || d.title).trim() === targetId || d.title === doc.title
+      );
 
       let updatedDocs;
       if (exists) {
-          updatedDocs = currentDocs.filter(d => d.title !== doc.title);
+          updatedDocs = currentDocs.filter(d =>
+            !(String(d.id || d.title).trim() === targetId || d.title === doc.title)
+          );
       } else {
+          const tags = Array.from(new Set([
+            ...doc.title.toLowerCase().split(' ').filter(Boolean),
+            ...(doc.type === 'METHODOLOGY' ? ['core', 'metodologia'] : [])
+          ]));
           updatedDocs = [...currentDocs, { 
               id: doc.id, 
               title: doc.title, 
               content: doc.content, 
-              tags: doc.title.toLowerCase().split(' ') 
+              tags
           }];
       }
 
