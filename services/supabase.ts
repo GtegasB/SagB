@@ -17,7 +17,22 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 const authListeners = new Set<(event: string, session: any) => void>();
-let inMemorySession: any | null = null;
+const SESSION_STORAGE_KEY = 'sagb_supabase_session_v1';
+
+const readSessionFromStorage = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.access_token && parsed.user) return parsed;
+  } catch {
+    // noop
+  }
+  return null;
+};
+
+let inMemorySession: any | null = readSessionFromStorage();
 
 const getStoredSession = () => {
   return inMemorySession;
@@ -25,6 +40,14 @@ const getStoredSession = () => {
 
 const setStoredSession = (session: any | null) => {
   inMemorySession = session;
+  if (typeof window !== 'undefined') {
+    try {
+      if (!session) window.localStorage.removeItem(SESSION_STORAGE_KEY);
+      else window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    } catch {
+      // noop
+    }
+  }
 };
 
 const emitAuth = (event: string, session: any) => {

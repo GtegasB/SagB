@@ -108,8 +108,10 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         date: new Date().toISOString().split('T')[0]
     });
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+    const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
 
     const chatEndRef = useRef<HTMLDivElement>(null);
+    const messagesScrollRef = useRef<HTMLDivElement>(null);
     const stopStreamingRef = useRef(false);
     const hasSummonedRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -146,11 +148,16 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     // --- EFFECTS ---
 
     useEffect(() => {
-        // Scroll apenas se não estiver carregando, para evitar pulos durante stream
-        if (!isLoading) {
-            chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }
-    }, [activeMessages, isLoading]);
+        if (!autoScrollEnabled) return;
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [activeMessages, autoScrollEnabled]);
+
+    const handleMessagesScroll = () => {
+        const el = messagesScrollRef.current;
+        if (!el) return;
+        const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+        setAutoScrollEnabled(distanceToBottom < 120);
+    };
 
     useEffect(() => {
         setNewAgentBU(activeBU.id);
@@ -176,6 +183,10 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             initializeSession(selectedAgent);
         }
     }, [modelMode]);
+
+    useEffect(() => {
+        setAutoScrollEnabled(true);
+    }, [selectedAgent?.id, currentSessionId]);
 
     const initializeSession = (agent: Agent, history: any[] = []) => {
         const modelId = modelMode === 'flash' ? 'gemini-2.5-flash' : 'gemini-1.5-pro';
@@ -998,6 +1009,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
         setInput('');
         setAttachment(null);
+        setAutoScrollEnabled(true);
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
             textareaRef.current.focus();
@@ -1649,7 +1661,11 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                     </div>
                                 )}
 
-                                <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-0 custom-scrollbar">
+                                <div
+                                    ref={messagesScrollRef}
+                                    onScroll={handleMessagesScroll}
+                                    className="flex-1 overflow-y-auto p-4 md:p-8 space-y-0 custom-scrollbar"
+                                >
                                     {activeMessages.map(msg => (
                                         <ChatMessage
                                             key={msg.id}

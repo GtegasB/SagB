@@ -111,7 +111,7 @@ const requestDeepSeek = async (
   messages,
   systemInstruction,
   maxTokens
-});
+}) as Promise<{ text: string; finishReason?: string | null }>;
 
 export async function* streamDeepSeekResponse(
   messages: DeepSeekMessage[],
@@ -123,8 +123,21 @@ export async function* streamDeepSeekResponse(
   try {
     const compactedMessages = compactHistory(messages);
     const response = await requestDeepSeek(compactedMessages, compactedSystemInstruction, PRIMARY_MAX_TOKENS);
+    let finalText = response.text || '';
 
-    yield { text: response.text || '' };
+    if (response.finishReason === 'length' && finalText.trim()) {
+      const continuationMessages: DeepSeekMessage[] = [
+        ...truncateMessageContent(compactedMessages.slice(-10), 1200),
+        { role: 'assistant', content: finalText },
+        { role: 'user', content: 'Continue exatamente do ponto onde parou, sem repetir nada.' }
+      ];
+      const continuation = await requestDeepSeek(continuationMessages, compactedSystemInstruction, FALLBACK_MAX_TOKENS);
+      if (continuation.text) {
+        finalText = `${finalText}\n${continuation.text}`.trim();
+      }
+    }
+
+    yield { text: finalText };
   } catch (error) {
     const firstMessage = String((error as any)?.message || '');
 

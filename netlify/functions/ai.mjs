@@ -83,7 +83,11 @@ const requestDeepSeekCompletion = async (payload) => {
       }
 
       const data = await response.json().catch(() => ({}));
-      return data?.choices?.[0]?.message?.content || '';
+      const choice = data?.choices?.[0] || {};
+      return {
+        text: choice?.message?.content || '',
+        finishReason: choice?.finish_reason || null
+      };
     } catch (error) {
       lastError = error;
       const statusCode = Number(error?.statusCode || 0);
@@ -203,8 +207,7 @@ const handleGeminiChat = async (payload) => {
 };
 
 const handleDeepSeekChat = async (payload) => {
-  const text = await requestDeepSeekCompletion(payload);
-  return { text };
+  return requestDeepSeekCompletion(payload);
 };
 
 const handleTranscribeAudio = async (payload) => {
@@ -244,14 +247,14 @@ Lista concisa de aprendizados (bullet points).
 `.trim();
 
   if (!hasGeminiKey()) {
-    const text = await requestDeepSeekCompletion({
+    const deepseekResponse = await requestDeepSeekCompletion({
       model: 'deepseek-chat',
       systemInstruction: 'Voce e um auditor de aprendizagem de agentes.',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.1,
       maxTokens: 2000
     });
-    return { text };
+    return { text: deepseekResponse.text || '' };
   }
 
   const ai = getGeminiClient();
@@ -277,14 +280,14 @@ Retorne JSON Array de strings.
 `.trim();
 
   if (!hasGeminiKey()) {
-    const text = await requestDeepSeekCompletion({
+    const deepseekResponse = await requestDeepSeekCompletion({
       model: 'deepseek-chat',
       systemInstruction: 'Responda estritamente no formato solicitado.',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.4,
       maxTokens: 700
     });
-    return { titles: parseJsonArray(text, []) };
+    return { titles: parseJsonArray(deepseekResponse.text, []) };
   }
 
   const ai = getGeminiClient();
@@ -316,14 +319,14 @@ Retorne JSON Array de strings.
 `.trim();
 
   if (!hasGeminiKey()) {
-    const text = await requestDeepSeekCompletion({
+    const deepseekResponse = await requestDeepSeekCompletion({
       model: 'deepseek-chat',
       systemInstruction: 'Responda estritamente no formato solicitado.',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.4,
       maxTokens: 700
     });
-    return { tasks: parseJsonArray(text, []) };
+    return { tasks: parseJsonArray(deepseekResponse.text, []) };
   }
 
   const ai = getGeminiClient();
@@ -347,14 +350,14 @@ Retorne JSON Array de strings.
 const handleCreateAgentFromScratch = async (payload) => {
   const prompt = payload.prompt || '';
   if (!hasGeminiKey()) {
-    const text = await requestDeepSeekCompletion({
+    const deepseekResponse = await requestDeepSeekCompletion({
       model: 'deepseek-chat',
       systemInstruction: 'Voce e um arquiteto de agentes. Retorne apenas JSON valido.',
       messages: [{ role: 'user', content: `ARQUITETO PIETRO: Gere o DNA V1.0 para: "${prompt}".` }],
       temperature: 0.2,
       maxTokens: 3500
     });
-    return { agent: parseJsonObject(text, {}) };
+    return { agent: parseJsonObject(deepseekResponse.text, {}) };
   }
 
   const ai = getGeminiClient();
