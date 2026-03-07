@@ -17,6 +17,14 @@ const pickDeepSeekKey = () => {
   return (process.env.DEEPSEEK_API_KEY || process.env.VITE_DEEPSEEK_API_KEY || '').trim();
 };
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const createHttpError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
 const getGeminiClient = () => {
   const key = pickGeminiKey();
   if (!key) {
@@ -132,7 +140,7 @@ const handleGeminiChat = async (payload) => {
 const handleDeepSeekChat = async (payload) => {
   const apiKey = pickDeepSeekKey();
   if (!apiKey) {
-    throw new Error('Missing DeepSeek API key in function environment.');
+    throw createHttpError(500, 'Missing DeepSeek API key in function environment.');
   }
 
   const messages = Array.isArray(payload.messages) ? payload.messages : [];
@@ -141,28 +149,75 @@ const handleDeepSeekChat = async (payload) => {
     ...messages
   ];
 
-  const response = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: payload.model || 'deepseek-chat',
-      messages: fullMessages,
-      stream: false,
-      temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.5,
-      max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 4000
-    })
-  });
+  const maxAttempts = 3;
+  const transientStatus = new Set([408, 409, 429, 500, 502, 503, 504]);
+  let lastError = null;
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`DeepSeek request failed (${response.status}): ${errText}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort('deepseek-timeout'), 45000);
+
+    try {
+      const response = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: payload.model || 'deepseek-chat',
+          messages: fullMessages,
+          stream: false,
+          temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.5,
+          max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 2000
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        const requestId = response.headers.get('x-request-id') || '';
+        const suffix = requestId ? ` [request_id=${requestId}]` : '';
+        const message = `DeepSeek request failed (${response.status})${suffix}: ${errText}`;
+
+        if (transientStatus.has(response.status) && attempt < maxAttempts) {
+          await wait(300 * attempt);
+          continue;
+        }
+
+        throw createHttpError(response.status, message);
+      }
+
+      const data = await response.json().catch(() => ({}));
+      return { text: data?.choices?.[0]?.message?.content || '' };
+    } catch (error) {
+      clearTimeout(timeoutId);
+
+      const isAbort =
+        error?.name === 'AbortError' ||
+        String(error?.message || '').toLowerCase().includes('abort');
+      if (isAbort) {
+        const timeoutErr = createHttpError(504, 'DeepSeek request timed out after 45s.');
+        if (attempt < maxAttempts) {
+          lastError = timeoutErr;
+          await wait(300 * attempt);
+          continue;
+        }
+        throw timeoutErr;
+      }
+
+      lastError = error;
+      const statusCode = Number(error?.statusCode || 0);
+      if (attempt < maxAttempts && transientStatus.has(statusCode)) {
+        await wait(300 * attempt);
+        continue;
+      }
+      throw error;
+    }
   }
 
-  const data = await response.json().catch(() => ({}));
-  return { text: data?.choices?.[0]?.message?.content || '' };
+  throw lastError || createHttpError(500, 'DeepSeek request failed unexpectedly.');
 };
 
 const handleTranscribeAudio = async (payload) => {
@@ -314,6 +369,7 @@ export async function handler(event) {
     return json(200, { ok: true, data });
   } catch (error) {
     console.error(`[ai function] action=${action}`, error);
-    return json(500, { ok: false, error: error?.message || 'AI function error.' });
+    const statusCode = Number(error?.statusCode || 500);
+    return json(statusCode, { ok: false, error: error?.message || 'AI function error.' });
   }
 }
