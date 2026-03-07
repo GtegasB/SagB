@@ -4,22 +4,32 @@ import ReactMarkdown from 'react-markdown';
 import { BusinessUnit, Message, Sender, BusinessBlueprint } from '../types';
 import { sendMessageStream, transcribeAudio } from '../services/gemini';
 import { SendIcon, MicIcon, StopCircleIcon, PaperclipIcon, XIcon, FileTextIcon } from './Icon';
+import {
+  appendMessage,
+  createSession,
+  findLatestSession,
+  loadSessionMessages,
+  touchSession,
+  updateMessage
+} from '../utils/supabaseChat';
 
 interface AlignmentViewProps {
   activeBU: BusinessUnit;
-  messages: Message[];
-  onAddMessage: (msg: Message) => void;
   blueprint: BusinessBlueprint;
   onUpdateBlueprint: (bp: BusinessBlueprint) => void;
+  activeWorkspaceId?: string | null;
+  ownerUserId?: string | null;
 }
 
 const AlignmentView: React.FC<AlignmentViewProps> = ({ 
   activeBU, 
-  messages, 
-  onAddMessage, 
   blueprint, 
-  onUpdateBlueprint 
+  onUpdateBlueprint,
+  activeWorkspaceId,
+  ownerUserId
 }) => {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
@@ -31,6 +41,52 @@ const AlignmentView: React.FC<AlignmentViewProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const [attachment, setAttachment] = useState<{ data: string, mimeType: string, preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const alignmentAgentId = `alignment:${activeBU.id}`;
+
+    const bootstrap = async () => {
+      try {
+        const existingSession = await findLatestSession({
+          workspaceId: activeWorkspaceId,
+          agentId: alignmentAgentId,
+          buId: activeBU.id
+        });
+
+        let targetSessionId = existingSession?.id || null;
+        if (!targetSessionId) {
+          targetSessionId = await createSession({
+            workspaceId: activeWorkspaceId,
+            agentId: alignmentAgentId,
+            ownerUserId,
+            buId: activeBU.id,
+            title: `Alinhamento • ${activeBU.name}`,
+            payload: { kind: 'alignment', buName: activeBU.name }
+          });
+        }
+
+        const history = await loadSessionMessages({
+          workspaceId: activeWorkspaceId,
+          sessionId: targetSessionId
+        });
+
+        if (cancelled) return;
+        setSessionId(targetSessionId);
+        setMessages(history);
+      } catch (error) {
+        console.error('Erro ao carregar alinhamento:', error);
+        if (cancelled) return;
+        setSessionId(null);
+        setMessages([]);
+      }
+    };
+
+    bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBU.id, activeBU.name, activeWorkspaceId, ownerUserId]);
 
   useEffect(() => {
     chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' });
@@ -81,7 +137,7 @@ const AlignmentView: React.FC<AlignmentViewProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!input.trim() && !attachment) || isLoading) return;
+    if ((!input.trim() && !attachment) || isLoading || !sessionId) return;
     
     const userText = input.trim();
     const currentAttachment = attachment;
@@ -90,12 +146,35 @@ const AlignmentView: React.FC<AlignmentViewProps> = ({
 
     const displayText = currentAttachment ? (userText ? userText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : userText;
 
-    onAddMessage({ id: Date.now().toString(), text: displayText, sender: Sender.User, timestamp: new Date(), buId: activeBU.id });
-    setIsLoading(true);
-    const botMsgId = (Date.now() + 1).toString();
-    onAddMessage({ id: botMsgId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true });
+    const alignmentAgentId = `alignment:${activeBU.id}`;
+    let persistedBotId = '';
 
     try {
+      const savedUser = await appendMessage({
+        workspaceId: activeWorkspaceId,
+        sessionId,
+        agentId: alignmentAgentId,
+        sender: Sender.User,
+        text: displayText,
+        buId: activeBU.id,
+        attachment: currentAttachment
+      });
+      setMessages(prev => [...prev, { id: savedUser.id, text: displayText, sender: Sender.User, timestamp: new Date(), buId: activeBU.id, attachment: currentAttachment || undefined }]);
+      setIsLoading(true);
+
+      const savedBot = await appendMessage({
+        workspaceId: activeWorkspaceId,
+        sessionId,
+        agentId: alignmentAgentId,
+        sender: Sender.Bot,
+        text: '',
+        buId: activeBU.id,
+        participantName: 'Pietro',
+        isStreaming: true
+      });
+      persistedBotId = savedBot.id;
+      setMessages(prev => [...prev, { id: persistedBotId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true, participantName: 'Pietro' }]);
+
       const context = `ALINHAMENTO ESTRATÉGICO (${activeBU.name}): Organização de DNA v1. Foco em ROI e viabilidade.`;
       
       let messagePayload: any = userText;
@@ -117,11 +196,16 @@ const AlignmentView: React.FC<AlignmentViewProps> = ({
       let fullText = '';
       for await (const chunk of stream) {
         fullText += (chunk as any).text || '';
-        onAddMessage({ id: botMsgId, text: fullText, sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true });
+        setMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, text: fullText } : msg));
       }
-      onAddMessage({ id: botMsgId, text: fullText, sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: false });
+      setMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, text: fullText, isStreaming: false } : msg));
+      await updateMessage(persistedBotId, { text: fullText, isStreaming: false, updatedAt: new Date() });
+      await touchSession(sessionId);
     } catch (e) {
-      onAddMessage({ id: botMsgId, text: 'Erro na conexão ou formato de arquivo não suportado.', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: false });
+      if (persistedBotId) {
+        setMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, text: 'Erro na conexão ou formato de arquivo não suportado.', isStreaming: false } : msg));
+        await updateMessage(persistedBotId, { text: 'Erro na conexão ou formato de arquivo não suportado.', isStreaming: false, updatedAt: new Date() }).catch(() => null);
+      }
     } finally {
       setIsLoading(false);
     }

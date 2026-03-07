@@ -99,8 +99,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentCont
         }
 
         if (parts.length === 0) {
+            const fallbackSpeaker = message.participantName || agentContext?.name || 'Pietro Carboni';
             return [{
-                speaker: agentContext?.name || 'Pietro Carboni',
+                speaker: fallbackSpeaker,
                 content: text,
                 imageUrl: agentContext?.avatarUrl || PIETRO_IMAGE
             }];

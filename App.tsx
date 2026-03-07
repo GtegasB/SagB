@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { SendIcon, MicIcon, StopCircleIcon, PaperclipIcon, XIcon, FileTextIcon } from './components/Icon';
 import Sidebar from './components/Sidebar';
@@ -23,6 +23,7 @@ import {
   startMainSession,
   createPietroInstruction,
   createCassioInstruction,
+  setRuntimeAiContext,
   KLAUS_PROMPT,
   NEWTON_PROMPT,
   transcribeAudio
@@ -30,19 +31,15 @@ import {
 import metadata from './metadata.json';
 import { db, auth, onAuthStateChanged, signOut, User } from './services/supabase';
 import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, setDoc, query, where, orderBy, Timestamp } from './services/supabase';
+import { appendMessage, createSession, findLatestSession, loadSessionMessages, touchSession, updateMessage } from './utils/supabaseChat';
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
 //const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
-const STORAGE_KEYS = {
-  AGENTS: 'grupob_activated_agents_v11',
-  CHAT: 'grupob_chat_history_v4',
-  ALIGNMENT: 'grupob_align_history_v4',
-  BLUEPRINTS: 'grupob_blueprints_v4',
-  TOPICS: 'grupob_topics_v4',
-  TASKS: 'grupob_tasks_v1',
-  NAV_TAB: 'grupob_nav_active_tab_v1',
-  NAV_BU: 'grupob_nav_active_bu_v1',
-  CUSTOM_UNITS: 'grupob_custom_units_v1'
+type AppUiPrefs = {
+  navTab?: TabId;
+  navBuId?: string;
+  customUnits?: BusinessUnit[];
+  audacusGatewayByBu?: Record<string, string>;
 };
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
@@ -167,7 +164,7 @@ const App: React.FC = () => {
   const [activatedAgents, setActivatedAgents] = useState<Agent[]>([]);
   const [agentConfigsByAgentId, setAgentConfigsByAgentId] = useState<Record<string, { fullPrompt?: string; globalDocuments?: Agent['globalDocuments']; docCount?: number }>>({});
   const [messages, setMessages] = useState<Message[]>([]);
-  const [alignmentMessages, setAlignmentMessages] = useState<Message[]>([]);
+  const [mainChatSessionId, setMainChatSessionId] = useState<string | null>(null);
   const [blueprints, setBlueprints] = useState<Record<string, BusinessBlueprint>>({});
   const [topics, setTopics] = useState<Topic[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -232,17 +229,24 @@ const App: React.FC = () => {
   const audioChunksRef = useRef<Blob[]>([]);
   const [attachment, setAttachment] = useState<{ data: string, mimeType: string, preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uiPrefsHydrated, setUiPrefsHydrated] = useState(false);
+
+  const userPayload = useMemo<Record<string, any>>(() => {
+    const payload = (userProfile as any)?.payload;
+    return payload && typeof payload === 'object' ? payload : {};
+  }, [userProfile]);
+
+  const uiPrefs = useMemo<AppUiPrefs>(() => {
+    const raw = userPayload.uiPrefs;
+    return raw && typeof raw === 'object' ? raw as AppUiPrefs : {};
+  }, [userPayload]);
 
   const memberWorkspaceIds = useMemo(
     () => workspaceMembers.map(member => member.workspaceId).filter(isUuid),
     [workspaceMembers]
   );
 
-  const persistedWorkspaceId = typeof localStorage !== 'undefined'
-    ? localStorage.getItem('grupob_active_workspace_v1')
-    : null;
-
-  const preferredWorkspaceId = userProfile?.workspaceId || persistedWorkspaceId || null;
+  const preferredWorkspaceId = userProfile?.workspaceId || null;
   const activeWorkspaceId = useMemo(() => {
     if (isUuid(preferredWorkspaceId)) {
       if (memberWorkspaceIds.length === 0 || memberWorkspaceIds.includes(preferredWorkspaceId)) {
@@ -289,10 +293,17 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (activeWorkspaceId && typeof localStorage !== 'undefined') {
-      localStorage.setItem('grupob_active_workspace_v1', activeWorkspaceId);
-    }
-  }, [activeWorkspaceId]);
+    const uid = userProfile?.uid || (user as any)?.id || (user as any)?.uid;
+    if (!uid || !activeWorkspaceId) return;
+    if (userProfile?.workspaceId === activeWorkspaceId) return;
+
+    updateDoc(doc(db, "users", uid), {
+      workspaceId: activeWorkspaceId,
+      updatedAt: new Date()
+    }).catch((error) => {
+      console.error('Erro ao persistir workspace ativo no perfil:', error);
+    });
+  }, [activeWorkspaceId, userProfile, user]);
 
   useEffect(() => {
     if (!userProfile || userProfile.workspaceId || workspaceMembers.length === 0) return;
@@ -479,53 +490,82 @@ if (userId) {
     }
   };
 
-  // --- PERSISTÊNCIA DE NAVEGAÇÃO E DADOS ---
+  // --- PREFERÊNCIAS DE UI VIA SUPABASE (users.payload.uiPrefs) ---
   useEffect(() => {
-    // 1. Load Custom Business Units
-    const savedUnitsStr = localStorage.getItem(STORAGE_KEYS.CUSTOM_UNITS);
+    if (!user) return;
+
     let allUnits = [...INITIAL_BUSINESS_UNITS];
-    if (savedUnitsStr) {
-      try {
-        const customUnits: BusinessUnit[] = JSON.parse(savedUnitsStr);
-        // Merge sem duplicar (baseado em ID)
-        customUnits.forEach(cu => {
-          if (!allUnits.some(u => u.id === cu.id)) {
-            allUnits.push(cu);
-          }
-        });
-        setBusinessUnits(allUnits);
-      } catch (e) { console.error("Error loading custom units", e); }
-    }
+    const customUnits = Array.isArray(uiPrefs.customUnits) ? uiPrefs.customUnits : [];
+    customUnits.forEach((unit) => {
+      if (!allUnits.some((base) => base.id === unit.id)) allUnits.push(unit);
+    });
+    setBusinessUnits(allUnits);
 
-    // 2. Restaurar estado de navegação
-    const savedTab = localStorage.getItem(STORAGE_KEYS.NAV_TAB);
-    const savedBUId = localStorage.getItem(STORAGE_KEYS.NAV_BU);
-
+    const savedBUId = uiPrefs.navBuId;
     if (savedBUId) {
-      const foundBU = allUnits.find(b => b.id === savedBUId);
-      if (foundBU) setActiveBU(foundBU);
+      const found = allUnits.find((bu) => bu.id === savedBUId);
+      if (found) setActiveBU(found);
     }
 
-    // SAFEGUARD: Validação de Tab
     const validTabs: TabId[] = ['home', 'ecosystem', 'team', 'conversations', 'management', 'vault', 'fabrica-ca', 'governance', 'unit-room', 'chat-room', 'alignment', '3forb-home', 'audacus-home', 'startyb-home', 'redir', 'requests', 'hub'];
-
+    const savedTab = uiPrefs.navTab;
     if (savedTab) {
-      const targetTab = savedTab === 'hub' ? 'ecosystem' : savedTab as TabId;
-      if (validTabs.includes(targetTab)) {
-        setActiveTab(targetTab);
-      } else {
-        setActiveTab('home'); // Fallback se a tab salva for inválida
-      }
+      const targetTab = savedTab === 'hub' ? 'ecosystem' : savedTab;
+      setActiveTab(validTabs.includes(targetTab) ? targetTab : 'home');
     } else {
       setActiveTab('home');
     }
-  }, []);
+
+    setUiPrefsHydrated(true);
+  }, [user, uiPrefs]);
+
+  const saveUiPrefs = useCallback(async (updates: Partial<AppUiPrefs>) => {
+    const uid = userProfile?.uid || (user as any)?.id || (user as any)?.uid;
+    if (!uid) return;
+
+    const payloadBase = (userProfile as any)?.payload && typeof (userProfile as any).payload === 'object'
+      ? (userProfile as any).payload
+      : {};
+    const currentUiPrefs = payloadBase.uiPrefs && typeof payloadBase.uiPrefs === 'object'
+      ? payloadBase.uiPrefs as AppUiPrefs
+      : {};
+
+    const mergedUiPrefs: AppUiPrefs = {
+      ...currentUiPrefs,
+      ...updates
+    };
+
+    const mergedPayload = {
+      ...payloadBase,
+      uiPrefs: mergedUiPrefs
+    };
+
+    await updateDoc(doc(db, "users", uid), {
+      payload: mergedPayload,
+      updatedAt: new Date()
+    });
+  }, [userProfile, user]);
 
   useEffect(() => {
-    // Salvar estado ao navegar
-    localStorage.setItem(STORAGE_KEYS.NAV_TAB, activeTab);
-    localStorage.setItem(STORAGE_KEYS.NAV_BU, activeBU.id);
-  }, [activeTab, activeBU]);
+    if (!uiPrefsHydrated || !user) return;
+
+    const customUnits = businessUnits.filter(unit => !INITIAL_BUSINESS_UNITS.some(base => base.id === unit.id));
+    const nextPrefs: AppUiPrefs = {
+      navTab: activeTab,
+      navBuId: activeBU.id,
+      customUnits
+    };
+    const currentPrefs = uiPrefs && typeof uiPrefs === 'object' ? uiPrefs : {};
+    if (JSON.stringify(currentPrefs) === JSON.stringify({ ...currentPrefs, ...nextPrefs })) return;
+
+    const timeout = setTimeout(() => {
+      saveUiPrefs(nextPrefs).catch((error) => {
+        console.error('Erro ao salvar preferências de UI no Supabase:', error);
+      });
+    }, 250);
+
+    return () => clearTimeout(timeout);
+  }, [uiPrefsHydrated, user, activeTab, activeBU.id, businessUnits, saveUiPrefs, uiPrefs]);
 
   useEffect(() => {
     if (!user) {
@@ -643,8 +683,10 @@ if (userId) {
         status: 'Pendente',
         timestamp: Timestamp.fromDate(new Date()),
         buId: activeBU.id,
+        workspaceId: activeWorkspaceId || userProfile?.workspaceId || null,
         assignee: assignee || '',
-        dueDate: dueDate || ''
+        dueDate: dueDate || '',
+        createdBy: userProfile?.uid || null
       };
       await addDoc(collection(db, "topics"), newTopic);
     } catch (e) {
@@ -671,12 +713,25 @@ if (userId) {
 
   // Handler que vem do CHAT (SystemicVision)
   const handleCreateTopicFromChat = (partialTopic: Partial<Topic>) => {
-    handleAddTopic(
-      partialTopic.title || 'Nova Pauta',
-      partialTopic.priority || 'Média',
-      partialTopic.assignee,
-      partialTopic.dueDate
-    );
+    const title = partialTopic.title || 'Nova Pauta';
+    const priority = partialTopic.priority || 'Média';
+    const assignee = partialTopic.assignee || '';
+    const dueDate = partialTopic.dueDate;
+
+    void handleAddTopic(title, priority, assignee, dueDate);
+
+    const normalizedDueDate = dueDate ? new Date(dueDate) : undefined;
+    const taskFromChat: Task = {
+      id: generateId(),
+      title,
+      description: partialTopic.description || '',
+      status: 'todo',
+      assignee,
+      createdAt: new Date(),
+      dueDate: normalizedDueDate && !Number.isNaN(normalizedDueDate.getTime()) ? normalizedDueDate : undefined
+    };
+
+    void handleAddTask(taskFromChat);
   };
 
   const handleRemoveVenture = async (id: string) => {
@@ -799,11 +854,8 @@ if (userId) {
   // Função para criar novas Unidades (Ventures) via Importador
   const handleAddBusinessUnit = (newUnit: BusinessUnit) => {
     setBusinessUnits(prev => {
-      const updated = [...prev, newUnit];
-      // Persist Custom Units
-      const customUnits = updated.filter(u => !INITIAL_BUSINESS_UNITS.some(init => init.id === u.id));
-      localStorage.setItem(STORAGE_KEYS.CUSTOM_UNITS, JSON.stringify(customUnits));
-      return updated;
+      if (prev.some(unit => unit.id === newUnit.id)) return prev;
+      return [...prev, newUnit];
     });
   };
 
@@ -812,6 +864,9 @@ if (userId) {
       const { id, ...data } = task;
       await addDoc(collection(db, "tasks"), {
         ...data,
+        workspaceId: activeWorkspaceId || userProfile?.workspaceId || null,
+        buId: activeBU.id,
+        createdBy: userProfile?.uid || null,
         createdAt: Timestamp.fromDate(new Date()),
         dueDate: task.dueDate ? Timestamp.fromDate(task.dueDate) : null
       });
@@ -1108,13 +1163,6 @@ if (userId) {
   }, [user, agentConfigsByAgentId]);
 
   // --- SAVE STATE ---
-  // --- SAVE STATE (LOCALSTORAGE REMOVIDO PARA AGENTES - AGORA É BANCO REMOTO) ---
-  // useEffect(() => { localStorage.setItem(STORAGE_KEYS.AGENTS, JSON.stringify(activatedAgents)); }, [activatedAgents]); 
-
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.CHAT, JSON.stringify(messages)); }, [messages]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.ALIGNMENT, JSON.stringify(alignmentMessages)); }, [alignmentMessages]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.TOPICS, JSON.stringify(topics)); }, [topics]);
-  useEffect(() => { localStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(tasks)); }, [tasks]);
 
 
   // CORREÇÃO CRÍTICA: Se estiver no GrupoB, mostra TODOS os agentes ativos no sistema
@@ -1124,29 +1172,132 @@ if (userId) {
     : activatedAgents.filter(a => activeBU && a.buId === activeBU.id);
 
   const filteredMessages = messages.filter(m => activeBU && m.buId === activeBU.id);
-  const filteredAlignMessages = alignmentMessages.filter(m => activeBU && m.buId === activeBU.id);
   const currentBlueprint = activeBU ? (blueprints[activeBU.id] || {}) : {};
+  const ownerUserId = userProfile?.uid || (user as any)?.id || (user as any)?.uid || null;
+  const audacusGatewayByBu = (uiPrefs.audacusGatewayByBu && typeof uiPrefs.audacusGatewayByBu === 'object')
+    ? uiPrefs.audacusGatewayByBu
+    : {};
+
+  useEffect(() => {
+    const agentIdentityByKey = activatedAgents.reduce((acc, agent) => {
+      if (agent?.fullPrompt?.trim()) {
+        acc[agent.id] = agent.fullPrompt;
+        if (agent.universalId) acc[agent.universalId] = agent.fullPrompt;
+      }
+      return acc;
+    }, {} as Record<string, string>);
+
+    setRuntimeAiContext({
+      constitution: latestCultureEntry?.contentMd || undefined,
+      context: latestCultureEntry?.summary || undefined,
+      compliance: activeComplianceRule?.ruleMd || undefined,
+      agentIdentityByKey
+    });
+  }, [activatedAgents, latestCultureEntry, activeComplianceRule]);
+
+  const handleSaveGatewayUrl = useCallback(async (buId: string, url: string) => {
+    const next = {
+      ...audacusGatewayByBu,
+      [buId]: url
+    };
+    await saveUiPrefs({ audacusGatewayByBu: next });
+  }, [audacusGatewayByBu, saveUiPrefs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const bootstrapMainChat = async () => {
+      const agentId = `redir:${activeBU.id}`;
+      try {
+        const existingSession = await findLatestSession({
+          workspaceId: activeWorkspaceId,
+          agentId,
+          buId: activeBU.id
+        });
+
+        let targetSessionId = existingSession?.id || null;
+        if (!targetSessionId) {
+          targetSessionId = await createSession({
+            workspaceId: activeWorkspaceId,
+            agentId,
+            ownerUserId,
+            buId: activeBU.id,
+            title: `Canal Direto • ${activeBU.name}`,
+            payload: { kind: 'direct-channel', buName: activeBU.name }
+          });
+        }
+
+        const loadedMessages = await loadSessionMessages({
+          workspaceId: activeWorkspaceId,
+          sessionId: targetSessionId
+        });
+
+        if (cancelled) return;
+        setMainChatSessionId(targetSessionId);
+        setMessages(loadedMessages);
+      } catch (error) {
+        console.error('Erro ao carregar canal direto:', error);
+        if (cancelled) return;
+        setMainChatSessionId(null);
+        setMessages([]);
+      }
+    };
+
+    bootstrapMainChat();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBU.id, activeBU.name, activeWorkspaceId, ownerUserId]);
 
   // Determina o "Diretor Ativo" para exibir o placeholder correto e avatar
   const activeDirector = activeBU && activeBU.id === 'startyb' ? CASSIO_PERSONA : PIETRO_PERSONA;
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if ((!input.trim() && !attachment) || isLoading) return;
+    if ((!input.trim() && !attachment) || isLoading || !mainChatSessionId) return;
     const userText = input.trim();
     const currentAttachment = attachment;
     setInput('');
     setAttachment(null);
 
     const displayText = currentAttachment ? (userText ? userText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : userText;
-
-    setMessages(prev => [...prev, { id: generateId(), text: displayText, sender: Sender.User, timestamp: new Date(), buId: activeBU.id }]);
-    const botMsgId = generateId();
-    setIsLoading(true);
-    setMessages(prev => [...prev, { id: botMsgId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true }]);
+    const channelAgentId = `redir:${activeBU.id}`;
+    let persistedBotId = '';
 
     try {
-      const stream = await sendMessageStream(userText, `Direto com Rodrigues. Unidade: ${activeBU.name}.`);
+      const savedUser = await appendMessage({
+        workspaceId: activeWorkspaceId,
+        sessionId: mainChatSessionId,
+        agentId: channelAgentId,
+        sender: Sender.User,
+        text: displayText,
+        buId: activeBU.id,
+        attachment: currentAttachment
+      });
+      setMessages(prev => [...prev, { id: savedUser.id, text: displayText, sender: Sender.User, timestamp: new Date(), buId: activeBU.id, attachment: currentAttachment || undefined }]);
+
+      const savedBot = await appendMessage({
+        workspaceId: activeWorkspaceId,
+        sessionId: mainChatSessionId,
+        agentId: channelAgentId,
+        sender: Sender.Bot,
+        text: '',
+        buId: activeBU.id,
+        participantName: activeDirector.name,
+        isStreaming: true
+      });
+      persistedBotId = savedBot.id;
+
+      setIsLoading(true);
+      setMessages(prev => [...prev, { id: persistedBotId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true, participantName: activeDirector.name }]);
+
+      let messagePayload: any = userText;
+      if (currentAttachment) {
+        messagePayload = [
+          { text: userText || 'Analise o arquivo enviado.' },
+          { inlineData: { mimeType: currentAttachment.mimeType, data: currentAttachment.data } }
+        ];
+      }
+      const stream = await sendMessageStream(messagePayload, `Direto com Rodrigues. Unidade: ${activeBU.name}.`);
       let fullText = '';
 
       for await (const chunk of stream) {
@@ -1154,16 +1305,31 @@ if (userId) {
         const chunkText = (chunk as { text?: string }).text || '';
         if (chunkText) {
           fullText += chunkText;
-          setMessages(prev => prev.map(msg => msg.id === botMsgId ? { ...msg, text: fullText } : msg));
+          setMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, text: fullText } : msg));
         }
       }
-      setMessages(prev => prev.map(msg => msg.id === botMsgId ? { ...msg, isStreaming: false } : msg));
+      setMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, isStreaming: false } : msg));
+      await updateMessage(persistedBotId, { text: fullText, isStreaming: false, updatedAt: new Date() });
+      await touchSession(mainChatSessionId);
     } catch (error) {
       console.error(error);
-      setMessages(prev => prev.map(msg => msg.id === botMsgId ? { ...msg, text: "Falha de conexão com o Diretor (API Key Error).", isStreaming: false } : msg));
+      if (persistedBotId) {
+        setMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, text: "Falha de conexão com o Diretor (API Key Error).", isStreaming: false } : msg));
+        await updateMessage(persistedBotId, { text: "Falha de conexão com o Diretor (API Key Error).", isStreaming: false, updatedAt: new Date() }).catch(() => null);
+      }
+      const sysText = "⚠️ **ERRO DE SISTEMA:** Não foi possível conectar ao Gemini API. Verifique as variáveis de ambiente.";
+      const savedSystem = await appendMessage({
+        workspaceId: activeWorkspaceId,
+        sessionId: mainChatSessionId,
+        agentId: channelAgentId,
+        sender: Sender.System,
+        text: sysText,
+        buId: activeBU.id,
+        participantName: 'Sistema'
+      }).catch(() => null);
       setMessages(prev => [...prev, {
-        id: 'error-' + Date.now(),
-        text: "⚠️ **ERRO DE SISTEMA:** Não foi possível conectar ao Gemini API. Verifique as variáveis de ambiente.",
+        id: savedSystem?.id || ('error-' + Date.now()),
+        text: sysText,
         sender: Sender.System,
         timestamp: new Date(),
         buId: activeBU.id
@@ -1186,26 +1352,35 @@ if (userId) {
       );
     }
 
-    if (activeBU.id === '3forb' && activeTab === '3forb-home') return <ThreeForBView activeTab={activeTab} activeBU={activeBU} setActiveTab={setActiveTab} agents={activatedAgents} onAddTopic={handleAddTopic} />;
+    if (activeBU.id === '3forb' && activeTab === '3forb-home') return <ThreeForBView activeTab={activeTab} activeBU={activeBU} setActiveTab={setActiveTab} agents={activatedAgents} onAddTopic={handleAddTopic} activeWorkspaceId={activeWorkspaceId} ownerUserId={ownerUserId} />;
 
-    if (activeBU.id === 'audacus' && activeTab === 'audacus-home') return <AudacusView activeBU={activeBU} onBack={handleReturnToHub} />;
+    if (activeBU.id === 'audacus' && activeTab === 'audacus-home') {
+      return (
+        <AudacusView
+          activeBU={activeBU}
+          onBack={handleReturnToHub}
+          savedGatewayUrl={audacusGatewayByBu[activeBU.id]}
+          onSaveGatewayUrl={(url) => handleSaveGatewayUrl(activeBU.id, url)}
+        />
+      );
+    }
 
     // ROTA STARTYB
-    if (activeBU.id === 'startyb' && activeTab === 'startyb-home') return <StartyBView activeBU={activeBU} agents={activatedAgents} onBack={handleReturnToHub} />;
+    if (activeBU.id === 'startyb' && activeTab === 'startyb-home') return <StartyBView activeBU={activeBU} agents={activatedAgents} onBack={handleReturnToHub} activeWorkspaceId={activeWorkspaceId} ownerUserId={ownerUserId} />;
 
     switch (activeTab) {
-      case 'home': return <DashboardHome agents={activatedAgents} tasks={tasks} businessUnits={businessUnits} onNavigate={setActiveTab} />;
+      case 'home': return <DashboardHome agents={activatedAgents} tasks={tasks} businessUnits={businessUnits} onNavigate={setActiveTab} activeWorkspaceId={activeWorkspaceId} />;
 
       // FIX: HUB VIEW SEMPRE RECEBE LISTA COMPLETA DE AGENTES (activatedAgents)
       case 'ecosystem': return <HubView businessUnits={businessUnits} activeBU={activeBU} onSelectBU={handleSelectBU} onNavigate={setActiveTab} agents={activatedAgents} onSelectAgent={handleAgentInteraction} />;
       // Fallback for 'hub' key from localstorage if present
       case 'hub': return <HubView businessUnits={businessUnits} activeBU={activeBU} onSelectBU={handleSelectBU} onNavigate={setActiveTab} agents={activatedAgents} onSelectAgent={handleAgentInteraction} />;
 
-      case 'management': return <ManagementView tasks={tasks} onAddTask={handleAddTask} onUpdateTaskStatus={handleUpdateTaskStatus} />;
-      case 'unit-room': return <UnitView activeBU={activeBU} agents={activatedAgents} onBack={handleBackNavigation} />;
+      case 'management': return <ManagementView tasks={tasks} onAddTask={handleAddTask} onUpdateTaskStatus={handleUpdateTaskStatus} activeWorkspaceId={activeWorkspaceId} ownerUserId={ownerUserId} />;
+      case 'unit-room': return <UnitView activeBU={activeBU} agents={activatedAgents} onBack={handleBackNavigation} activeWorkspaceId={activeWorkspaceId} ownerUserId={ownerUserId} />;
 
       // NOVA ROTA: CONVERSAS (HISTÓRICO)
-      case 'conversations': return <ConversationsView agents={activatedAgents} onOpenChat={handleAgentInteraction} />;
+      case 'conversations': return <ConversationsView agents={activatedAgents} onOpenChat={handleAgentInteraction} activeWorkspaceId={activeWorkspaceId} />;
 
       // NOVA LÓGICA V4.6 - Governance Deep Linking
       case 'governance': return (
@@ -1231,7 +1406,7 @@ if (userId) {
         />
       );
 
-      case 'alignment': return <AlignmentView activeBU={activeBU} messages={filteredAlignMessages} onAddMessage={(m) => setAlignmentMessages(p => [...p, m])} blueprint={currentBlueprint} onUpdateBlueprint={(bp) => setBlueprints(p => ({ ...p, [activeBU.id]: { ...p[activeBU.id], ...bp } }))} />;
+      case 'alignment': return <AlignmentView activeBU={activeBU} blueprint={currentBlueprint} onUpdateBlueprint={(bp) => setBlueprints(p => ({ ...p, [activeBU.id]: { ...p[activeBU.id], ...bp } }))} activeWorkspaceId={activeWorkspaceId} ownerUserId={ownerUserId} />;
 
       case 'fabrica-ca': return (
         <AgentFactory
@@ -1372,7 +1547,7 @@ if (userId) {
         );
 
       // DEFAULT FALLBACK: Sempre renderiza Home se a tab for desconhecida
-      default: return <DashboardHome agents={activatedAgents} tasks={tasks} businessUnits={businessUnits} onNavigate={setActiveTab} />;
+      default: return <DashboardHome agents={activatedAgents} tasks={tasks} businessUnits={businessUnits} onNavigate={setActiveTab} activeWorkspaceId={activeWorkspaceId} />;
     }
   };
 

@@ -36,6 +36,7 @@ interface ChatSession {
     title: string;
     createdAt: number;
     lastMessageAt: number;
+    participantIds?: string[];
 }
 
 const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdateAgents, activeBU, onAddAgent, onApproveAgent, onPlanAgent, onEnterRoom, businessUnits = [], totalGlobalAgents = 0, forcedAgent, onBack, onConvertToTopic, viewMode = 'bu', userProfile, activeWorkspaceId }) => {
@@ -114,8 +115,9 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const isCreatingSessionRef = useRef(false);
 
-    const workspaceId = activeWorkspaceId || userProfile?.workspaceId || (typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_active_workspace_v1') : null);
-    const useSupabaseChat = Boolean(workspaceId);
+    const DEFAULT_WORKSPACE_ID = '00000000-0000-0000-0000-000000000000';
+    const workspaceId = activeWorkspaceId || userProfile?.workspaceId || DEFAULT_WORKSPACE_ID;
+    const useSupabaseChat = true;
     const ownerUserId = userProfile?.uid || null;
 
     // New Agent Modal State
@@ -153,13 +155,6 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     useEffect(() => {
         setNewAgentBU(activeBU.id);
     }, [activeBU.id]);
-
-    // Persist Messages when they change
-    useEffect(() => {
-        if (!useSupabaseChat && selectedAgent && currentSessionId && activeMessages.length > 0) {
-            localStorage.setItem(`grupob_chat_${currentSessionId}`, JSON.stringify(activeMessages));
-        }
-    }, [activeMessages, currentSessionId, selectedAgent, useSupabaseChat]);
 
     // Reset textarea height on input clear
     useEffect(() => {
@@ -236,110 +231,58 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     }, [sidebarWidth]);
 
     // --- SESSION LOGIC ---
-    const loadSessionsForAgent = (agentId: string) => {
-        if (useSupabaseChat) return;
-        const stored = localStorage.getItem(`grupob_sessions_${agentId}`);
-        if (stored) {
-            try {
-                const parsed = JSON.parse(stored);
-                setSessions(parsed.sort((a: ChatSession, b: ChatSession) => b.lastMessageAt - a.lastMessageAt));
-            } catch (e) { setSessions([]); }
-        } else {
-            setSessions([]);
-        }
-    };
-
     const createNewSession = async (agent: Agent) => {
-        if (useSupabaseChat) {
-            if (!workspaceId) {
-                alert("Workspace não definido para salvar conversa.");
-                return;
-            }
-            if (isCreatingSessionRef.current) return;
-            isCreatingSessionRef.current = true;
-            try {
-                const now = new Date();
-                const sessionRef = await addDoc(collection(db, "chat_sessions"), {
-                    workspaceId,
-                    agentId: agent.id,
-                    ownerUserId,
-                    title: "Nova Conversa",
-                    status: "active",
-                    buId: activeBU.id,
-                    createdAt: now,
-                    updatedAt: now,
-                    lastMessageAt: now
-                });
-                setCurrentSessionId(sessionRef.id);
-                setTitleOptions(null);
-                setTaskSuggestions(null);
-                setAttachment(null);
-                setActiveParticipants([]);
-
-                const randomGreeting = HUMAN_GREETINGS[Math.floor(Math.random() * HUMAN_GREETINGS.length)];
-                await addDoc(collection(db, "chat_messages"), {
-                    workspaceId,
-                    sessionId: sessionRef.id,
-                    agentId: agent.id,
-                    sender: Sender.Bot,
-                    text: randomGreeting,
-                    buId: activeBU.id,
-                    hasAttachment: false,
-                    createdAt: now
-                });
-
-                if (agent.modelProvider !== 'deepseek') {
-                    initializeSession(agent);
-                } else {
-                    setGeminiSession(null);
-                }
-                setShowHistorySidebar(false);
-            } catch (error) {
-                console.error("Erro ao criar sessão no Supabase:", error);
-                alert("Falha ao criar sessão no banco de dados.");
-            } finally {
-                isCreatingSessionRef.current = false;
-            }
+        if (!workspaceId) {
+            alert("Workspace não definido para salvar conversa.");
             return;
         }
+        if (isCreatingSessionRef.current) return;
+        isCreatingSessionRef.current = true;
+        try {
+            const now = new Date();
+            const sessionRef = await addDoc(collection(db, "chat_sessions"), {
+                workspaceId,
+                agentId: agent.id,
+                ownerUserId,
+                title: "Nova Conversa",
+                status: "active",
+                buId: activeBU.id,
+                payload: { participantAgentIds: [] },
+                createdAt: now,
+                updatedAt: now,
+                lastMessageAt: now
+            });
+            setCurrentSessionId(sessionRef.id);
+            setTitleOptions(null);
+            setTaskSuggestions(null);
+            setAttachment(null);
+            setActiveParticipants([]);
 
-        const newSessionId = Date.now().toString();
-        const newSession: ChatSession = {
-            id: newSessionId,
-            agentId: agent.id,
-            title: "Nova Conversa",
-            createdAt: Date.now(),
-            lastMessageAt: Date.now()
-        };
+            const randomGreeting = HUMAN_GREETINGS[Math.floor(Math.random() * HUMAN_GREETINGS.length)];
+            await addDoc(collection(db, "chat_messages"), {
+                workspaceId,
+                sessionId: sessionRef.id,
+                agentId: agent.id,
+                participantName: agent.name,
+                sender: Sender.Bot,
+                text: randomGreeting,
+                buId: activeBU.id,
+                hasAttachment: false,
+                createdAt: now
+            });
 
-        const updatedSessions = [newSession, ...sessions];
-        setSessions(updatedSessions);
-        localStorage.setItem(`grupob_sessions_${agent.id}`, JSON.stringify(updatedSessions));
-
-        setCurrentSessionId(newSessionId);
-
-        // SAUDAÇÃO HUMANIZADA (Random Pick)
-        const randomGreeting = HUMAN_GREETINGS[Math.floor(Math.random() * HUMAN_GREETINGS.length)];
-
-        setActiveMessages([{
-            id: 'init',
-            text: randomGreeting,
-            sender: Sender.Bot,
-            timestamp: new Date(),
-            buId: activeBU.id
-        }]);
-
-        setTitleOptions(null);
-        setTaskSuggestions(null);
-        setAttachment(null);
-        setActiveParticipants([]);
-
-        if (agent.modelProvider !== 'deepseek') {
-            initializeSession(agent);
-        } else {
-            setGeminiSession(null);
+            if (agent.modelProvider !== 'deepseek') {
+                initializeSession(agent);
+            } else {
+                setGeminiSession(null);
+            }
+            setShowHistorySidebar(false);
+        } catch (error) {
+            console.error("Erro ao criar sessão no Supabase:", error);
+            alert("Falha ao criar sessão no banco de dados.");
+        } finally {
+            isCreatingSessionRef.current = false;
         }
-        setShowHistorySidebar(false);
     };
 
     const selectSession = (sessionId: string, agentContext?: Agent) => {
@@ -352,19 +295,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setAttachment(null);
         setActiveParticipants([]);
 
-        if (useSupabaseChat) {
-            setActiveMessages([]);
-            return;
-        }
-
-        const storedMsgs = localStorage.getItem(`grupob_chat_${sessionId}`);
-        if (storedMsgs) {
-            try {
-                setActiveMessages(JSON.parse(storedMsgs).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })));
-            } catch (e) { setActiveMessages([]); }
-        } else {
-            setActiveMessages([]);
-        }
+        setActiveMessages([]);
     };
 
     const handleManualSuggestTitle = async () => {
@@ -384,22 +315,16 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const handleDeleteSession = async (sessionId: string) => {
         if (!window.confirm("Deseja realmente excluir esta conversa?")) return;
 
-        if (useSupabaseChat) {
-            try {
-                await deleteDoc(doc(db, "chat_sessions", sessionId));
-            } catch (error) {
-                console.error("Erro ao excluir sessão:", error);
-                alert("Falha ao excluir conversa no banco de dados.");
-                return;
-            }
+        try {
+            await deleteDoc(doc(db, "chat_sessions", sessionId));
+        } catch (error) {
+            console.error("Erro ao excluir sessão:", error);
+            alert("Falha ao excluir conversa no banco de dados.");
+            return;
         }
 
         const updatedSessions = sessions.filter(s => s.id !== sessionId);
         setSessions(updatedSessions);
-        if (!useSupabaseChat && selectedAgent) {
-            localStorage.setItem(`grupob_sessions_${selectedAgent.id}`, JSON.stringify(updatedSessions));
-            localStorage.removeItem(`grupob_chat_${sessionId}`);
-        }
 
         if (currentSessionId === sessionId) {
             setCurrentSessionId(null);
@@ -414,15 +339,11 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         if (newTitle && newTitle.trim()) {
             const updatedSessions = sessions.map(s => s.id === sessionId ? { ...s, title: newTitle.trim() } : s);
             setSessions(updatedSessions);
-            if (useSupabaseChat) {
-                try {
-                    await updateDoc(doc(db, "chat_sessions", sessionId), { title: newTitle.trim(), updatedAt: new Date() });
-                } catch (error) {
-                    console.error("Erro ao renomear sessão:", error);
-                    alert("Falha ao renomear conversa no banco de dados.");
-                }
-            } else if (selectedAgent) {
-                localStorage.setItem(`grupob_sessions_${selectedAgent.id}`, JSON.stringify(updatedSessions));
+            try {
+                await updateDoc(doc(db, "chat_sessions", sessionId), { title: newTitle.trim(), updatedAt: new Date() });
+            } catch (error) {
+                console.error("Erro ao renomear sessão:", error);
+                alert("Falha ao renomear conversa no banco de dados.");
             }
         }
         setMenuOpenId(null);
@@ -438,19 +359,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             setTaskSuggestions(null);
             setAttachment(null);
             setActiveParticipants([]);
-
-            if (useSupabaseChat) {
-                return;
-            }
-
-            loadSessionsForAgent(agent.id);
-            const stored = localStorage.getItem(`grupob_sessions_${agent.id}`);
-            if (!stored || JSON.parse(stored).length === 0) {
-                setTimeout(() => { void createNewSession(agent); }, 50);
-            } else {
-                const recent = JSON.parse(stored).sort((a: ChatSession, b: ChatSession) => b.lastMessageAt - a.lastMessageAt)[0];
-                selectSession(recent.id, agent);
-            }
+            return;
         }
     };
 
@@ -473,12 +382,17 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         const unsubscribe = onSnapshot(sessionsQuery, (snapshot) => {
             const loaded = snapshot.docs.map((docSnap) => {
                 const data = docSnap.data() as any;
+                const payload = (data.payload && typeof data.payload === 'object') ? data.payload : {};
+                const participantAgentIds = Array.isArray(payload.participantAgentIds)
+                    ? payload.participantAgentIds.map((id: any) => String(id))
+                    : [];
                 return {
                     id: docSnap.id,
                     agentId: String(data.agentId || selectedAgent.id),
                     title: String(data.title || "Nova Conversa"),
                     createdAt: toMillis(data.createdAt),
-                    lastMessageAt: toMillis(data.lastMessageAt || data.updatedAt || data.createdAt)
+                    lastMessageAt: toMillis(data.lastMessageAt || data.updatedAt || data.createdAt),
+                    participantIds: participantAgentIds
                 } as ChatSession;
             }).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
 
@@ -498,6 +412,27 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
         return () => unsubscribe();
     }, [useSupabaseChat, workspaceId, selectedAgent?.id, selectedAgent?.status]);
+
+    useEffect(() => {
+        if (!selectedAgent || !currentSessionId) {
+            setActiveParticipants([]);
+            return;
+        }
+
+        const activeSession = sessions.find((session) => session.id === currentSessionId);
+        if (!activeSession || !Array.isArray(activeSession.participantIds)) {
+            setActiveParticipants([]);
+            return;
+        }
+
+        const participantSet = new Set(activeSession.participantIds);
+        const hydratedParticipants = dynamicAgents.filter((agent) =>
+            agent.id !== selectedAgent.id &&
+            participantSet.has(agent.id) &&
+            agent.status === 'ACTIVE'
+        );
+        setActiveParticipants(hydratedParticipants);
+    }, [currentSessionId, selectedAgent?.id, sessions, dynamicAgents]);
 
     useEffect(() => {
         if (!useSupabaseChat || !workspaceId || !selectedAgent || !currentSessionId) return;
@@ -553,21 +488,32 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setSessions(prev => {
             const updated = prev.map(s => s.id === sessionId ? { ...s, lastMessageAt: nowMs } : s);
             updated.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
-            if (!useSupabaseChat && selectedAgent) {
-                localStorage.setItem(`grupob_sessions_${selectedAgent.id}`, JSON.stringify(updated));
-            }
             return updated;
         });
 
-        if (useSupabaseChat) {
-            try {
-                await updateDoc(doc(db, "chat_sessions", sessionId), {
-                    lastMessageAt: new Date(nowMs),
-                    updatedAt: new Date(nowMs)
-                });
-            } catch (error) {
-                console.error("Erro ao atualizar metadata da sessão:", error);
-            }
+        try {
+            await updateDoc(doc(db, "chat_sessions", sessionId), {
+                lastMessageAt: new Date(nowMs),
+                updatedAt: new Date(nowMs)
+            });
+        } catch (error) {
+            console.error("Erro ao atualizar metadata da sessão:", error);
+        }
+    };
+
+    const persistSessionParticipants = async (sessionId: string, participantIds: string[]) => {
+        const normalizedIds = Array.from(new Set((participantIds || []).map((id) => String(id).trim()).filter(Boolean)));
+        setSessions((prev) => prev.map((s) => (
+            s.id === sessionId ? { ...s, participantIds: normalizedIds } : s
+        )));
+
+        try {
+            await updateDoc(doc(db, "chat_sessions", sessionId), {
+                payload: { participantAgentIds: normalizedIds },
+                updatedAt: new Date()
+            });
+        } catch (error) {
+            console.error("Erro ao persistir participantes da sessão:", error);
         }
     };
 
@@ -735,7 +681,15 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
     const handleInviteAgent = (agent: Agent, manual: boolean = true) => {
         if (activeParticipants.some(p => p.id === agent.id)) return;
-        setActiveParticipants(prev => [...prev, agent]);
+        setActiveParticipants((prev) => {
+            const alreadyInvited = prev.some((participant) => participant.id === agent.id);
+            if (alreadyInvited) return prev;
+            const nextParticipants = [...prev, agent];
+            if (currentSessionId) {
+                void persistSessionParticipants(currentSessionId, nextParticipants.map((participant) => participant.id));
+            }
+            return nextParticipants;
+        });
         if (manual) {
             setIsInviteModalOpen(false);
             const systemMessage = {
@@ -752,6 +706,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     workspaceId,
                     sessionId: currentSessionId,
                     agentId: selectedAgent.id,
+                    participantName: agent.name,
                     sender: Sender.System,
                     text: systemMessage.text,
                     buId: activeBU.id,
@@ -798,18 +753,12 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const handleApplyTitle = async (title: string) => {
         if (!currentSessionId) return;
         setSessions(prev => {
-            const updated = prev.map(s => s.id === currentSessionId ? { ...s, title } : s);
-            if (!useSupabaseChat) {
-                localStorage.setItem(`grupob_sessions_${selectedAgent?.id}`, JSON.stringify(updated));
-            }
-            return updated;
+            return prev.map(s => s.id === currentSessionId ? { ...s, title } : s);
         });
-        if (useSupabaseChat) {
-            try {
-                await updateDoc(doc(db, "chat_sessions", currentSessionId), { title, updatedAt: new Date() });
-            } catch (error) {
-                console.error("Erro ao aplicar título:", error);
-            }
+        try {
+            await updateDoc(doc(db, "chat_sessions", currentSessionId), { title, updatedAt: new Date() });
+        } catch (error) {
+            console.error("Erro ao aplicar título:", error);
         }
         setTitleOptions(null);
     };
@@ -962,9 +911,14 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         e?.preventDefault();
         if ((!input.trim() && !attachment) || isLoading || !selectedAgent) return;
 
+        if (!workspaceId || !currentSessionId) {
+            alert("Workspace ou sessão não definidos. Abra uma nova conversa.");
+            return;
+        }
+
         const userText = input.trim();
         const currentAttachment = attachment;
-        const canPersistChat = Boolean(useSupabaseChat && workspaceId && currentSessionId);
+        const canPersistChat = Boolean(workspaceId && currentSessionId);
         const now = new Date();
 
         setInput('');
@@ -1014,124 +968,172 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setActiveMessages(prev => [...prev, userMsg]);
         setIsLoading(true);
 
-        let botMsgId = Date.now().toString() + '_bot';
-        let persistedBotId: string | null = null;
-        if (canPersistChat) {
-            try {
-                const savedBot = await addDoc(collection(db, "chat_messages"), {
-                    workspaceId,
-                    sessionId: currentSessionId,
-                    agentId: selectedAgent.id,
-                    sender: Sender.Bot,
-                    text: '',
-                    buId: activeBU.id,
-                    hasAttachment: false,
-                    createdAt: new Date(),
-                    payload: { isStreaming: true }
-                });
-                botMsgId = savedBot.id;
-                persistedBotId = savedBot.id;
-            } catch (error) {
-                console.error("Erro ao criar placeholder da resposta no banco:", error);
-            }
-        }
-
-        setActiveMessages(prev => [...prev, {
-            id: botMsgId,
-            text: '',
-            sender: Sender.Bot,
-            timestamp: new Date(),
-            buId: activeBU.id,
-            isStreaming: true
-        }]);
-
         try {
-            // RAG & CONTEXT RETRIEVAL (BUSCA DE CONTEÚDO)
-            const ragContext = retrieveRelevantContext(selectedAgent, userText);
+            const participantsLabel = activeParticipants.length > 0
+                ? `[MESA: ${activeParticipants.map((participant) => participant.name).join(', ')}]`
+                : '';
+            const speakerQueue = [selectedAgent, ...activeParticipants];
+            const generatedReplies: Message[] = [];
 
-            let finalBotText = '';
+            for (const speaker of speakerQueue) {
+                let botMsgId = `${Date.now()}_${speaker.id}`;
+                let persistedBotId: string | null = null;
 
-            // LÓGICA MULTI-MODELO (CÉREBRO)
-            if (selectedAgent.modelProvider === 'deepseek') {
-                const deepSeekHistory = activeMessages.concat(userMsg).map(m => ({
-                    role: m.sender === Sender.User ? 'user' : 'assistant',
-                    content: m.text
-                })) as DeepSeekMessage[];
-
-                // INJEÇÃO RAG PARA DEEPSEEK (Anexa ao histórico como sistema)
-                if (ragContext) {
-                    deepSeekHistory.push({ role: 'system', content: ragContext });
+                if (canPersistChat) {
+                    try {
+                        const savedBot = await addDoc(collection(db, "chat_messages"), {
+                            workspaceId,
+                            sessionId: currentSessionId,
+                            agentId: speaker.id,
+                            participantName: speaker.name,
+                            sender: Sender.Bot,
+                            text: '',
+                            buId: activeBU.id,
+                            hasAttachment: false,
+                            createdAt: new Date(),
+                            payload: { isStreaming: true }
+                        });
+                        botMsgId = savedBot.id;
+                        persistedBotId = savedBot.id;
+                    } catch (error) {
+                        console.error("Erro ao criar placeholder da resposta no banco:", error);
+                    }
                 }
 
-                const stream = streamDeepSeekResponse(deepSeekHistory, selectedAgent.fullPrompt);
-                let fullText = "";
+                setActiveMessages((prev) => [...prev, {
+                    id: botMsgId,
+                    text: '',
+                    sender: Sender.Bot,
+                    timestamp: new Date(),
+                    buId: activeBU.id,
+                    isStreaming: true,
+                    participantName: speaker.name
+                }]);
 
-                for await (const chunk of stream) {
-                    fullText += chunk.text;
-                    setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
-                }
-                setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
-                finalBotText = fullText;
+                try {
+                    const ragContext = retrieveRelevantContext(speaker, userText);
+                    let finalBotText = '';
 
-            } else {
-                // GEMINI (DEFAULT)
-                let currentSession = geminiSession;
-                if (!currentSession) {
-                    currentSession = initializeSession(selectedAgent);
-                }
+                    if (speaker.modelProvider === 'deepseek') {
+                        const deepSeekHistory = activeMessages
+                            .concat(userMsg)
+                            .concat(generatedReplies)
+                            .map((message) => ({
+                                role: message.sender === Sender.User ? 'user' : 'assistant',
+                                content: message.text
+                            })) as DeepSeekMessage[];
 
-                let messagePayload: any = userText;
+                        if (ragContext) {
+                            deepSeekHistory.push({ role: 'system', content: ragContext });
+                        }
+                        if (participantsLabel) {
+                            deepSeekHistory.push({ role: 'system', content: participantsLabel });
+                        }
 
-                // INJEÇÃO RAG PARA GEMINI (Anexa à mensagem)
-                if (ragContext) {
-                    messagePayload = `${ragContext}\n\n[MENSAGEM DO USUÁRIO]:\n${userText}`;
-                }
+                        const stream = streamDeepSeekResponse(deepSeekHistory, speaker.fullPrompt);
+                        for await (const chunk of stream) {
+                            finalBotText += chunk.text;
+                            setActiveMessages((prev) => prev.map((message) => (
+                                message.id === botMsgId ? { ...message, text: finalBotText } : message
+                            )));
+                        }
+                    } else {
+                        const modelId = modelMode === 'flash' ? 'gemini-2.5-flash' : 'gemini-1.5-pro';
+                        const historyForSpeaker = activeMessages
+                            .concat(userMsg)
+                            .concat(generatedReplies)
+                            .filter((message) => message.sender !== Sender.System)
+                            .map((message) => ({
+                                role: message.sender === Sender.User ? 'user' : 'model',
+                                parts: [{ text: message.text }]
+                            }));
 
-                if (activeParticipants.length > 0) {
-                    messagePayload = `[MESA: ${activeParticipants.map(p => p.name).join(', ')}]\n${messagePayload}`;
-                }
+                        const longTermMemory = retrieveLearnedMemory(speaker);
+                        const docsInventory = speaker.globalDocuments
+                            ? speaker.globalDocuments.map((doc) => `- ${doc.title}`).join('\n')
+                            : "Nenhum documento vinculado.";
+                        const speakerSession = startAgentSession(
+                            speaker.id,
+                            speaker.fullPrompt || '',
+                            speaker.knowledgeBase || [],
+                            modelId,
+                            historyForSpeaker,
+                            CURRENT_USER,
+                            undefined,
+                            longTermMemory,
+                            docsInventory
+                        );
 
-                if (currentAttachment) {
-                    messagePayload = [
-                        { text: typeof messagePayload === 'string' ? messagePayload : userText },
-                        { inlineData: { mimeType: currentAttachment.mimeType, data: currentAttachment.data } }
-                    ];
-                }
+                        let messagePayload: any = userText;
+                        if (ragContext) {
+                            messagePayload = `${ragContext}\n\n[MENSAGEM DO USUÁRIO]:\n${userText}`;
+                        }
+                        if (participantsLabel) {
+                            messagePayload = `${participantsLabel}\n${messagePayload}`;
+                        }
+                        if (currentAttachment) {
+                            messagePayload = [
+                                { text: typeof messagePayload === 'string' ? messagePayload : userText },
+                                { inlineData: { mimeType: currentAttachment.mimeType, data: currentAttachment.data } }
+                            ];
+                        }
 
-                const result = await currentSession?.sendMessageStream({ message: messagePayload });
-                let fullText = '';
-
-                for await (const chunk of result) {
-                    const text = (chunk as any).text || '';
-                    fullText += text;
-
-                    if (!hasSummonedRef.current && fullText.includes('<<<CALL:')) {
-                        const match = fullText.match(/<<<CALL: (.*?)>>>/);
-                        if (match) {
-                            const agentName = match[1];
-                            const agentToCall = dynamicAgents.find(a => a.name.includes(agentName) || agentName.includes(a.name));
-                            if (agentToCall && !activeParticipants.some(p => p.id === agentToCall.id)) {
-                                handleInviteAgent(agentToCall, false);
-                                hasSummonedRef.current = true;
-                            }
+                        const result = await speakerSession.sendMessageStream({ message: messagePayload });
+                        for await (const chunk of result) {
+                            const text = (chunk as any).text || '';
+                            finalBotText += text;
+                            setActiveMessages((prev) => prev.map((message) => (
+                                message.id === botMsgId ? { ...message, text: finalBotText } : message
+                            )));
                         }
                     }
 
-                    setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
-                }
-                setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
-                hasSummonedRef.current = false;
-                finalBotText = fullText;
-            }
+                    const summonMatch = finalBotText.match(/<<<CALL: (.*?)>>>/);
+                    if (summonMatch?.[1]) {
+                        const agentName = summonMatch[1];
+                        const agentToCall = dynamicAgents.find((agent) => (
+                            agent.name.includes(agentName) || agentName.includes(agent.name)
+                        ));
+                        if (agentToCall && !activeParticipants.some((participant) => participant.id === agentToCall.id)) {
+                            handleInviteAgent(agentToCall, false);
+                        }
+                    }
+                    finalBotText = finalBotText.replace(/<<<CALL:\s*.*?>>>/g, '').trim();
 
-            if (persistedBotId) {
-                try {
-                    await updateDoc(doc(db, "chat_messages", persistedBotId), {
+                    setActiveMessages((prev) => prev.map((message) => (
+                        message.id === botMsgId ? { ...message, text: finalBotText, isStreaming: false } : message
+                    )));
+
+                    if (persistedBotId) {
+                        await updateDoc(doc(db, "chat_messages", persistedBotId), {
+                            text: finalBotText,
+                            participantName: speaker.name,
+                            payload: { isStreaming: false }
+                        });
+                    }
+
+                    generatedReplies.push({
+                        id: `reply_${speaker.id}_${Date.now()}`,
                         text: finalBotText,
-                        payload: { isStreaming: false }
+                        sender: Sender.Bot,
+                        timestamp: new Date(),
+                        buId: activeBU.id,
+                        participantName: speaker.name
                     });
-                } catch (error) {
-                    console.error("Erro ao finalizar resposta no banco:", error);
+                } catch (error: any) {
+                    const technicalMsg = error?.message || "Conexão Instável";
+                    const errorText = `Erro na conexão neural (${technicalMsg}).`;
+                    console.error(`Erro ao gerar resposta de ${speaker.name}:`, error);
+                    setActiveMessages((prev) => prev.map((message) => (
+                        message.id === botMsgId ? { ...message, text: errorText, isStreaming: false } : message
+                    )));
+                    if (persistedBotId) {
+                        await updateDoc(doc(db, "chat_messages", persistedBotId), {
+                            text: errorText,
+                            participantName: speaker.name,
+                            payload: { isStreaming: false }
+                        }).catch(() => null);
+                    }
                 }
             }
 
@@ -1139,55 +1141,11 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                 await updateSessionMetadata(currentSessionId);
             }
 
-        } catch (error: any) {
+            const suggestionsContext = [userText, ...generatedReplies.map((message) => message.text)].join('\n\n');
+            const suggestions = await generateTaskSuggestions(suggestionsContext);
+            setTaskSuggestions(suggestions.length > 0 ? suggestions : null);
+        } catch (error) {
             console.error("Neural Connection Error Detail:", error);
-            const technicalMsg = error.message || "Conexão Instável";
-
-            // TENTATIVA DE FALLBACK AUTOMÁTICO PARA DEEPSEEK SE O GEMINI FALHAR
-            if (technicalMsg.includes("403") || technicalMsg.includes("PERMISSION_DENIED") || technicalMsg.includes("blocked")) {
-                console.warn("⚠️ Gemini Bloqueado. Ativando Protocolo de Emergência (DeepSeek Fallback)...");
-                try {
-                    const deepSeekHistory = activeMessages.concat(userMsg).map(m => ({
-                        role: m.sender === Sender.User ? 'user' : 'assistant',
-                        content: m.text
-                    })) as DeepSeekMessage[];
-
-                    const stream = streamDeepSeekResponse(deepSeekHistory, selectedAgent.fullPrompt);
-                    let fullText = "⚠️ [MODO DE EMERGÊNCIA ATIVADO: Gemini bloqueado. Usando DeepSeek.]\n\n";
-
-                    for await (const chunk of stream) {
-                        fullText += chunk.text;
-                        setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
-                    }
-                    setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
-                    if (persistedBotId) {
-                        await updateDoc(doc(db, "chat_messages", persistedBotId), {
-                            text: fullText,
-                            payload: { isStreaming: false }
-                        });
-                    }
-                    return; // Sucesso no Fallback
-                } catch (dsError: any) {
-                    console.error("DeepSeek Fallback also failed:", dsError);
-                }
-            }
-
-            const errorText = `Erro na conexão neural (${technicalMsg}). Newton, crie uma NOVA CHAVE DE API e verifique as restrições de serviço no Google Cloud.`;
-            setActiveMessages(prev => prev.map(m => m.id === botMsgId ? {
-                ...m,
-                text: errorText,
-                isStreaming: false
-            } : m));
-            if (persistedBotId) {
-                try {
-                    await updateDoc(doc(db, "chat_messages", persistedBotId), {
-                        text: errorText,
-                        payload: { isStreaming: false }
-                    });
-                } catch (persistError) {
-                    console.error("Erro ao persistir mensagem de erro:", persistError);
-                }
-            }
         } finally {
             setIsLoading(false);
         }

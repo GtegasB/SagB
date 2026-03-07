@@ -3,10 +3,13 @@ import React, { useEffect, useState } from 'react';
 import { Agent } from '../types';
 import { Avatar } from './Avatar';
 import { SearchIcon, ChevronRightIcon, BotIcon } from './Icon';
+import { db, collection, query, where, orderBy, onSnapshot } from '../services/supabase';
+import { resolveWorkspaceId } from '../utils/supabaseChat';
 
 interface ConversationsViewProps {
   agents: Agent[];
   onOpenChat: (agent: Agent) => void;
+  activeWorkspaceId?: string | null;
 }
 
 interface ChatSessionSummary {
@@ -20,60 +23,96 @@ interface ChatSessionSummary {
     preview: string;
 }
 
-const ConversationsView: React.FC<ConversationsViewProps> = ({ agents, onOpenChat }) => {
+const ConversationsView: React.FC<ConversationsViewProps> = ({ agents, onOpenChat, activeWorkspaceId }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  const [sessionsById, setSessionsById] = useState<Record<string, any>>({});
+  const [messagePreviewBySession, setMessagePreviewBySession] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    // 1. Varrer LocalStorage buscando todas as sessões de agentes
-    const allSessions: ChatSessionSummary[] = [];
+    const scopedWorkspaceId = resolveWorkspaceId(activeWorkspaceId);
+    const sessionsQuery = query(
+      collection(db, 'chat_sessions'),
+      where('workspaceId', '==', scopedWorkspaceId),
+      orderBy('lastMessageAt', 'desc')
+    );
 
-    agents.forEach(agent => {
-        // Chave de sessões do agente
-        const sessionsKey = `grupob_sessions_${agent.id}`;
-        const storedSessions = localStorage.getItem(sessionsKey);
+    const unsubscribe = onSnapshot(
+      sessionsQuery,
+      (snapshot) => {
+        const next: Record<string, any> = {};
+        snapshot.docs.forEach((row: any) => {
+          const data = row.data();
+          next[String(data.id || row.id)] = data;
+        });
+        setSessionsById(next);
+      },
+      (error) => {
+        console.error('Erro ao carregar sessões de conversa:', error);
+        setSessionsById({});
+      }
+    );
 
-        if (storedSessions) {
-            try {
-                const parsedSessions = JSON.parse(storedSessions);
-                parsedSessions.forEach((session: any) => {
-                    // Pega a última mensagem para preview (se houver cache de chat)
-                    let preview = "Nova conversa iniciada...";
-                    const chatKey = `grupob_chat_${session.id}`;
-                    const chatMsgs = localStorage.getItem(chatKey);
-                    
-                    if (chatMsgs) {
-                        try {
-                            const msgs = JSON.parse(chatMsgs);
-                            if (msgs.length > 0) {
-                                const lastMsg = msgs[msgs.length - 1];
-                                preview = lastMsg.text.slice(0, 60) + (lastMsg.text.length > 60 ? '...' : '');
-                            }
-                        } catch(e) {}
-                    }
+    return () => unsubscribe();
+  }, [activeWorkspaceId]);
 
-                    allSessions.push({
-                        sessionId: session.id,
-                        agentId: agent.id,
-                        agentName: agent.name,
-                        agentRole: agent.officialRole,
-                        agentAvatar: agent.avatarUrl,
-                        lastMessageAt: session.lastMessageAt || session.createdAt,
-                        title: session.title || "Conversa sem título",
-                        preview: preview
-                    });
-                });
-            } catch (e) {
-                console.error("Erro ao processar sessões do agente " + agent.name, e);
-            }
-        }
-    });
+  useEffect(() => {
+    const scopedWorkspaceId = resolveWorkspaceId(activeWorkspaceId);
+    const messagesQuery = query(
+      collection(db, 'chat_messages'),
+      where('workspaceId', '==', scopedWorkspaceId),
+      orderBy('createdAt', 'desc')
+    );
 
-    // 2. Ordenar por data decrescente (mais recente primeiro)
+    const unsubscribe = onSnapshot(
+      messagesQuery,
+      (snapshot) => {
+        const previewMap: Record<string, string> = {};
+        snapshot.docs.forEach((row: any) => {
+          const data = row.data();
+          const sessionId = String(data.sessionId || '');
+          if (!sessionId || previewMap[sessionId]) return;
+          const raw = String(data.text || '').trim();
+          previewMap[sessionId] = raw ? `${raw.slice(0, 60)}${raw.length > 60 ? '...' : ''}` : 'Nova conversa iniciada...';
+        });
+        setMessagePreviewBySession(previewMap);
+      },
+      (error) => {
+        console.error('Erro ao carregar previews de conversa:', error);
+        setMessagePreviewBySession({});
+      }
+    );
+
+    return () => unsubscribe();
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    const allSessions: ChatSessionSummary[] = Object.entries(sessionsById)
+      .map(([sessionId, sessionData]) => {
+        const agentId = String(sessionData.agentId || '');
+        const agent = agents.find((a) => a.id === agentId);
+        if (!agent) return null;
+
+        const lastMessageAt = sessionData.lastMessageAt instanceof Date
+          ? sessionData.lastMessageAt.getTime()
+          : new Date(sessionData.lastMessageAt || sessionData.updatedAt || sessionData.createdAt || Date.now()).getTime();
+
+        return {
+          sessionId,
+          agentId: agent.id,
+          agentName: agent.name,
+          agentRole: agent.officialRole,
+          agentAvatar: agent.avatarUrl,
+          lastMessageAt,
+          title: String(sessionData.title || 'Conversa sem título'),
+          preview: messagePreviewBySession[sessionId] || 'Nova conversa iniciada...'
+        } as ChatSessionSummary;
+      })
+      .filter((session): session is ChatSessionSummary => Boolean(session));
+
     allSessions.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
-
     setSessions(allSessions);
-  }, [agents]);
+  }, [agents, messagePreviewBySession, sessionsById]);
 
   const filteredSessions = sessions.filter(s => 
       s.agentName.toLowerCase().includes(searchTerm.toLowerCase()) || 

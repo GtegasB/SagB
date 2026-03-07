@@ -1,101 +1,77 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { Agent, Task, BusinessUnit } from '../types';
+import { db, collection, query, where, onSnapshot } from '../services/supabase';
+import { resolveWorkspaceId } from '../utils/supabaseChat';
 
 interface DashboardHomeProps {
   agents: Agent[];
   tasks: Task[];
   businessUnits: BusinessUnit[];
   onNavigate: (tab: any) => void;
+  activeWorkspaceId?: string | null;
 }
 
 const GERAC_SEAL = "https://static.wixstatic.com/media/64c3dc_6d0ef8c33da846cd9a3527cb01f6a1f7~mv2.png";
 
-const DashboardHome: React.FC<DashboardHomeProps> = ({ agents, tasks, businessUnits, onNavigate }) => {
+const DashboardHome: React.FC<DashboardHomeProps> = ({ agents, tasks, businessUnits, onNavigate, activeWorkspaceId }) => {
   const [dailyStats, setDailyStats] = useState({ conversations: 0, messages: 0 });
 
   // --- CÁLCULO DE VOLUMETRIA EM TEMPO REAL ---
   useEffect(() => {
-    const calculateDailyMetrics = () => {
-        const now = new Date();
-        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-        
-        let msgCount = 0;
-        let convCount = 0;
+    const scopedWorkspaceId = resolveWorkspaceId(activeWorkspaceId);
+    let sessionsCache: any[] = [];
+    let messagesCache: any[] = [];
 
-        // 1. Processar Sessões de Agentes (Systemic Vision)
-        agents.forEach(agent => {
-            // Conta Sessões (Conversas)
-            const sessionsStr = localStorage.getItem(`grupob_sessions_${agent.id}`);
-            if (sessionsStr) {
-                try {
-                    const sessions = JSON.parse(sessionsStr);
-                    sessions.forEach((session: any) => {
-                        // Conversa criada hoje
-                        if (session.createdAt >= startOfDay) {
-                            convCount++;
-                        }
-                        
-                        // Conta mensagens dentro desta sessão
-                        const chatKey = `grupob_chat_${session.id}`;
-                        const msgsStr = localStorage.getItem(chatKey);
-                        if (msgsStr) {
-                             const msgs = JSON.parse(msgsStr);
-                             msgs.forEach((m: any) => {
-                                 if (new Date(m.timestamp).getTime() >= startOfDay) msgCount++;
-                             });
-                        }
-                    });
-                } catch (e) { console.error("Erro ao ler sessões", e); }
-            }
+    const recalculate = () => {
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
-            // Conta mensagens do chat legado (se houver, para compatibilidade)
-            const legacyChatStr = localStorage.getItem(`grupob_chat_${agent.id}`);
-            if (legacyChatStr) {
-                 try {
-                     const msgs = JSON.parse(legacyChatStr);
-                     // Verifica se é formato antigo (array direto) e não sessão
-                     if (Array.isArray(msgs)) {
-                         msgs.forEach((m: any) => {
-                             if (new Date(m.timestamp).getTime() >= startOfDay) msgCount++;
-                         });
-                     }
-                 } catch (e) {}
-            }
-        });
+      const convCount = sessionsCache.filter((session: any) => {
+        const createdAt = session.createdAt instanceof Date ? session.createdAt : new Date(session.createdAt || 0);
+        return !Number.isNaN(createdAt.getTime()) && createdAt.getTime() >= startOfDay;
+      }).length;
 
-        // 2. Processar Canal Direto (Redir / Main Chat)
-        const mainChatStr = localStorage.getItem('grupob_chat_history_v4');
-        if (mainChatStr) {
-            try {
-                const msgs = JSON.parse(mainChatStr);
-                msgs.forEach((m: any) => {
-                    if (new Date(m.timestamp).getTime() >= startOfDay) msgCount++;
-                });
-            } catch (e) {}
-        }
+      const msgCount = messagesCache.filter((message: any) => {
+        const createdAt = message.createdAt instanceof Date ? message.createdAt : new Date(message.createdAt || 0);
+        return !Number.isNaN(createdAt.getTime()) && createdAt.getTime() >= startOfDay;
+      }).length;
 
-        // 3. Processar Salas de Unidade (War Rooms)
-        businessUnits.forEach(bu => {
-            const unitChatStr = localStorage.getItem(`grupob_unit_chat_${bu.id}`);
-            if (unitChatStr) {
-                try {
-                    const msgs = JSON.parse(unitChatStr);
-                    msgs.forEach((m: any) => {
-                        if (new Date(m.timestamp).getTime() >= startOfDay) msgCount++;
-                    });
-                } catch (e) {}
-            }
-        });
-
-        setDailyStats({ conversations: convCount, messages: msgCount });
+      setDailyStats({ conversations: convCount, messages: msgCount });
     };
 
-    calculateDailyMetrics();
-    // Recalcula a cada 5 segundos para dar sensação de "Live" sem pesar
-    const interval = setInterval(calculateDailyMetrics, 5000);
-    return () => clearInterval(interval);
-  }, [agents, businessUnits]);
+    const sessionsQuery = query(
+      collection(db, 'chat_sessions'),
+      where('workspaceId', '==', scopedWorkspaceId)
+    );
+    const messagesQuery = query(
+      collection(db, 'chat_messages'),
+      where('workspaceId', '==', scopedWorkspaceId)
+    );
+
+    const unsubscribeSessions = onSnapshot(
+      sessionsQuery,
+      (snapshot) => {
+        sessionsCache = snapshot.docs.map((row: any) => row.data());
+        recalculate();
+      },
+      (error) => console.error('Erro ao carregar métricas de sessões:', error)
+    );
+
+    const unsubscribeMessages = onSnapshot(
+      messagesQuery,
+      (snapshot) => {
+        messagesCache = snapshot.docs.map((row: any) => row.data());
+        recalculate();
+      },
+      (error) => console.error('Erro ao carregar métricas de mensagens:', error)
+    );
+
+    return () => {
+      unsubscribeSessions();
+      unsubscribeMessages();
+    };
+  }, [activeWorkspaceId]);
 
 
   // --- CÁLCULOS DO BI (ESTÁTICO) ---

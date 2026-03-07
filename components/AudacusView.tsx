@@ -5,38 +5,40 @@ import { BusinessUnit } from '../types';
 interface AudacusViewProps {
   activeBU: BusinessUnit;
   onBack?: () => void;
+  savedGatewayUrl?: string;
+  onSaveGatewayUrl?: (url: string) => Promise<void> | void;
 }
 
-const AudacusView: React.FC<AudacusViewProps> = ({ activeBU, onBack }) => {
+const AudacusView: React.FC<AudacusViewProps> = ({ activeBU, onBack, savedGatewayUrl, onSaveGatewayUrl }) => {
   const [targetUrl, setTargetUrl] = useState('');
   const [isConfiguring, setIsConfiguring] = useState(false);
   const [isLoadingIframe, setIsLoadingIframe] = useState(true);
 
   useEffect(() => {
-    // Recupera link salvo ou usa o padrão do sistema (Hardcoded para Audacus)
-    const savedUrl = localStorage.getItem(`grupob_gateway_${activeBU.id}`);
-    
     // Protocolo de Conexão Direta: Audacus
     const defaultUrl = activeBU.id === 'audacus' 
       ? 'https://audacus-64246262651.us-west1.run.app/' 
       : '';
 
-    if (savedUrl) {
-      setTargetUrl(savedUrl);
+    if (savedGatewayUrl) {
+      setTargetUrl(savedGatewayUrl);
       setIsConfiguring(false);
     } else if (defaultUrl) {
-      // Auto-conexão para unidades conhecidas
       setTargetUrl(defaultUrl);
-      localStorage.setItem(`grupob_gateway_${activeBU.id}`, defaultUrl);
+      Promise.resolve(onSaveGatewayUrl?.(defaultUrl)).catch((error) => {
+        console.error('Erro ao persistir gateway padrão no Supabase:', error);
+      });
       setIsConfiguring(false);
     } else {
       setIsConfiguring(true);
     }
-  }, [activeBU.id]);
+  }, [activeBU.id, savedGatewayUrl, onSaveGatewayUrl]);
 
-  const handleSaveUrl = () => {
+  const handleSaveUrl = async () => {
     if (targetUrl.trim()) {
-      localStorage.setItem(`grupob_gateway_${activeBU.id}`, targetUrl);
+      await Promise.resolve(onSaveGatewayUrl?.(targetUrl.trim())).catch((error) => {
+        console.error('Erro ao persistir gateway no Supabase:', error);
+      });
       setIsConfiguring(false);
       setIsLoadingIframe(true);
     }

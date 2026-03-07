@@ -5,11 +5,21 @@ import { BusinessUnit, Agent, Message, Sender } from '../types';
 import { startAgentSession, transcribeAudio } from '../services/gemini';
 import { SendIcon, BackIcon, BotIcon, MicIcon, StopCircleIcon, PaperclipIcon, XIcon, FileTextIcon } from './Icon';
 import { Avatar } from './Avatar';
+import {
+  appendMessage,
+  createSession,
+  findLatestSession,
+  loadSessionMessages,
+  touchSession,
+  updateMessage
+} from '../utils/supabaseChat';
 
 interface StartyBViewProps {
   activeBU: BusinessUnit;
   agents: Agent[];
   onBack?: () => void;
+  activeWorkspaceId?: string | null;
+  ownerUserId?: string | null;
 }
 
 // --- MOCK DATA PARA PROJETOS ---
@@ -20,13 +30,15 @@ const ACTIVE_PROJECTS = [
     { id: 'scale', name: 'Scale Odonto App', status: 'Planejamento', progress: 15, tech: 'Mobile' },
 ];
 
-const StartyBView: React.FC<StartyBViewProps> = ({ activeBU, agents, onBack }) => {
+const StartyBView: React.FC<StartyBViewProps> = ({ activeBU, agents, onBack, activeWorkspaceId, ownerUserId }) => {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [chatSession, setChatSession] = useState<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const selectionTokenRef = useRef(0);
 
   // Audio & File
   const [isRecording, setIsRecording] = useState(false);
@@ -43,32 +55,66 @@ const StartyBView: React.FC<StartyBViewProps> = ({ activeBU, agents, onBack }) =
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleAgentClick = (agent: Agent) => {
+  const handleAgentClick = async (agent: Agent) => {
+      selectionTokenRef.current += 1;
+      const token = selectionTokenRef.current;
       setSelectedAgent(agent);
+      setMessages([]);
+      setActiveSessionId(null);
       
-      // Carrega histórico
-      const savedHistory = localStorage.getItem(`grupob_chat_${agent.id}`);
-      let initMsgs: Message[] = [];
-      
-      if (savedHistory) {
-          try {
-             initMsgs = JSON.parse(savedHistory).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }));
-          } catch(e) {}
-      } else {
-          initMsgs = [{
-              id: 'init',
-              text: `Terminal conectado. Agente **${agent.name}** (${agent.officialRole}) online.\n\nAguardando instruções de engenharia.`,
-              sender: Sender.Bot,
-              timestamp: new Date(),
-              buId: activeBU.id
-          }];
-      }
-      setMessages(initMsgs);
-
       // Inicia sessão Gemini
       if (agent.fullPrompt) {
           const session = startAgentSession(agent.id, agent.fullPrompt, agent.knowledgeBase || []);
           setChatSession(session);
+      }
+
+      try {
+        const existingSession = await findLatestSession({
+          workspaceId: activeWorkspaceId,
+          agentId: agent.id,
+          buId: activeBU.id
+        });
+
+        let sessionId = existingSession?.id || null;
+        if (!sessionId) {
+          sessionId = await createSession({
+            workspaceId: activeWorkspaceId,
+            agentId: agent.id,
+            ownerUserId,
+            buId: activeBU.id,
+            title: `StartyB • ${agent.name}`,
+            payload: { kind: 'startyb-chat', agentName: agent.name }
+          });
+          await appendMessage({
+            workspaceId: activeWorkspaceId,
+            sessionId,
+            agentId: agent.id,
+            sender: Sender.Bot,
+            text: `Terminal conectado. Agente **${agent.name}** (${agent.officialRole}) online.\n\nAguardando instruções de engenharia.`,
+            buId: activeBU.id,
+            participantName: agent.name
+          });
+        }
+
+        const history = await loadSessionMessages({
+          workspaceId: activeWorkspaceId,
+          sessionId
+        });
+
+        if (selectionTokenRef.current !== token) return;
+        setActiveSessionId(sessionId);
+        setMessages(history);
+      } catch (error) {
+        console.error('Erro ao carregar chat StartyB:', error);
+        if (selectionTokenRef.current !== token) return;
+        setMessages([{
+          id: 'init-fallback',
+          text: `Terminal conectado. Agente **${agent.name}** (${agent.officialRole}) online.\n\nAguardando instruções de engenharia.`,
+          sender: Sender.Bot,
+          timestamp: new Date(),
+          buId: activeBU.id,
+          participantName: agent.name
+        }]);
       }
   };
 
@@ -116,8 +162,8 @@ const StartyBView: React.FC<StartyBViewProps> = ({ activeBU, agents, onBack }) =
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if ((!input.trim() && !attachment) || !selectedAgent || isLoading || !chatSession) return;
+    e.preventDefault();
+      if ((!input.trim() && !attachment) || !selectedAgent || !activeSessionId || isLoading || !chatSession) return;
 
       const userText = input.trim();
       const currentAttachment = attachment;
@@ -126,14 +172,50 @@ const StartyBView: React.FC<StartyBViewProps> = ({ activeBU, agents, onBack }) =
       
       const displayText = currentAttachment ? (userText ? userText + " 📎 [File]" : "📎 [File]") : userText;
 
-      const userMsg: Message = { id: Date.now().toString(), text: displayText, sender: Sender.User, timestamp: new Date(), buId: activeBU.id };
-      setMessages(prev => [...prev, userMsg]);
-      setIsLoading(true);
-
-      const botMsgId = Date.now().toString() + '_bot';
-      setMessages(prev => [...prev, { id: botMsgId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true }]);
+      let persistedBotId = '';
 
       try {
+          const savedUser = await appendMessage({
+              workspaceId: activeWorkspaceId,
+              sessionId: activeSessionId,
+              agentId: selectedAgent.id,
+              sender: Sender.User,
+              text: displayText,
+              buId: activeBU.id,
+              attachment: currentAttachment
+          });
+          const userMsg: Message = {
+            id: savedUser.id,
+            text: displayText,
+            sender: Sender.User,
+            timestamp: new Date(),
+            buId: activeBU.id,
+            attachment: currentAttachment || undefined
+          };
+          setMessages(prev => [...prev, userMsg]);
+          setIsLoading(true);
+
+          const savedBot = await appendMessage({
+              workspaceId: activeWorkspaceId,
+              sessionId: activeSessionId,
+              agentId: selectedAgent.id,
+              sender: Sender.Bot,
+              text: '',
+              buId: activeBU.id,
+              participantName: selectedAgent.name,
+              isStreaming: true
+          });
+          persistedBotId = savedBot.id;
+          setMessages(prev => [...prev, {
+            id: persistedBotId,
+            text: '',
+            sender: Sender.Bot,
+            timestamp: new Date(),
+            buId: activeBU.id,
+            isStreaming: true,
+            participantName: selectedAgent.name
+          }]);
+
           let messagePayload: any = userText;
           if (currentAttachment) {
               messagePayload = [
@@ -147,15 +229,17 @@ const StartyBView: React.FC<StartyBViewProps> = ({ activeBU, agents, onBack }) =
           for await (const chunk of result) {
               const text = (chunk as any).text || '';
               fullText += text;
-              setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
+              setMessages(prev => prev.map(m => m.id === persistedBotId ? { ...m, text: fullText } : m));
           }
-          setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
-          
-          const updatedMsgs = [...messages, userMsg, { id: botMsgId, text: fullText, sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: false }];
-          localStorage.setItem(`grupob_chat_${selectedAgent.id}`, JSON.stringify(updatedMsgs));
+          setMessages(prev => prev.map(m => m.id === persistedBotId ? { ...m, isStreaming: false } : m));
+          await updateMessage(persistedBotId, { text: fullText, isStreaming: false, updatedAt: new Date() });
+          await touchSession(activeSessionId);
 
       } catch (error) {
-          setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: 'Erro de compilação na resposta.', isStreaming: false } : m));
+          if (persistedBotId) {
+            setMessages(prev => prev.map(m => m.id === persistedBotId ? { ...m, text: 'Erro de compilação na resposta.', isStreaming: false } : m));
+            await updateMessage(persistedBotId, { text: 'Erro de compilação na resposta.', isStreaming: false, updatedAt: new Date() }).catch(() => null);
+          }
       } finally {
           setIsLoading(false);
       }

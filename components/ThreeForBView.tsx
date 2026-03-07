@@ -5,6 +5,14 @@ import { TabId, BusinessUnit, Agent, Message, Sender, AgentStatus } from '../typ
 import { startAgentSession } from '../services/gemini';
 import { SendIcon, ChevronRightIcon, BackIcon } from './Icon';
 import { Avatar } from './Avatar';
+import {
+  appendMessage,
+  createSession,
+  findLatestSession,
+  loadSessionMessages,
+  touchSession,
+  updateMessage
+} from '../utils/supabaseChat';
 
 interface ThreeForBViewProps {
   activeTab: TabId;
@@ -12,6 +20,8 @@ interface ThreeForBViewProps {
   setActiveTab: (tab: TabId) => void;
   agents?: Agent[];
   onAddTopic?: (title: string, priority: 'Alta' | 'Média' | 'Baixa', buId?: string) => void;
+  activeWorkspaceId?: string | null;
+  ownerUserId?: string | null;
 }
 
 interface TeamMember {
@@ -182,7 +192,7 @@ const SECTOR_CONFIG = {
 const GERAC_SEAL = "https://static.wixstatic.com/media/64c3dc_6d0ef8c33da846cd9a3527cb01f6a1f7~mv2.png";
 const TRIFORCE_LOGO = "https://static.wixstatic.com/media/64c3dc_2892da29671c4051a998d15089edd1c4~mv2.png";
 
-const ThreeForBView: React.FC<ThreeForBViewProps> = ({ activeTab, activeBU, setActiveTab, agents = [], onAddTopic }) => {
+const ThreeForBView: React.FC<ThreeForBViewProps> = ({ activeTab, activeBU, setActiveTab, agents = [], onAddTopic, activeWorkspaceId, ownerUserId }) => {
   const [viewMode, setViewMode] = useState<'dashboard' | 'triage' | 'client-room'>('dashboard');
   
   // Triage State
@@ -192,11 +202,13 @@ const ThreeForBView: React.FC<ThreeForBViewProps> = ({ activeTab, activeBU, setA
   
   // Chat State
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [chatSession, setChatSession] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const selectionTokenRef = useRef(0);
 
   // --- TRIAGE LOGIC ---
 
@@ -399,59 +411,115 @@ const ThreeForBView: React.FC<ThreeForBViewProps> = ({ activeTab, activeBU, setA
     // Por enquanto, vou permitir abrir mas pode estar "desligado" no chat.
     // Decisão: Permitir abrir para configurar/testar, mas visualmente no grid já estará cinza.
     
+    selectionTokenRef.current += 1;
+    const token = selectionTokenRef.current;
     setSelectedMember(member);
-    
-    let initialMessages: Message[] = [];
-    if (member.agentId) {
-        const savedHistory = localStorage.getItem(`grupob_chat_${member.agentId}`);
-        if (savedHistory) {
-            try {
-                initialMessages = JSON.parse(savedHistory).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) }));
-            } catch (e) { console.error("Erro ao carregar histórico", e); }
-        }
-    }
-
-    if (initialMessages.length === 0) {
-        let greeting = `**${member.name}** online.`;
-        if (member.isRoom) {
-            greeting = `**Sala de Guerra:** Olá. Estamos na sala de coordenação.\n\nQuem você deseja convocar para a reunião?`;
-        }
-        initialMessages = [{
-            id: 'init', 
-            text: greeting, 
-            sender: Sender.Bot, 
-            timestamp: new Date(), 
-            buId: activeBU.id 
-        }];
-    }
-    setChatMessages(initialMessages);
+    setActiveSessionId(null);
+    setChatMessages([]);
 
     if (member.agentId && member.fullPrompt) {
         const session = startAgentSession(member.agentId, member.fullPrompt);
         setChatSession(session);
+    } else {
+        setChatSession(null);
+    }
+
+    const memberAgentId = member.agentId || `3forb-room:${member.name.toLowerCase().replace(/\s+/g, '-')}`;
+    const greeting = member.isRoom
+      ? `**Sala de Guerra:** Olá. Estamos na sala de coordenação.\n\nQuem você deseja convocar para a reunião?`
+      : `**${member.name}** online.`;
+
+    try {
+      const existingSession = await findLatestSession({
+        workspaceId: activeWorkspaceId,
+        agentId: memberAgentId,
+        buId: activeBU.id
+      });
+
+      let sessionId = existingSession?.id || null;
+      if (!sessionId) {
+        sessionId = await createSession({
+          workspaceId: activeWorkspaceId,
+          agentId: memberAgentId,
+          ownerUserId,
+          buId: activeBU.id,
+          title: `3forB • ${member.name}`,
+          payload: { kind: '3forb-chat', memberName: member.name }
+        });
+        await appendMessage({
+          workspaceId: activeWorkspaceId,
+          sessionId,
+          agentId: memberAgentId,
+          sender: Sender.Bot,
+          text: greeting,
+          buId: activeBU.id,
+          participantName: member.name
+        });
+      }
+
+      const history = await loadSessionMessages({
+        workspaceId: activeWorkspaceId,
+        sessionId
+      });
+      if (selectionTokenRef.current !== token) return;
+      setActiveSessionId(sessionId);
+      setChatMessages(history);
+    } catch (e) {
+      console.error('Erro ao carregar histórico', e);
+      if (selectionTokenRef.current !== token) return;
+      setChatMessages([{
+        id: 'init-fallback',
+        text: greeting,
+        sender: Sender.Bot,
+        timestamp: new Date(),
+        buId: activeBU.id,
+        participantName: member.name
+      }]);
     }
   };
 
-  useEffect(() => {
-    if (selectedMember?.agentId && chatMessages.length > 0) {
-        localStorage.setItem(`grupob_chat_${selectedMember.agentId}`, JSON.stringify(chatMessages));
-    }
-  }, [chatMessages, selectedMember]);
-
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || !selectedMember || isLoading || !chatSession) return;
+    if (!input.trim() || !selectedMember || isLoading || !chatSession || !activeSessionId) return;
     const userText = input.trim();
     setInput('');
-    setChatMessages(prev => [...prev, { id: Date.now().toString(), text: userText, sender: Sender.User, timestamp: new Date(), buId: activeBU.id }]);
-    setIsLoading(true);
-    const botMsgId = Date.now().toString() + "-bot";
-    setChatMessages(prev => [...prev, { id: botMsgId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true }]);
+    const memberAgentId = selectedMember.agentId || `3forb-room:${selectedMember.name.toLowerCase().replace(/\s+/g, '-')}`;
+    let persistedBotId = '';
     try {
+      const savedUser = await appendMessage({
+        workspaceId: activeWorkspaceId,
+        sessionId: activeSessionId,
+        agentId: memberAgentId,
+        sender: Sender.User,
+        text: userText,
+        buId: activeBU.id
+      });
+      setChatMessages(prev => [...prev, { id: savedUser.id, text: userText, sender: Sender.User, timestamp: new Date(), buId: activeBU.id }]);
+      setIsLoading(true);
+
+      const savedBot = await appendMessage({
+        workspaceId: activeWorkspaceId,
+        sessionId: activeSessionId,
+        agentId: memberAgentId,
+        sender: Sender.Bot,
+        text: '',
+        buId: activeBU.id,
+        participantName: selectedMember.name,
+        isStreaming: true
+      });
+      persistedBotId = savedBot.id;
+      setChatMessages(prev => [...prev, { id: persistedBotId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true }]);
+
       const result = await chatSession.sendMessage({ message: userText });
-      setChatMessages(prev => prev.map(msg => msg.id === botMsgId ? { ...msg, text: result.text || '', isStreaming: false } : msg));
+      const reply = result.text || '';
+      setChatMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, text: reply, isStreaming: false } : msg));
+      await updateMessage(persistedBotId, { text: reply, isStreaming: false, updatedAt: new Date() });
+      await touchSession(activeSessionId);
     } catch (error) {
-      setChatMessages(prev => prev.map(msg => msg.id === botMsgId ? { ...msg, text: 'Falha na conexão neural.', isStreaming: false } : msg));
+      if (persistedBotId) {
+        setChatMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, text: 'Falha na conexão neural.', isStreaming: false } : msg));
+        await updateMessage(persistedBotId, { text: 'Falha na conexão neural.', isStreaming: false, updatedAt: new Date() }).catch(() => null);
+      }
     } finally { setIsLoading(false); }
   };
 

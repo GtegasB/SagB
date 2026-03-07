@@ -16,20 +16,15 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase env vars ausentes: VITE_SUPABASE_URL e/ou VITE_SUPABASE_ANON_KEY');
 }
 
-const AUTH_STORAGE_KEY = 'sagb_supabase_session';
 const authListeners = new Set<(event: string, session: any) => void>();
+let inMemorySession: any | null = null;
 
 const getStoredSession = () => {
-  if (typeof localStorage === 'undefined') return null;
-  const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch { return null; }
+  return inMemorySession;
 };
 
 const setStoredSession = (session: any | null) => {
-  if (typeof localStorage === 'undefined') return;
-  if (!session) localStorage.removeItem(AUTH_STORAGE_KEY);
-  else localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+  inMemorySession = session;
 };
 
 const emitAuth = (event: string, session: any) => {

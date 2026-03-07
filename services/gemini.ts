@@ -113,20 +113,37 @@ class BackendChatSession {
   }
 }
 
+type RuntimeAiContext = {
+  constitution?: string;
+  context?: string;
+  compliance?: string;
+  agentIdentityByKey?: Record<string, string>;
+};
+
+let runtimeAiContext: RuntimeAiContext = {};
+
+export const setRuntimeAiContext = (next: RuntimeAiContext) => {
+  runtimeAiContext = {
+    ...runtimeAiContext,
+    ...next,
+    agentIdentityByKey: {
+      ...(runtimeAiContext.agentIdentityByKey || {}),
+      ...(next.agentIdentityByKey || {})
+    }
+  };
+};
+
 const buildInstruction = (coreIdentity: string, agentKey?: string): string => {
-  const storedConstitution = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_constitution_v1') : null;
-  const constitution = storedConstitution || GLOBAL_LAYER;
-
-  const storedContext = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_context_v1') : null;
-  const context = storedContext || CONTEXT_LAYER;
-
-  const storedCompliance = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_compliance_v1') : null;
-  const compliance = storedCompliance ? `[DIRETRIZES E COMPLIANCE GLOBAL - OBRIGATORIO]:\n${storedCompliance}` : "";
+  const constitution = runtimeAiContext.constitution || GLOBAL_LAYER;
+  const context = runtimeAiContext.context || CONTEXT_LAYER;
+  const compliance = runtimeAiContext.compliance
+    ? `[DIRETRIZES E COMPLIANCE GLOBAL - OBRIGATORIO]:\n${runtimeAiContext.compliance}`
+    : "";
 
   let identity = coreIdentity;
   if (agentKey) {
-    const storedIdentity = typeof localStorage !== 'undefined' ? localStorage.getItem(agentKey) : null;
-    if (storedIdentity) identity = storedIdentity;
+    const mappedIdentity = runtimeAiContext.agentIdentityByKey?.[agentKey];
+    if (mappedIdentity) identity = mappedIdentity;
   }
 
   return `
@@ -194,11 +211,10 @@ export const startAgentSession = (
   longTermMemory?: string,
   docsInventory?: string
 ) => {
-  const storedConstitution = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_constitution_v1') : null;
-  const constitution = storedConstitution || GLOBAL_LAYER;
-
-  const storedCompliance = typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_global_compliance_v1') : null;
-  const compliance = storedCompliance ? `\n[PROTOCOLOS DE COMPLIANCE E SEGURANCA (BLOQUEIO)]:\n${storedCompliance}\n` : "";
+  const constitution = runtimeAiContext.constitution || GLOBAL_LAYER;
+  const compliance = runtimeAiContext.compliance
+    ? `\n[PROTOCOLOS DE COMPLIANCE E SEGURANCA (BLOQUEIO)]:\n${runtimeAiContext.compliance}\n`
+    : "";
 
   const kbContext = knowledgeBase.length > 0
     ? `\n[MEMORIA DE SESSAO / ARQUIVOS ANEXADOS]:\n${knowledgeBase.map((k, i) => `--- DOC ${i + 1} ---\n${k}`).join('\n')}\n`

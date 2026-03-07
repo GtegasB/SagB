@@ -304,7 +304,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         setIsSaving(true); // INICIA BLOQUEIO
 
         const selectedBU = businessUnits.find(b => b.id === newAgent.buId);
-        const workspaceId = activeWorkspaceId || (typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_active_workspace_v1') : null);
+        const workspaceId = activeWorkspaceId || null;
 
         if (!workspaceId) {
             alert("Workspace não definido. Atualize seu perfil ou associação.");

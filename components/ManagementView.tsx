@@ -8,16 +8,27 @@ import ReactMarkdown from 'react-markdown';
 import { Message, Sender, Task } from '../types';
 import { startKlausSession, transcribeAudio } from '../services/gemini';
 import { SendIcon, MicIcon, StopCircleIcon, PaperclipIcon, XIcon, FileTextIcon } from './Icon';
+import {
+  appendMessage,
+  createSession,
+  findLatestSession,
+  loadSessionMessages,
+  touchSession,
+  updateMessage
+} from '../utils/supabaseChat';
 
 interface ManagementViewProps {
   tasks: Task[];
   onAddTask: (task: Task) => void;
   onUpdateTaskStatus: (taskId: string, status: Task['status']) => void;
+  activeWorkspaceId?: string | null;
+  ownerUserId?: string | null;
 }
 
-const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpdateTaskStatus }) => {
+const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpdateTaskStatus, activeWorkspaceId, ownerUserId }) => {
   // Chat State
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [chatSession, setChatSession] = useState<any>(null);
@@ -37,20 +48,61 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
 
   // Initialize Chat Session
   useEffect(() => {
-    const session = startKlausSession();
-    setChatSession(session);
+    let cancelled = false;
+    const klausAgentId = 'klaus-management';
 
-    // Carregar histórico local se existir
-    const savedHistory = localStorage.getItem('grupob_klaus_chat_v1');
-    if (savedHistory) {
+    const bootstrap = async () => {
+      const session = startKlausSession();
+      setChatSession(session);
+
       try {
-        setMessages(JSON.parse(savedHistory).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })));
-      } catch (e) { console.error("History error", e); }
-    }
-  }, []);
+        const existing = await findLatestSession({
+          workspaceId: activeWorkspaceId,
+          agentId: klausAgentId,
+          buId: 'grupob'
+        });
+
+        let targetSessionId = existing?.id || null;
+        if (!targetSessionId) {
+          targetSessionId = await createSession({
+            workspaceId: activeWorkspaceId,
+            agentId: klausAgentId,
+            ownerUserId,
+            buId: 'grupob',
+            title: 'Klaus • Console de Estratégia',
+            payload: { kind: 'management-chat' }
+          });
+          await appendMessage({
+            workspaceId: activeWorkspaceId,
+            sessionId: targetSessionId,
+            agentId: klausAgentId,
+            sender: Sender.Bot,
+            text: 'Console de estratégia pronto. Traga o cenário e converto para execução.',
+            buId: 'grupob',
+            participantName: 'Klaus'
+          });
+        }
+
+        const history = await loadSessionMessages({
+          workspaceId: activeWorkspaceId,
+          sessionId: targetSessionId
+        });
+
+        if (cancelled) return;
+        setSessionId(targetSessionId);
+        setMessages(history);
+      } catch (e) {
+        console.error('History error', e);
+      }
+    };
+
+    bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceId, ownerUserId]);
 
   useEffect(() => {
-    localStorage.setItem('grupob_klaus_chat_v1', JSON.stringify(messages));
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -118,7 +170,7 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!input.trim() && !attachment) || isLoading || !chatSession) return;
+    if ((!input.trim() && !attachment) || isLoading || !chatSession || !sessionId) return;
     
     const userText = input.trim();
     const currentAttachment = attachment;
@@ -127,13 +179,29 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
 
     const displayText = currentAttachment ? (userText ? userText + " 📎 [File]" : "📎 [File]") : userText;
 
-    const userMsg: Message = { id: Date.now().toString(), text: displayText, sender: Sender.User, timestamp: new Date(), buId: 'grupob' };
-    setMessages(prev => [...prev, userMsg]);
-    
-    setIsLoading(true);
-    const botMsgId = Date.now().toString() + '_bot';
+    let persistedBotId = '';
     
     try {
+      const savedUser = await appendMessage({
+        workspaceId: activeWorkspaceId,
+        sessionId,
+        agentId: 'klaus-management',
+        sender: Sender.User,
+        text: displayText,
+        buId: 'grupob',
+        attachment: currentAttachment
+      });
+      const userMsg: Message = {
+        id: savedUser.id,
+        text: displayText,
+        sender: Sender.User,
+        timestamp: new Date(),
+        buId: 'grupob',
+        attachment: currentAttachment || undefined
+      };
+      setMessages(prev => [...prev, userMsg]);
+      setIsLoading(true);
+
       let messagePayload: any = userText;
       if (currentAttachment) {
           messagePayload = [
@@ -145,13 +213,24 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
       const result = await chatSession.sendMessageStream({ message: messagePayload });
       let fullText = '';
       
-      setMessages(prev => [...prev, { id: botMsgId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: 'grupob', isStreaming: true }]);
+      const savedBot = await appendMessage({
+        workspaceId: activeWorkspaceId,
+        sessionId,
+        agentId: 'klaus-management',
+        sender: Sender.Bot,
+        text: '',
+        buId: 'grupob',
+        participantName: 'Klaus',
+        isStreaming: true
+      });
+      persistedBotId = savedBot.id;
+      setMessages(prev => [...prev, { id: persistedBotId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: 'grupob', isStreaming: true }]);
 
       for await (const chunk of result) {
         const textChunk = (chunk as any).text || '';
         fullText += textChunk;
         const cleanText = fullText.replace(/<<<JSON_START>>>[\s\S]*?<<<JSON_END>>>/g, '');
-        setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: cleanText } : m));
+        setMessages(prev => prev.map(m => m.id === persistedBotId ? { ...m, text: cleanText } : m));
       }
 
       // JSON Parsing for Tasks
@@ -168,9 +247,19 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
                   assignee: 'Klaus'
                };
                onAddTask(newTask);
+               const sysText = `✅ Tarefa criada via Chat: "${newTask.title}"`;
+               const savedSystem = await appendMessage({
+                 workspaceId: activeWorkspaceId,
+                 sessionId,
+                 agentId: 'klaus-management',
+                 sender: Sender.System,
+                 text: sysText,
+                 buId: 'grupob',
+                 participantName: 'Sistema'
+               });
                setMessages(prev => [...prev, { 
-                  id: Date.now() + '_sys', 
-                  text: `✅ Tarefa criada via Chat: "${newTask.title}"`, 
+                  id: savedSystem.id, 
+                  text: sysText, 
                   sender: Sender.System, 
                   timestamp: new Date(), 
                   buId: 'grupob' 
@@ -181,10 +270,19 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
          }
       }
       
-      setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
+      setMessages(prev => prev.map(m => m.id === persistedBotId ? { ...m, isStreaming: false } : m));
+      await updateMessage(persistedBotId, {
+        text: fullText.replace(/<<<JSON_START>>>[\s\S]*?<<<JSON_END>>>/g, ''),
+        isStreaming: false,
+        updatedAt: new Date()
+      });
+      await touchSession(sessionId);
 
     } catch (error) {
-      setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: 'Erro de conexão com o Kernel.', isStreaming: false } : m));
+      if (persistedBotId) {
+        setMessages(prev => prev.map(m => m.id === persistedBotId ? { ...m, text: 'Erro de conexão com o Kernel.', isStreaming: false } : m));
+        await updateMessage(persistedBotId, { text: 'Erro de conexão com o Kernel.', isStreaming: false, updatedAt: new Date() }).catch(() => null);
+      }
     } finally {
       setIsLoading(false);
     }

@@ -2,18 +2,29 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { BusinessUnit, Agent, Message, Sender } from '../types';
-import { startMainSession, sendMessageStream, transcribeAudio } from '../services/gemini';
+import { sendMessageStream, transcribeAudio } from '../services/gemini';
 import { SendIcon, BackIcon, MicIcon, StopCircleIcon, PaperclipIcon, XIcon, FileTextIcon } from './Icon';
 import { Avatar } from './Avatar'; // Importar Avatar
+import {
+  appendMessage,
+  createSession,
+  findLatestSession,
+  loadSessionMessages,
+  touchSession,
+  updateMessage
+} from '../utils/supabaseChat';
 
 interface UnitViewProps {
   activeBU: BusinessUnit;
   agents: Agent[];
   onBack?: () => void;
+  activeWorkspaceId?: string | null;
+  ownerUserId?: string | null;
 }
 
-const UnitView: React.FC<UnitViewProps> = ({ activeBU, agents, onBack }) => {
+const UnitView: React.FC<UnitViewProps> = ({ activeBU, agents, onBack, activeWorkspaceId, ownerUserId }) => {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -30,31 +41,73 @@ const UnitView: React.FC<UnitViewProps> = ({ activeBU, agents, onBack }) => {
   const unitAgents = agents.filter(a => a.buId === activeBU.id);
 
   useEffect(() => {
-    // Carregar histórico local da sala
-    const savedKey = `grupob_unit_chat_${activeBU.id}`;
-    const saved = localStorage.getItem(savedKey);
-    if (saved) {
+    let cancelled = false;
+    const roomAgentId = `unit-room:${activeBU.id}`;
+
+    const bootstrapRoom = async () => {
       try {
-        setMessages(JSON.parse(saved).map((m: any) => ({ ...m, timestamp: new Date(m.timestamp) })));
-      } catch (e) { console.error(e); }
-    } else {
-      // Mensagem de boas-vindas inicial
-      setMessages([{
-        id: 'init',
-        text: `Sala de Guerra **${activeBU.name}** iniciada.\n\nTodos os agentes da unidade estão ouvindo. Qual a ordem do dia, Rodrigues?`,
-        sender: Sender.Bot,
-        timestamp: new Date(),
-        buId: activeBU.id
-      }]);
-    }
-  }, [activeBU.id]);
+        const existingSession = await findLatestSession({
+          workspaceId: activeWorkspaceId,
+          agentId: roomAgentId,
+          buId: activeBU.id
+        });
+
+        let targetSessionId = existingSession?.id || null;
+
+        if (!targetSessionId) {
+          targetSessionId = await createSession({
+            workspaceId: activeWorkspaceId,
+            agentId: roomAgentId,
+            ownerUserId,
+            buId: activeBU.id,
+            title: `Sala de Guerra • ${activeBU.name}`,
+            payload: { kind: 'unit-room', buName: activeBU.name }
+          });
+
+          await appendMessage({
+            workspaceId: activeWorkspaceId,
+            sessionId: targetSessionId,
+            agentId: roomAgentId,
+            sender: Sender.Bot,
+            text: `Sala de Guerra **${activeBU.name}** iniciada.\n\nTodos os agentes da unidade estão ouvindo. Qual a ordem do dia, Rodrigues?`,
+            buId: activeBU.id,
+            participantName: 'Sala de Guerra'
+          });
+        }
+
+        const loadedMessages = await loadSessionMessages({
+          workspaceId: activeWorkspaceId,
+          sessionId: targetSessionId
+        });
+
+        if (cancelled) return;
+        setSessionId(targetSessionId);
+        setMessages(loadedMessages);
+      } catch (error) {
+        console.error('Falha ao carregar sala da unidade:', error);
+        if (cancelled) return;
+        setSessionId(null);
+        setMessages([
+          {
+            id: 'init-fallback',
+            text: `Sala de Guerra **${activeBU.name}** iniciada.\n\nTodos os agentes da unidade estão ouvindo. Qual a ordem do dia, Rodrigues?`,
+            sender: Sender.Bot,
+            timestamp: new Date(),
+            buId: activeBU.id
+          }
+        ]);
+      }
+    };
+
+    bootstrapRoom();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBU.id, activeBU.name, activeWorkspaceId, ownerUserId]);
 
   useEffect(() => {
-    if (messages.length > 0) {
-      localStorage.setItem(`grupob_unit_chat_${activeBU.id}`, JSON.stringify(messages));
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, activeBU.id]);
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   // Audio Handlers
   const handleToggleRecording = async () => {
@@ -102,7 +155,7 @@ const UnitView: React.FC<UnitViewProps> = ({ activeBU, agents, onBack }) => {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if ((!input.trim() && !attachment) || isLoading) return;
+    if ((!input.trim() && !attachment) || isLoading || !sessionId) return;
 
     const userText = input.trim();
     const currentAttachment = attachment;
@@ -111,29 +164,53 @@ const UnitView: React.FC<UnitViewProps> = ({ activeBU, agents, onBack }) => {
     
     const displayText = currentAttachment ? (userText ? userText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : userText;
 
-    // User Message
-    const userMsg: Message = { 
-        id: Date.now().toString(), 
-        text: displayText, 
-        sender: Sender.User, 
-        timestamp: new Date(), 
-        buId: activeBU.id 
-    };
-    setMessages(prev => [...prev, userMsg]);
-    setIsLoading(true);
-
-    // Bot Placeholder
-    const botMsgId = Date.now().toString() + '_bot';
-    setMessages(prev => [...prev, { 
-        id: botMsgId, 
-        text: '', 
-        sender: Sender.Bot, 
-        timestamp: new Date(), 
-        buId: activeBU.id, 
-        isStreaming: true 
-    }]);
+    let persistedBotId = '';
 
     try {
+        const savedUser = await appendMessage({
+            workspaceId: activeWorkspaceId,
+            sessionId,
+            agentId: `unit-room:${activeBU.id}`,
+            sender: Sender.User,
+            text: displayText,
+            buId: activeBU.id,
+            attachment: currentAttachment
+        });
+        const userMsg: Message = {
+            id: savedUser.id,
+            text: displayText,
+            sender: Sender.User,
+            timestamp: new Date(),
+            buId: activeBU.id,
+            attachment: currentAttachment || undefined
+        };
+        setMessages(prev => [...prev, userMsg]);
+        setIsLoading(true);
+
+        const savedBot = await appendMessage({
+            workspaceId: activeWorkspaceId,
+            sessionId,
+            agentId: `unit-room:${activeBU.id}`,
+            sender: Sender.Bot,
+            text: '',
+            buId: activeBU.id,
+            participantName: 'Sala de Guerra',
+            isStreaming: true
+        });
+        persistedBotId = savedBot.id;
+        setMessages(prev => [
+          ...prev,
+          {
+            id: persistedBotId,
+            text: '',
+            sender: Sender.Bot,
+            timestamp: new Date(),
+            buId: activeBU.id,
+            isStreaming: true,
+            participantName: 'Sala de Guerra'
+          }
+        ]);
+
         // Contexto específico da sala
         const teamContext = unitAgents.map(a => `- ${a.name} (${a.officialRole})`).join('\n');
         const context = `
@@ -159,13 +236,18 @@ Você é o orquestrador desta sala. Responda como o líder da unidade ou delegue
         for await (const chunk of stream) {
             const text = (chunk as any).text || '';
             fullText += text;
-            setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
+            setMessages(prev => prev.map(m => m.id === persistedBotId ? { ...m, text: fullText } : m));
         }
         
-        setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
+        setMessages(prev => prev.map(m => m.id === persistedBotId ? { ...m, isStreaming: false } : m));
+        await updateMessage(persistedBotId, { text: fullText, isStreaming: false, updatedAt: new Date() });
+        await touchSession(sessionId);
 
     } catch (error) {
-        setMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: "Erro de conexão com a Sala de Guerra.", isStreaming: false } : m));
+        if (persistedBotId) {
+          setMessages(prev => prev.map(m => m.id === persistedBotId ? { ...m, text: "Erro de conexão com a Sala de Guerra.", isStreaming: false } : m));
+          await updateMessage(persistedBotId, { text: 'Erro de conexão com a Sala de Guerra.', isStreaming: false, updatedAt: new Date() }).catch(() => null);
+        }
     } finally {
         setIsLoading(false);
     }

@@ -343,30 +343,21 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
 
   // --- BACKUP SYSTEM ---
   const handleExportData = () => {
-      const STORAGE_KEYS = [
-          'grupob_activated_agents_v11', 
-          'grupob_chat_history_v4',
-          'grupob_black_vault_docs_v1', 
-          'grupob_global_constitution_v1',
-          'grupob_global_compliance_v1'
-      ];
-
       const backupData: Record<string, any> = {
           timestamp: new Date().toISOString(),
           version: '2.0.0',
-          data: {}
-      };
-
-      STORAGE_KEYS.forEach(key => {
-          const item = localStorage.getItem(key);
-          if (item) {
-              try {
-                  backupData.data[key] = JSON.parse(item);
-              } catch (e) {
-                  backupData.data[key] = item;
+          source: 'supabase',
+          data: {
+              agents,
+              businessUnits,
+              governance: {
+                cultureEntry: cultureEntry || null,
+                complianceMarkdown: complianceMarkdown || '',
+                vaultItems,
+                knowledgeNodes
               }
           }
-      });
+      };
 
       const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
