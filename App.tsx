@@ -514,14 +514,8 @@ if (userId) {
       if (found) setActiveBU(found);
     }
 
-    const validTabs: TabId[] = ['home', 'ecosystem', 'team', 'conversations', 'management', 'vault', 'fabrica-ca', 'governance', 'unit-room', 'chat-room', 'alignment', '3forb-home', 'audacus-home', 'startyb-home', 'redir', 'requests', 'hub'];
-    const savedTab = uiPrefs.navTab;
-    if (savedTab) {
-      const targetTab = savedTab === 'hub' ? 'ecosystem' : savedTab;
-      setActiveTab(validTabs.includes(targetTab) ? targetTab : 'home');
-    } else {
-      setActiveTab('home');
-    }
+    // Não restaura navTab automaticamente para evitar corrida de navegação
+    // que pode tirar o usuário do chat durante a sessão.
 
     uiPrefsHydratedUserRef.current = uid;
     setUiPrefsHydrated(true);
