@@ -10,6 +10,7 @@ const MAX_TOTAL_CHARS = 24000;
 const MAX_SYSTEM_CHARS = 16000;
 const PRIMARY_MAX_TOKENS = 1800;
 const FALLBACK_MAX_TOKENS = 900;
+const MAX_CONTINUATIONS = 3;
 
 const compactHistory = (messages: DeepSeekMessage[]): DeepSeekMessage[] => {
   const cleaned = (messages || [])
@@ -111,7 +112,26 @@ const requestDeepSeek = async (
   messages,
   systemInstruction,
   maxTokens
-}) as Promise<{ text: string; finishReason?: string | null }>;
+}) as Promise<{ text: string; finishReason?: string | null; completionTokens?: number | null; requestedMaxTokens?: number | null }>;
+
+const isLikelyTruncatedText = (text: string): boolean => {
+  const trimmed = String(text || '').trim();
+  if (trimmed.length < 120) return false;
+  if (/[.!?)]$/.test(trimmed)) return false;
+  if (/```$/.test(trimmed)) return false;
+  return true;
+};
+
+const shouldRequestContinuation = (response: { text?: string; finishReason?: string | null; completionTokens?: number | null; requestedMaxTokens?: number | null }): boolean => {
+  const finishReason = String(response.finishReason || '').toLowerCase();
+  if (finishReason === 'length' || finishReason === 'max_tokens') return true;
+
+  const completionTokens = Number(response.completionTokens || 0);
+  const requestedMaxTokens = Number(response.requestedMaxTokens || 0);
+  if (requestedMaxTokens > 0 && completionTokens >= Math.floor(requestedMaxTokens * 0.92)) return true;
+
+  return isLikelyTruncatedText(String(response.text || ''));
+};
 
 export async function* streamDeepSeekResponse(
   messages: DeepSeekMessage[],
@@ -124,16 +144,26 @@ export async function* streamDeepSeekResponse(
     const compactedMessages = compactHistory(messages);
     const response = await requestDeepSeek(compactedMessages, compactedSystemInstruction, PRIMARY_MAX_TOKENS);
     let finalText = response.text || '';
+    let continuationSafetyCounter = 0;
+    let currentResponse = response;
 
-    if (response.finishReason === 'length' && finalText.trim()) {
-      const continuationMessages: DeepSeekMessage[] = [
-        ...truncateMessageContent(compactedMessages.slice(-10), 1200),
-        { role: 'assistant', content: finalText },
-        { role: 'user', content: 'Continue exatamente do ponto onde parou, sem repetir nada.' }
-      ];
-      const continuation = await requestDeepSeek(continuationMessages, compactedSystemInstruction, FALLBACK_MAX_TOKENS);
-      if (continuation.text) {
-        finalText = `${finalText}\n${continuation.text}`.trim();
+    while (finalText.trim() && continuationSafetyCounter < MAX_CONTINUATIONS && shouldRequestContinuation(currentResponse)) {
+      continuationSafetyCounter += 1;
+      try {
+        const tailAssistant = finalText.slice(-2400);
+        const continuationMessages: DeepSeekMessage[] = [
+          ...truncateMessageContent(compactedMessages.slice(-8), 1100),
+          { role: 'assistant', content: tailAssistant },
+          { role: 'user', content: 'Continue exatamente do ponto onde parou, sem repetir o que ja foi dito.' }
+        ];
+        const continuation = await requestDeepSeek(continuationMessages, compactedSystemInstruction, FALLBACK_MAX_TOKENS);
+        const extra = String(continuation.text || '').trim();
+        if (!extra) break;
+        finalText = `${finalText}\n${extra}`.trim();
+        currentResponse = continuation;
+      } catch (continuationError) {
+        console.warn('DeepSeek continuation failed, preserving partial response.', continuationError);
+        break;
       }
     }
 

@@ -84,9 +84,12 @@ const requestDeepSeekCompletion = async (payload) => {
 
       const data = await response.json().catch(() => ({}));
       const choice = data?.choices?.[0] || {};
+      const completionTokens = Number(data?.usage?.completion_tokens || 0) || null;
       return {
         text: choice?.message?.content || '',
-        finishReason: choice?.finish_reason || null
+        finishReason: choice?.finish_reason || null,
+        completionTokens,
+        requestedMaxTokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 1200
       };
     } catch (error) {
       lastError = error;
