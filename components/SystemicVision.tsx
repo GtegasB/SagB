@@ -5,6 +5,7 @@ import { Agent, Message, Sender, BusinessUnit, AgentTier, AgentStatus, Topic, Pe
 import { startAgentSession, generateTitleOptions, transcribeAudio, generateTaskSuggestions, consolidateChatMemory } from '../services/gemini';
 import { streamDeepSeekResponse, DeepSeekMessage } from '../services/deepseek';
 import { retrieveRelevantContext, retrieveLearnedMemory, addDocumentToAgent, addLearningToAgent } from '../services/knowledge';
+import { db, collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '../services/supabase';
 import { SendIcon, NewChatIcon, MicIcon, StopCircleIcon, BackIcon, FolderIcon, PlusIcon, FileTextIcon, CloudUploadIcon, PaperclipIcon, XIcon, BookIcon, BotIcon, PencilIcon, CheckIcon, TrashIcon } from './Icon';
 import { Avatar } from './Avatar';
 import ChatMessage from './ChatMessage';
@@ -25,6 +26,7 @@ interface SystemicVisionProps {
     onConvertToTopic?: (topic: Partial<Topic>) => void;
     viewMode?: 'bu' | 'global';
     userProfile?: UserProfile | null;
+    activeWorkspaceId?: string | null;
 }
 
 // Interface para Sessão
@@ -36,7 +38,7 @@ interface ChatSession {
     lastMessageAt: number;
 }
 
-const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdateAgents, activeBU, onAddAgent, onApproveAgent, onPlanAgent, onEnterRoom, businessUnits = [], totalGlobalAgents = 0, forcedAgent, onBack, onConvertToTopic, viewMode = 'bu', userProfile }) => {
+const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdateAgents, activeBU, onAddAgent, onApproveAgent, onPlanAgent, onEnterRoom, businessUnits = [], totalGlobalAgents = 0, forcedAgent, onBack, onConvertToTopic, viewMode = 'bu', userProfile, activeWorkspaceId }) => {
 
     const CURRENT_USER = useMemo(() => ({
         name: userProfile?.name || "Douglas Rodrigues",
@@ -110,6 +112,11 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const stopStreamingRef = useRef(false);
     const hasSummonedRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const isCreatingSessionRef = useRef(false);
+
+    const workspaceId = activeWorkspaceId || userProfile?.workspaceId || (typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_active_workspace_v1') : null);
+    const useSupabaseChat = Boolean(workspaceId);
+    const ownerUserId = userProfile?.uid || null;
 
     // New Agent Modal State
     const [isAdding, setIsAdding] = useState(false);
@@ -149,10 +156,10 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
     // Persist Messages when they change
     useEffect(() => {
-        if (selectedAgent && currentSessionId && activeMessages.length > 0) {
+        if (!useSupabaseChat && selectedAgent && currentSessionId && activeMessages.length > 0) {
             localStorage.setItem(`grupob_chat_${currentSessionId}`, JSON.stringify(activeMessages));
         }
-    }, [activeMessages, currentSessionId, selectedAgent]);
+    }, [activeMessages, currentSessionId, selectedAgent, useSupabaseChat]);
 
     // Reset textarea height on input clear
     useEffect(() => {
@@ -230,6 +237,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
     // --- SESSION LOGIC ---
     const loadSessionsForAgent = (agentId: string) => {
+        if (useSupabaseChat) return;
         const stored = localStorage.getItem(`grupob_sessions_${agentId}`);
         if (stored) {
             try {
@@ -241,7 +249,60 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         }
     };
 
-    const createNewSession = (agent: Agent) => {
+    const createNewSession = async (agent: Agent) => {
+        if (useSupabaseChat) {
+            if (!workspaceId) {
+                alert("Workspace não definido para salvar conversa.");
+                return;
+            }
+            if (isCreatingSessionRef.current) return;
+            isCreatingSessionRef.current = true;
+            try {
+                const now = new Date();
+                const sessionRef = await addDoc(collection(db, "chat_sessions"), {
+                    workspaceId,
+                    agentId: agent.id,
+                    ownerUserId,
+                    title: "Nova Conversa",
+                    status: "active",
+                    buId: activeBU.id,
+                    createdAt: now,
+                    updatedAt: now,
+                    lastMessageAt: now
+                });
+                setCurrentSessionId(sessionRef.id);
+                setTitleOptions(null);
+                setTaskSuggestions(null);
+                setAttachment(null);
+                setActiveParticipants([]);
+
+                const randomGreeting = HUMAN_GREETINGS[Math.floor(Math.random() * HUMAN_GREETINGS.length)];
+                await addDoc(collection(db, "chat_messages"), {
+                    workspaceId,
+                    sessionId: sessionRef.id,
+                    agentId: agent.id,
+                    sender: Sender.Bot,
+                    text: randomGreeting,
+                    buId: activeBU.id,
+                    hasAttachment: false,
+                    createdAt: now
+                });
+
+                if (agent.modelProvider !== 'deepseek') {
+                    initializeSession(agent);
+                } else {
+                    setGeminiSession(null);
+                }
+                setShowHistorySidebar(false);
+            } catch (error) {
+                console.error("Erro ao criar sessão no Supabase:", error);
+                alert("Falha ao criar sessão no banco de dados.");
+            } finally {
+                isCreatingSessionRef.current = false;
+            }
+            return;
+        }
+
         const newSessionId = Date.now().toString();
         const newSession: ChatSession = {
             id: newSessionId,
@@ -283,12 +344,18 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
     const selectSession = (sessionId: string, agentContext?: Agent) => {
         const agent = agentContext || selectedAgent;
+        if (!agent) return;
 
         setCurrentSessionId(sessionId);
         setTitleOptions(null);
         setTaskSuggestions(null);
         setAttachment(null);
         setActiveParticipants([]);
+
+        if (useSupabaseChat) {
+            setActiveMessages([]);
+            return;
+        }
 
         const storedMsgs = localStorage.getItem(`grupob_chat_${sessionId}`);
         if (storedMsgs) {
@@ -314,15 +381,25 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         }
     };
 
-    const handleDeleteSession = (sessionId: string) => {
+    const handleDeleteSession = async (sessionId: string) => {
         if (!window.confirm("Deseja realmente excluir esta conversa?")) return;
+
+        if (useSupabaseChat) {
+            try {
+                await deleteDoc(doc(db, "chat_sessions", sessionId));
+            } catch (error) {
+                console.error("Erro ao excluir sessão:", error);
+                alert("Falha ao excluir conversa no banco de dados.");
+                return;
+            }
+        }
 
         const updatedSessions = sessions.filter(s => s.id !== sessionId);
         setSessions(updatedSessions);
-        if (selectedAgent) {
+        if (!useSupabaseChat && selectedAgent) {
             localStorage.setItem(`grupob_sessions_${selectedAgent.id}`, JSON.stringify(updatedSessions));
+            localStorage.removeItem(`grupob_chat_${sessionId}`);
         }
-        localStorage.removeItem(`grupob_chat_${sessionId}`);
 
         if (currentSessionId === sessionId) {
             setCurrentSessionId(null);
@@ -331,13 +408,20 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setMenuOpenId(null);
     };
 
-    const handleRenameSession = (sessionId: string) => {
+    const handleRenameSession = async (sessionId: string) => {
         const session = sessions.find(s => s.id === sessionId);
         const newTitle = window.prompt("Novo nome da conversa:", session?.title);
         if (newTitle && newTitle.trim()) {
             const updatedSessions = sessions.map(s => s.id === sessionId ? { ...s, title: newTitle.trim() } : s);
             setSessions(updatedSessions);
-            if (selectedAgent) {
+            if (useSupabaseChat) {
+                try {
+                    await updateDoc(doc(db, "chat_sessions", sessionId), { title: newTitle.trim(), updatedAt: new Date() });
+                } catch (error) {
+                    console.error("Erro ao renomear sessão:", error);
+                    alert("Falha ao renomear conversa no banco de dados.");
+                }
+            } else if (selectedAgent) {
                 localStorage.setItem(`grupob_sessions_${selectedAgent.id}`, JSON.stringify(updatedSessions));
             }
         }
@@ -348,10 +432,21 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const handleOpenAgent = (agent: Agent) => {
         setSelectedAgent(agent);
         if (agent.status !== 'PLANNED') {
+            setCurrentSessionId(null);
+            setActiveMessages([]);
+            setTitleOptions(null);
+            setTaskSuggestions(null);
+            setAttachment(null);
+            setActiveParticipants([]);
+
+            if (useSupabaseChat) {
+                return;
+            }
+
             loadSessionsForAgent(agent.id);
             const stored = localStorage.getItem(`grupob_sessions_${agent.id}`);
             if (!stored || JSON.parse(stored).length === 0) {
-                setTimeout(() => createNewSession(agent), 50);
+                setTimeout(() => { void createNewSession(agent); }, 50);
             } else {
                 const recent = JSON.parse(stored).sort((a: ChatSession, b: ChatSession) => b.lastMessageAt - a.lastMessageAt)[0];
                 selectSession(recent.id, agent);
@@ -359,17 +454,121 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         }
     };
 
+    useEffect(() => {
+        if (!useSupabaseChat || !workspaceId || !selectedAgent || selectedAgent.status === 'PLANNED') return;
+
+        const toMillis = (value: any) => {
+            if (value instanceof Date) return value.getTime();
+            const parsed = new Date(value);
+            return Number.isNaN(parsed.getTime()) ? Date.now() : parsed.getTime();
+        };
+
+        const sessionsQuery = query(
+            collection(db, "chat_sessions"),
+            where("workspaceId", "==", workspaceId),
+            where("agentId", "==", selectedAgent.id),
+            orderBy("lastMessageAt", "desc")
+        );
+
+        const unsubscribe = onSnapshot(sessionsQuery, (snapshot) => {
+            const loaded = snapshot.docs.map((docSnap) => {
+                const data = docSnap.data() as any;
+                return {
+                    id: docSnap.id,
+                    agentId: String(data.agentId || selectedAgent.id),
+                    title: String(data.title || "Nova Conversa"),
+                    createdAt: toMillis(data.createdAt),
+                    lastMessageAt: toMillis(data.lastMessageAt || data.updatedAt || data.createdAt)
+                } as ChatSession;
+            }).sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+
+            setSessions(loaded);
+            setCurrentSessionId((prev) => {
+                if (loaded.length === 0) return null;
+                if (prev && loaded.some((s) => s.id === prev)) return prev;
+                return loaded[0].id;
+            });
+
+            if (loaded.length === 0 && !isCreatingSessionRef.current) {
+                void createNewSession(selectedAgent);
+            }
+        }, (error) => {
+            console.error("Erro ao carregar sessões de chat:", error);
+        });
+
+        return () => unsubscribe();
+    }, [useSupabaseChat, workspaceId, selectedAgent?.id, selectedAgent?.status]);
+
+    useEffect(() => {
+        if (!useSupabaseChat || !workspaceId || !selectedAgent || !currentSessionId) return;
+
+        const messagesQuery = query(
+            collection(db, "chat_messages"),
+            where("workspaceId", "==", workspaceId),
+            where("sessionId", "==", currentSessionId),
+            orderBy("createdAt", "asc")
+        );
+
+        const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+            const loaded = snapshot.docs.map((docSnap) => {
+                const data = docSnap.data() as any;
+                const senderRaw = String(data.sender || 'bot').toLowerCase();
+                const sender =
+                    senderRaw === Sender.User ? Sender.User :
+                    senderRaw === Sender.System ? Sender.System :
+                    Sender.Bot;
+                const timestamp = data.createdAt instanceof Date ? data.createdAt : new Date(data.createdAt || Date.now());
+                const payload = (data.payload && typeof data.payload === 'object') ? data.payload : {};
+                const attachment = data.attachment && typeof data.attachment === 'object'
+                    ? {
+                        data: String(data.attachment.data || ''),
+                        mimeType: String(data.attachment.mimeType || 'application/octet-stream'),
+                        preview: String(data.attachment.preview || '')
+                    }
+                    : undefined;
+
+                return {
+                    id: docSnap.id,
+                    text: String(data.text || ''),
+                    sender,
+                    timestamp,
+                    buId: String(data.buId || activeBU.id),
+                    isStreaming: Boolean(payload.isStreaming),
+                    participantName: data.participantName ? String(data.participantName) : undefined,
+                    attachment
+                } as Message;
+            });
+            setActiveMessages(loaded);
+        }, (error) => {
+            console.error("Erro ao carregar mensagens:", error);
+        });
+
+        return () => unsubscribe();
+    }, [useSupabaseChat, workspaceId, selectedAgent?.id, currentSessionId, activeBU.id]);
+
     // --- HANDLER FUNCTIONS ---
 
-    const updateSessionMetadata = (sessionId: string) => {
+    const updateSessionMetadata = async (sessionId: string) => {
+        const nowMs = Date.now();
         setSessions(prev => {
-            const updated = prev.map(s => s.id === sessionId ? { ...s, lastMessageAt: Date.now() } : s);
+            const updated = prev.map(s => s.id === sessionId ? { ...s, lastMessageAt: nowMs } : s);
             updated.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
-            if (selectedAgent) {
+            if (!useSupabaseChat && selectedAgent) {
                 localStorage.setItem(`grupob_sessions_${selectedAgent.id}`, JSON.stringify(updated));
             }
             return updated;
         });
+
+        if (useSupabaseChat) {
+            try {
+                await updateDoc(doc(db, "chat_sessions", sessionId), {
+                    lastMessageAt: new Date(nowMs),
+                    updatedAt: new Date(nowMs)
+                });
+            } catch (error) {
+                console.error("Erro ao atualizar metadata da sessão:", error);
+            }
+        }
     };
 
     const handleCloseChat = () => {
@@ -383,6 +582,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     // --- CORE: LOGICA DE EDIÇÃO E REGENERAÇÃO ---
     const handleUpdateAndRegenerate = async (msg: Message, newText: string, newAttachment?: { data: string, mimeType: string, preview: string } | null) => {
         if (!selectedAgent) return;
+        const canPersistChat = Boolean(useSupabaseChat && workspaceId && currentSessionId);
 
         // 1. Encontrar o índice da mensagem editada
         const msgIndex = activeMessages.findIndex(m => m.id === msg.id);
@@ -398,12 +598,49 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             attachment: newAttachment || undefined
         };
 
+        if (canPersistChat) {
+            try {
+                await updateDoc(doc(db, "chat_messages", msg.id), {
+                    text: truncatedMessages[msgIndex].text,
+                    hasAttachment: Boolean(newAttachment),
+                    attachment: newAttachment || null
+                });
+                const toRemove = activeMessages.slice(msgIndex + 1);
+                await Promise.all(
+                    toRemove.map((m) => deleteDoc(doc(db, "chat_messages", m.id)).catch(() => null))
+                );
+            } catch (persistError) {
+                console.error("Erro ao persistir edição/regeneração:", persistError);
+            }
+        }
+
         // 4. Atualizar estado visual imediatamente
         setActiveMessages(truncatedMessages);
         setIsLoading(true);
 
         // 5. Preparar para regenerar a resposta
-        const botMsgId = Date.now().toString() + '_bot_regen';
+        let botMsgId = Date.now().toString() + '_bot_regen';
+        let persistedBotId: string | null = null;
+        if (canPersistChat) {
+            try {
+                const savedBot = await addDoc(collection(db, "chat_messages"), {
+                    workspaceId,
+                    sessionId: currentSessionId,
+                    agentId: selectedAgent.id,
+                    sender: Sender.Bot,
+                    text: '',
+                    buId: activeBU.id,
+                    hasAttachment: false,
+                    createdAt: new Date(),
+                    payload: { isStreaming: true }
+                });
+                botMsgId = savedBot.id;
+                persistedBotId = savedBot.id;
+            } catch (createBotError) {
+                console.error("Erro ao criar placeholder da regeneração:", createBotError);
+            }
+        }
+
         setActiveMessages(prev => [...prev, {
             id: botMsgId,
             text: '',
@@ -416,6 +653,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         try {
             // --- LOGICA DE GERAÇÃO (Cópia da handleSendMessage adaptada) ---
             const ragContext = retrieveRelevantContext(selectedAgent, newText);
+            let finalBotText = '';
 
             if (selectedAgent.modelProvider === 'deepseek') {
                 const deepSeekHistory = truncatedMessages.map(m => ({
@@ -435,6 +673,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
                 }
                 setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
+                finalBotText = fullText;
 
             } else {
                 // GEMINI: Precisamos reiniciar a sessão com o histórico cortado para garantir consistência
@@ -465,15 +704,30 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
                 }
                 setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
+                finalBotText = fullText;
+            }
+
+            if (persistedBotId) {
+                await updateDoc(doc(db, "chat_messages", persistedBotId), {
+                    text: finalBotText,
+                    payload: { isStreaming: false }
+                });
             }
 
             if (currentSessionId) {
-                updateSessionMetadata(currentSessionId);
+                await updateSessionMetadata(currentSessionId);
             }
 
         } catch (error) {
             console.error(error);
-            setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: "Erro na regeneração.", isStreaming: false } : m));
+            const regenerationError = "Erro na regeneração.";
+            setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: regenerationError, isStreaming: false } : m));
+            if (persistedBotId) {
+                await updateDoc(doc(db, "chat_messages", persistedBotId), {
+                    text: regenerationError,
+                    payload: { isStreaming: false }
+                }).catch(() => null);
+            }
         } finally {
             setIsLoading(false);
         }
@@ -484,13 +738,27 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setActiveParticipants(prev => [...prev, agent]);
         if (manual) {
             setIsInviteModalOpen(false);
-            setActiveMessages(prev => [...prev, {
+            const systemMessage = {
                 id: Date.now().toString(),
                 text: `SYSTEM: ${agent.name} entrou na sala.`,
                 sender: Sender.System,
                 timestamp: new Date(),
                 buId: activeBU.id
-            }]);
+            };
+            setActiveMessages(prev => [...prev, systemMessage]);
+
+            if (useSupabaseChat && workspaceId && currentSessionId && selectedAgent) {
+                addDoc(collection(db, "chat_messages"), {
+                    workspaceId,
+                    sessionId: currentSessionId,
+                    agentId: selectedAgent.id,
+                    sender: Sender.System,
+                    text: systemMessage.text,
+                    buId: activeBU.id,
+                    hasAttachment: false,
+                    createdAt: new Date()
+                }).catch((error) => console.error("Erro ao persistir mensagem de sistema:", error));
+            }
         }
     };
 
@@ -527,13 +795,22 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setTaskForm({ title: '', assignee: '', date: new Date().toISOString().split('T')[0] });
     };
 
-    const handleApplyTitle = (title: string) => {
+    const handleApplyTitle = async (title: string) => {
         if (!currentSessionId) return;
         setSessions(prev => {
             const updated = prev.map(s => s.id === currentSessionId ? { ...s, title } : s);
-            localStorage.setItem(`grupob_sessions_${selectedAgent?.id}`, JSON.stringify(updated));
+            if (!useSupabaseChat) {
+                localStorage.setItem(`grupob_sessions_${selectedAgent?.id}`, JSON.stringify(updated));
+            }
             return updated;
         });
+        if (useSupabaseChat) {
+            try {
+                await updateDoc(doc(db, "chat_sessions", currentSessionId), { title, updatedAt: new Date() });
+            } catch (error) {
+                console.error("Erro ao aplicar título:", error);
+            }
+        }
         setTitleOptions(null);
     };
 
@@ -687,6 +964,8 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
         const userText = input.trim();
         const currentAttachment = attachment;
+        const canPersistChat = Boolean(useSupabaseChat && workspaceId && currentSessionId);
+        const now = new Date();
 
         setInput('');
         setAttachment(null);
@@ -695,11 +974,35 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             textareaRef.current.focus();
         }
 
+        let userMsgId = Date.now().toString();
+        if (canPersistChat) {
+            try {
+                const savedUser = await addDoc(collection(db, "chat_messages"), {
+                    workspaceId,
+                    sessionId: currentSessionId,
+                    agentId: selectedAgent.id,
+                    sender: Sender.User,
+                    text: currentAttachment ? (userText ? userText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : userText,
+                    buId: activeBU.id,
+                    hasAttachment: Boolean(currentAttachment),
+                    attachment: currentAttachment ? {
+                        data: currentAttachment.data,
+                        mimeType: currentAttachment.mimeType,
+                        preview: currentAttachment.preview
+                    } : null,
+                    createdAt: now
+                });
+                userMsgId = savedUser.id;
+            } catch (error) {
+                console.error("Erro ao persistir mensagem do usuário:", error);
+            }
+        }
+
         const userMsg: Message = {
-            id: Date.now().toString(),
+            id: userMsgId,
             text: currentAttachment ? (userText ? userText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : userText,
             sender: Sender.User,
-            timestamp: new Date(),
+            timestamp: now,
             buId: activeBU.id,
             attachment: currentAttachment ? {
                 data: currentAttachment.data,
@@ -711,7 +1014,28 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setActiveMessages(prev => [...prev, userMsg]);
         setIsLoading(true);
 
-        const botMsgId = Date.now().toString() + '_bot';
+        let botMsgId = Date.now().toString() + '_bot';
+        let persistedBotId: string | null = null;
+        if (canPersistChat) {
+            try {
+                const savedBot = await addDoc(collection(db, "chat_messages"), {
+                    workspaceId,
+                    sessionId: currentSessionId,
+                    agentId: selectedAgent.id,
+                    sender: Sender.Bot,
+                    text: '',
+                    buId: activeBU.id,
+                    hasAttachment: false,
+                    createdAt: new Date(),
+                    payload: { isStreaming: true }
+                });
+                botMsgId = savedBot.id;
+                persistedBotId = savedBot.id;
+            } catch (error) {
+                console.error("Erro ao criar placeholder da resposta no banco:", error);
+            }
+        }
+
         setActiveMessages(prev => [...prev, {
             id: botMsgId,
             text: '',
@@ -724,6 +1048,8 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         try {
             // RAG & CONTEXT RETRIEVAL (BUSCA DE CONTEÚDO)
             const ragContext = retrieveRelevantContext(selectedAgent, userText);
+
+            let finalBotText = '';
 
             // LÓGICA MULTI-MODELO (CÉREBRO)
             if (selectedAgent.modelProvider === 'deepseek') {
@@ -745,6 +1071,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
                 }
                 setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
+                finalBotText = fullText;
 
             } else {
                 // GEMINI (DEFAULT)
@@ -794,10 +1121,22 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                 }
                 setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
                 hasSummonedRef.current = false;
+                finalBotText = fullText;
+            }
+
+            if (persistedBotId) {
+                try {
+                    await updateDoc(doc(db, "chat_messages", persistedBotId), {
+                        text: finalBotText,
+                        payload: { isStreaming: false }
+                    });
+                } catch (error) {
+                    console.error("Erro ao finalizar resposta no banco:", error);
+                }
             }
 
             if (currentSessionId) {
-                updateSessionMetadata(currentSessionId);
+                await updateSessionMetadata(currentSessionId);
             }
 
         } catch (error: any) {
@@ -821,17 +1160,34 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                         setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
                     }
                     setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
+                    if (persistedBotId) {
+                        await updateDoc(doc(db, "chat_messages", persistedBotId), {
+                            text: fullText,
+                            payload: { isStreaming: false }
+                        });
+                    }
                     return; // Sucesso no Fallback
                 } catch (dsError: any) {
                     console.error("DeepSeek Fallback also failed:", dsError);
                 }
             }
 
+            const errorText = `Erro na conexão neural (${technicalMsg}). Newton, crie uma NOVA CHAVE DE API e verifique as restrições de serviço no Google Cloud.`;
             setActiveMessages(prev => prev.map(m => m.id === botMsgId ? {
                 ...m,
-                text: `Erro na conexão neural (${technicalMsg}). Newton, crie uma NOVA CHAVE DE API e verifique as restrições de serviço no Google Cloud.`,
+                text: errorText,
                 isStreaming: false
             } : m));
+            if (persistedBotId) {
+                try {
+                    await updateDoc(doc(db, "chat_messages", persistedBotId), {
+                        text: errorText,
+                        payload: { isStreaming: false }
+                    });
+                } catch (persistError) {
+                    console.error("Erro ao persistir mensagem de erro:", persistError);
+                }
+            }
         } finally {
             setIsLoading(false);
         }

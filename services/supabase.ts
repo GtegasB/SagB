@@ -547,6 +547,39 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     };
   }
 
+  if (table === 'chat_sessions') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      agentId: String(r.agent_id ?? ''),
+      ownerUserId: r.owner_user_id ?? undefined,
+      title: String(r.title ?? 'Nova Conversa'),
+      status: r.status ?? 'active',
+      buId: r.bu_id ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      lastMessageAt: asJsDate(pick(r, 'last_message_at', 'lastMessageAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'chat_messages') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      sessionId: String(r.session_id ?? ''),
+      agentId: String(r.agent_id ?? ''),
+      sender: String(r.sender ?? 'bot'),
+      text: String(r.text ?? ''),
+      buId: r.bu_id ?? undefined,
+      participantName: r.participant_name ?? undefined,
+      hasAttachment: Boolean(r.has_attachment),
+      attachment: r.attachment ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
   return r;
 };
 
@@ -844,6 +877,35 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     delete p.updatedAt;
   }
 
+  if (table === 'chat_sessions') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
+    if (p.ownerUserId !== undefined) { p.owner_user_id = p.ownerUserId; delete p.ownerUserId; }
+    if (p.lastMessageAt !== undefined) { p.last_message_at = p.lastMessageAt; delete p.lastMessageAt; }
+    if (p.buId !== undefined) { p.bu_id = p.buId; delete p.buId; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'chat_messages') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.sessionId !== undefined) { p.session_id = p.sessionId; delete p.sessionId; }
+    if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
+    if (p.buId !== undefined) { p.bu_id = p.buId; delete p.buId; }
+    if (p.participantName !== undefined) { p.participant_name = p.participantName; delete p.participantName; }
+    if (p.hasAttachment !== undefined) { p.has_attachment = p.hasAttachment; delete p.hasAttachment; }
+    if (p.isStreaming !== undefined) {
+      p.payload = { ...(p.payload && typeof p.payload === 'object' ? p.payload : {}), isStreaming: p.isStreaming };
+      delete p.isStreaming;
+    }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
   return p;
 };
 
@@ -1021,6 +1083,8 @@ const buildDocSnapshot = (record: any | null, table: string) => ({
 
 const getBasePollingMs = (ref: AnyRef) => {
   const table = ref.table;
+  if (table === 'chat_messages') return 2500;
+  if (table === 'chat_sessions') return 4000;
   if (table === 'agents' || table === 'workspace_members' || table === 'agent_configs') return 15000;
   if (
     table === 'governance_global_culture' ||
