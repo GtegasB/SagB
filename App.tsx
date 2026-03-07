@@ -49,6 +49,7 @@ const generateId = () => Math.random().toString(36).substring(2, 15);
 const isUuid = (value: any) =>
   typeof value === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const normalizeStatus = (value: any) => String(value || '').trim().toLowerCase();
 
 // IMAGENS ESTÁVEIS (ATUALIZADAS V5.3 - CDN LINKS)
 const PIETRO_IMAGE = "https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&q=80&w=200&h=200";
@@ -179,7 +180,7 @@ const App: React.FC = () => {
   const [input, setInput] = useState('');
 
   const filteredCultureEntries = useMemo(
-    () => cultureEntries.filter(entry => entry.status !== 'deleted'),
+    () => cultureEntries.filter(entry => normalizeStatus(entry.status) !== 'deleted'),
     [cultureEntries]
   );
 
@@ -194,9 +195,11 @@ const App: React.FC = () => {
 
   const GLOBAL_COMPLIANCE_CODE = 'GOVERNANCE.GLOBAL.DEFAULT';
   const activeComplianceRule = useMemo(() => {
-    const relevant = complianceRules.filter(rule => rule.code === GLOBAL_COMPLIANCE_CODE && rule.status !== 'deleted');
-    if (relevant.length === 0) return null;
-    return [...relevant].sort((a, b) => {
+    const nonDeletedRules = complianceRules.filter(rule => normalizeStatus(rule.status) !== 'deleted');
+    if (nonDeletedRules.length === 0) return null;
+    const preferredByCode = nonDeletedRules.filter(rule => rule.code === GLOBAL_COMPLIANCE_CODE);
+    const sourceRules = preferredByCode.length > 0 ? preferredByCode : nonDeletedRules;
+    return [...sourceRules].sort((a, b) => {
       const aTime = a.updatedAt instanceof Date ? a.updatedAt.getTime() : new Date(a.updatedAt).getTime();
       const bTime = b.updatedAt instanceof Date ? b.updatedAt.getTime() : new Date(b.updatedAt).getTime();
       return bTime - aTime;
@@ -204,12 +207,18 @@ const App: React.FC = () => {
   }, [complianceRules]);
 
   const activeVaultEntries = useMemo(
-    () => vaultItems.filter(item => item.status !== 'deleted' && item.status !== 'archived'),
+    () => vaultItems.filter(item => {
+      const status = normalizeStatus(item.status);
+      return status !== 'deleted' && status !== 'archived';
+    }),
     [vaultItems]
   );
 
   const visibleKnowledgeNodes = useMemo(
-    () => knowledgeNodes.filter(node => node.status !== 'archived' && node.status !== 'deleted'),
+    () => knowledgeNodes.filter(node => {
+      const status = normalizeStatus(node.status);
+      return status !== 'archived' && status !== 'deleted';
+    }),
     [knowledgeNodes]
   );
   const [isLoading, setIsLoading] = useState(false);
@@ -224,12 +233,60 @@ const App: React.FC = () => {
   const [attachment, setAttachment] = useState<{ data: string, mimeType: string, preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const rawWorkspaceId =
-    userProfile?.workspaceId ||
-    workspaceMembers[0]?.workspaceId ||
-    (typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_active_workspace_v1') : null);
-  const fallbackWorkspaceIdFromVenture = ventures.find(v => isUuid(v?.id))?.id || null;
-  const activeWorkspaceId = isUuid(rawWorkspaceId) ? rawWorkspaceId : fallbackWorkspaceIdFromVenture;
+  const memberWorkspaceIds = useMemo(
+    () => workspaceMembers.map(member => member.workspaceId).filter(isUuid),
+    [workspaceMembers]
+  );
+
+  const persistedWorkspaceId = typeof localStorage !== 'undefined'
+    ? localStorage.getItem('grupob_active_workspace_v1')
+    : null;
+
+  const preferredWorkspaceId = userProfile?.workspaceId || persistedWorkspaceId || null;
+  const activeWorkspaceId = useMemo(() => {
+    if (isUuid(preferredWorkspaceId)) {
+      if (memberWorkspaceIds.length === 0 || memberWorkspaceIds.includes(preferredWorkspaceId)) {
+        return preferredWorkspaceId;
+      }
+    }
+    if (memberWorkspaceIds.length > 0) return memberWorkspaceIds[0];
+    return null;
+  }, [preferredWorkspaceId, memberWorkspaceIds]);
+
+  const resolveWorkspaceIdForWrites = useMemo(() => {
+    const candidates = [
+      activeWorkspaceId,
+      latestCultureEntry?.workspaceId,
+      activeComplianceRule?.workspaceId,
+      activeVaultEntries[0]?.workspaceId,
+      visibleKnowledgeNodes[0]?.workspaceId,
+      memberWorkspaceIds[0]
+    ];
+    return candidates.find(isUuid) || null;
+  }, [
+    activeWorkspaceId,
+    latestCultureEntry,
+    activeComplianceRule,
+    activeVaultEntries,
+    visibleKnowledgeNodes,
+    memberWorkspaceIds
+  ]);
+
+  const scopeGovernanceRowsByWorkspace = <T extends { workspaceId?: string | null }>(rows: T[]): T[] => {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    if (!isUuid(activeWorkspaceId)) return rows;
+
+    const exact = rows.filter(row => row.workspaceId === activeWorkspaceId);
+    if (exact.length > 0) return exact;
+
+    if (memberWorkspaceIds.length > 0) {
+      const validWorkspaces = new Set(memberWorkspaceIds);
+      const memberScoped = rows.filter(row => !!row.workspaceId && validWorkspaces.has(row.workspaceId));
+      if (memberScoped.length > 0) return memberScoped;
+    }
+
+    return rows;
+  };
 
   useEffect(() => {
     if (activeWorkspaceId && typeof localStorage !== 'undefined') {
@@ -471,7 +528,7 @@ if (userId) {
   }, [activeTab, activeBU]);
 
   useEffect(() => {
-    if (!activeWorkspaceId) {
+    if (!user) {
       setCultureEntries([]);
       setComplianceRules([]);
       setVaultItems([]);
@@ -480,59 +537,42 @@ if (userId) {
       return;
     }
 
-    const cultureQuery = query(
-      collection(db, 'governance_global_culture'),
-      where('workspaceId', '==', activeWorkspaceId),
-      orderBy('updatedAt', 'desc')
-    );
+    const cultureQuery = query(collection(db, 'governance_global_culture'), orderBy('updatedAt', 'desc'));
 
-    const complianceQuery = query(
-      collection(db, 'governance_compliance_rules'),
-      where('workspaceId', '==', activeWorkspaceId),
-      orderBy('updatedAt', 'desc')
-    );
+    const complianceQuery = query(collection(db, 'governance_compliance_rules'), orderBy('updatedAt', 'desc'));
 
-    const vaultQuery = query(
-      collection(db, 'vault_items'),
-      where('workspaceId', '==', activeWorkspaceId),
-      orderBy('createdAt', 'desc')
-    );
+    const vaultQuery = query(collection(db, 'vault_items'), orderBy('createdAt', 'desc'));
 
     const knowledgeQuery = query(
       collection(db, 'knowledge_nodes'),
-      where('workspaceId', '==', activeWorkspaceId),
       orderBy('parentId', 'asc'),
       orderBy('orderIndex', 'asc')
     );
 
-    const agentConfigsQuery = query(
-      collection(db, 'agent_configs'),
-      where('workspaceId', '==', activeWorkspaceId),
-      orderBy('updatedAt', 'desc')
-    );
+    const agentConfigsQuery = query(collection(db, 'agent_configs'), orderBy('updatedAt', 'desc'));
 
     const unsubscribeCulture = onSnapshot(cultureQuery, (snapshot) => {
       const rows = snapshot.docs.map(doc => doc.data() as GovernanceCulture);
-      setCultureEntries(rows);
+      setCultureEntries(scopeGovernanceRowsByWorkspace(rows));
     }, (error) => console.error('Erro ao carregar cultura global:', error));
 
     const unsubscribeCompliance = onSnapshot(complianceQuery, (snapshot) => {
       const rows = snapshot.docs.map(doc => doc.data() as ComplianceRule);
-      setComplianceRules(rows);
+      setComplianceRules(scopeGovernanceRowsByWorkspace(rows));
     }, (error) => console.error('Erro ao carregar compliance:', error));
 
     const unsubscribeVault = onSnapshot(vaultQuery, (snapshot) => {
       const rows = snapshot.docs.map(doc => doc.data() as VaultItem);
-      setVaultItems(rows);
+      setVaultItems(scopeGovernanceRowsByWorkspace(rows));
     }, (error) => console.error('Erro ao carregar vault:', error));
 
     const unsubscribeKnowledge = onSnapshot(knowledgeQuery, (snapshot) => {
       const rows = snapshot.docs.map(doc => ({ ...(doc.data() as KnowledgeNode), id: doc.id }));
-      setKnowledgeNodes(rows);
+      setKnowledgeNodes(scopeGovernanceRowsByWorkspace(rows));
     }, (error) => console.error('Erro ao carregar knowledge nodes:', error));
 
     const unsubscribeAgentConfigs = onSnapshot(agentConfigsQuery, (snapshot) => {
-      const rows = snapshot.docs.map(doc => doc.data() as any);
+      const rows = scopeGovernanceRowsByWorkspace(snapshot.docs.map(doc => doc.data() as any));
       const mapped: Record<string, { fullPrompt?: string; globalDocuments?: Agent['globalDocuments']; docCount?: number }> = {};
       rows.forEach((row) => {
         const targetAgentId = String(row.agentId || row.agent_id || '').trim();
@@ -553,7 +593,7 @@ if (userId) {
       unsubscribeKnowledge();
       unsubscribeAgentConfigs();
     };
-  }, [activeWorkspaceId]);
+  }, [user, activeWorkspaceId, memberWorkspaceIds]);
 
   const handleSelectBU = (bu: BusinessUnit) => {
     setIsTransitioning(true);
@@ -708,9 +748,10 @@ if (userId) {
 
   // Nova função para atualizar agentes diretamente da Governança (DNA Editor)
   const handleUpdateAgentData = async (updatedAgent: Agent) => {
-    const workspaceIdForSave = isUuid(activeWorkspaceId)
-      ? activeWorkspaceId
-      : (isUuid(updatedAgent.ventureId) ? updatedAgent.ventureId : null);
+    const workspaceIdForSave =
+      (isUuid(activeWorkspaceId) ? activeWorkspaceId : null) ||
+      resolveWorkspaceIdForWrites ||
+      (isUuid(updatedAgent.ventureId) ? updatedAgent.ventureId : null);
 
     if (!workspaceIdForSave) {
       throw new Error('Workspace não definido. Atualize seu perfil ou associação.');
@@ -788,7 +829,7 @@ if (userId) {
   }
 
   const handleSaveCultureEntry = async ({ contentMd, title, summary }: { contentMd: string; title?: string; summary?: string; }) => {
-    if (!activeWorkspaceId) {
+    if (!latestCultureEntry && !resolveWorkspaceIdForWrites) {
       alert('Workspace não definido. Atualize seu perfil ou associação.');
       return;
     }
@@ -805,7 +846,7 @@ if (userId) {
         });
       } else {
         await addDoc(collection(db, "governance_global_culture"), {
-          workspaceId: activeWorkspaceId,
+          workspaceId: resolveWorkspaceIdForWrites,
           title: title || 'Cultura Global',
           summary: summary || '',
           contentMd,
@@ -824,7 +865,7 @@ if (userId) {
   };
 
   const handleSaveComplianceMarkdown = async (markdown: string) => {
-    if (!activeWorkspaceId) {
+    if (!activeComplianceRule && !resolveWorkspaceIdForWrites) {
       alert('Workspace não definido. Atualize seu perfil ou associação.');
       return;
     }
@@ -839,7 +880,7 @@ if (userId) {
         });
       } else {
         await addDoc(collection(db, "governance_compliance_rules"), {
-          workspaceId: activeWorkspaceId,
+          workspaceId: resolveWorkspaceIdForWrites,
           code: GLOBAL_COMPLIANCE_CODE,
           title: 'Diretrizes & Compliance',
           description: 'Regras e protocolos globais do ecossistema GrupoB.',
@@ -861,14 +902,14 @@ if (userId) {
   };
 
   const handleCreateVaultRecord = async (item: { name: string; provider: string; env: string; itemType: string; ownerEmail?: string; storagePath?: string; secretRef?: string; rotatePolicy?: string; payload?: Record<string, any>; }) => {
-    if (!activeWorkspaceId) {
+    if (!resolveWorkspaceIdForWrites) {
       alert('Workspace não definido. Atualize seu perfil ou associação.');
       return;
     }
     const now = new Date();
     try {
       await addDoc(collection(db, "vault_items"), {
-        workspaceId: activeWorkspaceId,
+        workspaceId: resolveWorkspaceIdForWrites,
         name: item.name,
         provider: item.provider,
         env: item.env,
@@ -904,7 +945,7 @@ if (userId) {
   };
 
   const handleCreateKnowledgeNode = async ({ title, nodeType, parentId = null, contentMd = '', linkUrl }: { title: string; nodeType: KnowledgeNode['nodeType']; parentId?: string | null; contentMd?: string; linkUrl?: string; }) => {
-    if (!activeWorkspaceId) {
+    if (!resolveWorkspaceIdForWrites) {
       alert('Workspace não definido. Atualize seu perfil ou associação.');
       return;
     }
@@ -913,7 +954,7 @@ if (userId) {
     const nextOrderIndex = siblings.length > 0 ? Math.max(...siblings.map(node => node.orderIndex ?? 0)) + 1 : 1;
     try {
       const docRef = await addDoc(collection(db, "knowledge_nodes"), {
-        workspaceId: activeWorkspaceId,
+        workspaceId: resolveWorkspaceIdForWrites,
         parentId: parentId ?? null,
         nodeType,
         title,
