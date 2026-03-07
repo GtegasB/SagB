@@ -8,8 +8,8 @@ export interface DeepSeekMessage {
 const MAX_MESSAGES = 24;
 const MAX_TOTAL_CHARS = 24000;
 const MAX_SYSTEM_CHARS = 16000;
-const PRIMARY_MAX_TOKENS = 1200;
-const FALLBACK_MAX_TOKENS = 700;
+const PRIMARY_MAX_TOKENS = 1800;
+const FALLBACK_MAX_TOKENS = 900;
 
 const compactHistory = (messages: DeepSeekMessage[]): DeepSeekMessage[] => {
   const cleaned = (messages || [])
@@ -68,6 +68,33 @@ const compactSystemInstruction = (systemInstruction: string): string => {
   return normalized.slice(0, MAX_SYSTEM_CHARS);
 };
 
+const getLatestUserMessage = (messages: DeepSeekMessage[]): string => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role === 'user' && typeof message.content === 'string' && message.content.trim()) {
+      return message.content.trim();
+    }
+  }
+  return '';
+};
+
+const buildGroundedInstruction = (baseInstruction: string, latestUserMessage: string): string => {
+  const userContext = latestUserMessage
+    ? `\n[PEDIDO MAIS RECENTE DO USUARIO - PRIORIDADE MAXIMA]:\n${latestUserMessage}\n`
+    : '';
+
+  return `
+${baseInstruction}
+
+[REGRAS DE ATERRAMENTO DE CONTEXTO]:
+1. Priorize o pedido MAIS RECENTE do usuario.
+2. Nao reutilize projeto/caso antigo se o usuario mudou o contexto.
+3. Se houver conflito entre historico antigo e pedido atual, siga o pedido atual.
+4. Se faltar dado critico, pergunte antes de concluir.
+${userContext}
+`.trim();
+};
+
 const truncateMessageContent = (messages: DeepSeekMessage[], maxCharsPerMessage: number): DeepSeekMessage[] => (
   messages.map((message) => {
     const content = String(message.content || '');
@@ -90,7 +117,9 @@ export async function* streamDeepSeekResponse(
   messages: DeepSeekMessage[],
   systemInstruction: string
 ) {
-  const compactedSystemInstruction = compactSystemInstruction(systemInstruction);
+  const latestUserMessage = getLatestUserMessage(messages);
+  const groundedSystemInstruction = buildGroundedInstruction(systemInstruction, latestUserMessage);
+  const compactedSystemInstruction = compactSystemInstruction(groundedSystemInstruction);
   try {
     const compactedMessages = compactHistory(messages);
     const response = await requestDeepSeek(compactedMessages, compactedSystemInstruction, PRIMARY_MAX_TOKENS);

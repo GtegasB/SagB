@@ -605,6 +605,10 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     role: m.sender === Sender.User ? 'user' : 'assistant',
                     content: m.text
                 })) as DeepSeekMessage[];
+                const editedAttachmentText = extractTextFromAttachment(newAttachment);
+                if (editedAttachmentText) {
+                    deepSeekHistory.push({ role: 'user', content: editedAttachmentText });
+                }
 
                 if (ragContext) {
                     deepSeekHistory.push({ role: 'system', content: ragContext });
@@ -930,6 +934,32 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         }
     };
 
+    const extractTextFromAttachment = (fileAttachment?: { data: string, mimeType: string, preview: string } | null): string => {
+        if (!fileAttachment?.data) return '';
+
+        const mime = String(fileAttachment.mimeType || '').toLowerCase();
+        const isTextual =
+            mime.startsWith('text/') ||
+            mime.includes('json') ||
+            mime.includes('xml') ||
+            mime.includes('yaml') ||
+            mime.includes('csv') ||
+            mime.includes('markdown');
+
+        if (!isTextual) {
+            return `[ANEXO ENVIADO: ${mime || 'application/octet-stream'}]`;
+        }
+
+        try {
+            const decoded = atob(fileAttachment.data);
+            const excerpt = decoded.slice(0, 12000).trim();
+            if (!excerpt) return '';
+            return `[CONTEUDO DO ARQUIVO ANEXADO]\n${excerpt}`;
+        } catch {
+            return `[ANEXO ENVIADO: ${mime || 'text/plain'}]`;
+        }
+    };
+
     const handlePaste = (e: React.ClipboardEvent) => {
         const items = e.clipboardData.items;
         for (let i = 0; i < items.length; i++) {
@@ -1067,6 +1097,10 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                 role: message.sender === Sender.User ? 'user' : 'assistant',
                                 content: message.text
                             })) as DeepSeekMessage[];
+                        const attachmentText = extractTextFromAttachment(currentAttachment);
+                        if (attachmentText) {
+                            deepSeekHistory.push({ role: 'user', content: attachmentText });
+                        }
 
                         if (ragContext) {
                             deepSeekHistory.push({ role: 'system', content: ragContext });
