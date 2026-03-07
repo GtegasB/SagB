@@ -17,22 +17,19 @@ import GovernanceView from './components/GovernanceView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView';
 import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
-import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, Venture, BusinessUnit, BusinessBlueprint, AgentTier, AgentStatus, Task, UserProfile, GovernanceCulture, ComplianceRule, VaultItem, KnowledgeNode, WorkspaceMember } from './types';
+import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, Venture, BusinessUnit, BusinessBlueprint, Task, UserProfile, GovernanceCulture, ComplianceRule, VaultItem, KnowledgeNode, WorkspaceMember } from './types';
 import {
   sendMessageStream,
   startMainSession,
   createPietroInstruction,
   createCassioInstruction,
-  DEFAULT_PIETRO_PROMPT,
-  DEFAULT_CASSIO_PROMPT,
   KLAUS_PROMPT,
   NEWTON_PROMPT,
   transcribeAudio
 } from './services/gemini';
-import { MASTER_AGENTS_LIST } from './data/agents';
 import metadata from './metadata.json';
 import { db, auth, onAuthStateChanged, signOut, User } from './services/supabase';
-import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, query, where, orderBy, Timestamp } from './services/supabase';
+import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, setDoc, query, where, orderBy, Timestamp } from './services/supabase';
 
 // --- CONFIGURAÇÃO DE VERSÃO E PERSISTÊNCIA ---
 //const APP_VERSION = "1.8.1"; // VERSÃO FIXA (RESTORED)
@@ -151,36 +148,6 @@ const CASSIO_PERSONA: PersonaConfig = {
   imageUrl: null
 };
 
-// --- MAPPING HELPERS ---
-const UNIT_MAP: Record<string, string> = {
-  'gpb': 'grupob',
-  '3fb': '3forb',
-  'stb': 'startyb',
-  'aud': 'audacus',
-  'tgs': 'tegas',
-  'sco': 'scaleodonto',
-  'zip': 'ziplia',
-  'dms': 'domusys',
-  'zog': 'zoggon',
-  'dse': 'domuse',
-  'sed': 'seddore',
-  'pib': 'piblo',
-  'nex': 'nuexus',
-  'ddr': 'douglas-rodrigues',
-  'ins': 'institutob',
-  'acl': 'acelerab',
-  'ppo': 'papob',
-  'met': 'gerac'
-};
-
-const inferTier = (role: string): AgentTier => {
-  const r = role.toLowerCase();
-  if (r.includes('chairman') || r.includes('ceo') || r.includes('cfo') || r.includes('cro') || r.includes('conselheiro')) return 'ESTRATÉGICO';
-  if (r.includes('diretor') || r.includes('head') || r.includes('gestor') || r.includes('sócio')) return 'TÁTICO';
-  if (r.includes('mentor') || r.includes('auditor') || r.includes('treinador') || r.includes('controller') || r.includes('cdo') || r.includes('prompt')) return 'CONTROLE';
-  return 'OPERACIONAL';
-};
-
 const App: React.FC = () => {
   const version = metadata.version;
   const [user, setUser] = useState<User | null>(null);
@@ -193,30 +160,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('home'); // DEFAULT: HOME
   const [activeBU, setActiveBU] = useState<BusinessUnit>(INITIAL_BUSINESS_UNITS[0]);
 
-  // OFFLINE-FIRST: Inicializa com a Lista Mestre para garantir UI imediata
-  const [activatedAgents, setActivatedAgents] = useState<Agent[]>(() => {
-    return MASTER_AGENTS_LIST.map(seed => {
-      let injectedPrompt = '';
-      if (seed.id === 'ca006gpb') injectedPrompt = DEFAULT_PIETRO_PROMPT;
-      if (seed.id === 'ca045tgs') injectedPrompt = DEFAULT_CASSIO_PROMPT;
-
-      return {
-        id: seed.id,
-        universalId: seed.id,
-        name: seed.name,
-        officialRole: seed.role,
-        buId: UNIT_MAP[seed.unit] || 'grupob',
-        tier: inferTier(seed.role),
-        active: seed.is_active,
-        status: seed.is_active ? 'ACTIVE' : 'PLANNED',
-        version: '1.0',
-        company: 'GrupoB',
-        fullPrompt: injectedPrompt,
-        sector: seed.role.split(' ')[0],
-        modelProvider: (seed as any).model_provider || 'gemini'
-      } as Agent;
-    });
-  });
+  const [activatedAgents, setActivatedAgents] = useState<Agent[]>([]);
+  const [agentConfigsByAgentId, setAgentConfigsByAgentId] = useState<Record<string, { fullPrompt?: string; globalDocuments?: Agent['globalDocuments']; docCount?: number }>>({});
   const [messages, setMessages] = useState<Message[]>([]);
   const [alignmentMessages, setAlignmentMessages] = useState<Message[]>([]);
   const [blueprints, setBlueprints] = useState<Record<string, BusinessBlueprint>>({});
@@ -523,6 +468,7 @@ if (userId) {
       setComplianceRules([]);
       setVaultItems([]);
       setKnowledgeNodes([]);
+      setAgentConfigsByAgentId({});
       return;
     }
 
@@ -551,6 +497,12 @@ if (userId) {
       orderBy('orderIndex', 'asc')
     );
 
+    const agentConfigsQuery = query(
+      collection(db, 'agent_configs'),
+      where('workspaceId', '==', activeWorkspaceId),
+      orderBy('updatedAt', 'desc')
+    );
+
     const unsubscribeCulture = onSnapshot(cultureQuery, (snapshot) => {
       const rows = snapshot.docs.map(doc => doc.data() as GovernanceCulture);
       setCultureEntries(rows);
@@ -571,11 +523,27 @@ if (userId) {
       setKnowledgeNodes(rows);
     }, (error) => console.error('Erro ao carregar knowledge nodes:', error));
 
+    const unsubscribeAgentConfigs = onSnapshot(agentConfigsQuery, (snapshot) => {
+      const rows = snapshot.docs.map(doc => doc.data() as any);
+      const mapped: Record<string, { fullPrompt?: string; globalDocuments?: Agent['globalDocuments']; docCount?: number }> = {};
+      rows.forEach((row) => {
+        const targetAgentId = String(row.agentId || row.agent_id || '').trim();
+        if (!targetAgentId) return;
+        mapped[targetAgentId] = {
+          fullPrompt: row.fullPrompt || row.full_prompt || '',
+          globalDocuments: row.globalDocuments || row.global_documents || [],
+          docCount: Number(row.docCount ?? row.doc_count ?? 0)
+        };
+      });
+      setAgentConfigsByAgentId(mapped);
+    }, (error) => console.error('Erro ao carregar agent_configs:', error));
+
     return () => {
       unsubscribeCulture();
       unsubscribeCompliance();
       unsubscribeVault();
       unsubscribeKnowledge();
+      unsubscribeAgentConfigs();
     };
   }, [activeWorkspaceId]);
 
@@ -732,13 +700,32 @@ if (userId) {
 
   // Nova função para atualizar agentes diretamente da Governança (DNA Editor)
   const handleUpdateAgentData = async (updatedAgent: Agent) => {
+    if (!activeWorkspaceId) {
+      alert('Workspace não definido. Atualize seu perfil ou associação.');
+      return;
+    }
     try {
-      const { id, ...data } = updatedAgent;
-      // Sanitização básica antes de salvar
-      const payload = Object.fromEntries(
-        Object.entries(data).filter(([_, v]) => v !== undefined && v !== null)
+      const { id, fullPrompt, globalDocuments, docCount, ...baseData } = updatedAgent;
+      const sanitizedBasePayload = Object.fromEntries(
+        Object.entries(baseData).filter(([_, v]) => v !== undefined && v !== null)
       );
-      await updateDoc(doc(db, "agents", id), payload);
+
+      await updateDoc(doc(db, "agents", id), sanitizedBasePayload);
+
+      const currentUserId = userProfile?.uid || user?.id || null;
+      const normalizedGlobalDocuments = globalDocuments || [];
+      const normalizedDocCount = docCount ?? normalizedGlobalDocuments.length;
+
+      await setDoc(doc(db, "agent_configs", id), {
+        workspaceId: activeWorkspaceId,
+        agentId: id,
+        fullPrompt: fullPrompt || '',
+        globalDocuments: normalizedGlobalDocuments,
+        docCount: normalizedDocCount,
+        status: 'active',
+        updatedBy: currentUserId,
+        updatedAt: new Date()
+      }, { merge: true });
     } catch (e) {
       console.error("Error updating agent data:", e);
     }
@@ -1036,13 +1023,24 @@ if (userId) {
         id: doc.id
       })) as Agent[];
 
-      setActivatedAgents(remoteAgents);
+      const hydratedAgents = remoteAgents.map((agent) => {
+        const config = agentConfigsByAgentId[agent.id] || (agent.universalId ? agentConfigsByAgentId[agent.universalId] : undefined);
+        if (!config) return agent;
+        return {
+          ...agent,
+          fullPrompt: config.fullPrompt ?? agent.fullPrompt ?? '',
+          globalDocuments: config.globalDocuments ?? agent.globalDocuments,
+          docCount: config.docCount ?? agent.docCount
+        };
+      });
+
+      setActivatedAgents(hydratedAgents);
     }, (error) => {
       console.error("Erro ao conectar no banco de dados:", error);
     });
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, agentConfigsByAgentId]);
 
   // --- SAVE STATE ---
   // --- SAVE STATE (LOCALSTORAGE REMOVIDO PARA AGENTES - AGORA É BANCO REMOTO) ---

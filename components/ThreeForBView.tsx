@@ -172,11 +172,6 @@ const TRIAGE_BLOCKS = [
   }
 ];
 
-// REPLICANDO PROMPTS ESSENCIAIS PARA GARANTIR FUNCIONAMENTO NO DIFF
-const PROMPT_BERNARDO = `[IDENTIDADE] Bernardo Castello...`; 
-const PROMPT_ZARA = `[IDENTIDADE] Zara Bittencourt...`;
-const PROMPT_WAR_ROOM = `[SISTEMA: SALA DE GUERRA DINÂMICA]...`;
-
 const SECTOR_CONFIG = {
   'LIDERANÇA': { color: '#ea580c', bg: 'bg-orange-50', text: 'text-orange-600', border: 'border-orange-200' },
   'MARKETING': { color: '#db2777', bg: 'bg-pink-50', text: 'text-pink-600', border: 'border-pink-200' },
@@ -419,7 +414,7 @@ const ThreeForBView: React.FC<ThreeForBViewProps> = ({ activeTab, activeBU, setA
     if (initialMessages.length === 0) {
         let greeting = `**${member.name}** online.`;
         if (member.isRoom) {
-            greeting = `**Zara Bittencourt:** Olá Rodrigues. Estamos na Sala de Guerra. \n\nEstou à disposição. Quem você quer convocar para a reunião?`;
+            greeting = `**Sala de Guerra:** Olá. Estamos na sala de coordenação.\n\nQuem você deseja convocar para a reunião?`;
         }
         initialMessages = [{
             id: 'init', 
@@ -485,31 +480,7 @@ const ThreeForBView: React.FC<ThreeForBViewProps> = ({ activeTab, activeBU, setA
         avatarUrl: agent.avatarUrl // MAPEANDO IMAGEM
       };
     });
-
-    const STATIC_MEMBERS_LOCAL: TeamMember[] = [
-      { name: 'Zara Bittencourt', role: 'CEO 3forB C.A', sector: 'LIDERANÇA', isLeader: true, isAi: true, agentId: 'zara-ceo', fullPrompt: PROMPT_ZARA },
-      { name: 'SALA DE GUERRA', role: 'Reunião de Comando (Multi-Agentes)', sector: 'MARKETING', isRoom: true, isAi: true, agentId: 'war-room-mkt', fullPrompt: PROMPT_WAR_ROOM },
-      { name: 'Bernardo Castello', role: 'Diretor de Marketing 3forB C.A', sector: 'MARKETING', isLeader: true, isAi: true, agentId: 'bernardo-cmo', fullPrompt: PROMPT_BERNARDO },
-      { name: 'Benício Ravel', role: 'Gestor de Tráfego C.A', sector: 'MARKETING', isAi: true, agentId: 'benicio-ads', fullPrompt: `[IDENTIDADE] Benício...` },
-      { name: 'Davi Fontes', role: 'Copywriter C.A', sector: 'MARKETING', isAi: true, agentId: 'davi-copy', fullPrompt: `[IDENTIDADE] Davi...` },
-      { name: 'Roni Salles', role: 'Head de Copy C.A', sector: 'MARKETING', isAi: true, agentId: 'roni-head-copy', fullPrompt: `[IDENTIDADE] Roni...` },
-      { name: 'Marina Vaz', role: 'Diretora de Arte C.A', sector: 'MARKETING', isAi: true, agentId: 'marina-design', fullPrompt: `[IDENTIDADE] Marina...` },
-      { name: 'Lívia Salles', role: 'Community Manager C.A', sector: 'MARKETING', isAi: true, agentId: 'livia-social', fullPrompt: `[IDENTIDADE] Lívia...` },
-      { name: 'Kleber Teles', role: 'Web Developer C.A', sector: 'MARKETING', isAi: true, agentId: 'kleber-dev', fullPrompt: `[IDENTIDADE] Kleber...` },
-      { name: 'Max Guerra', role: 'Diretor Comercial 3forB C.A', sector: 'VENDAS', isLeader: true },
-      { name: 'Murilo Zago', role: 'Head de Vendas C.A', sector: 'VENDAS' },
-      { name: 'Alec Ross', role: 'Closer C.A', sector: 'VENDAS' },
-      { name: 'Henri Milan', role: 'SDR TeleforB C.A', sector: 'VENDAS' },
-      { name: 'Hector Valente', role: 'CGO Expansão C.A', sector: 'EXPANSÃO', isLeader: true },
-      { name: 'Tadeu Gusmão', role: 'Head de Expansão C.A', sector: 'EXPANSÃO' },
-      { name: 'Ricardo Lemos', role: 'Treinador PIRP C.A', sector: 'EXPANSÃO' },
-    ];
-
-    const dynamicNames = new Set(dynamicMembers.map(m => m.name));
-    // Correção: Se o membro estático já existir no dinâmico, usamos o dinâmico (que tem o status real)
-    const filteredStatic = STATIC_MEMBERS_LOCAL.filter(m => !dynamicNames.has(m.name));
-    
-    return [...filteredStatic, ...dynamicMembers];
+    return dynamicMembers;
   }, [agents]);
 
   const MemberCard: React.FC<{ member: TeamMember }> = ({ member }) => {

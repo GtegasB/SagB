@@ -166,8 +166,7 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
           const target = agents.find(a => a.id === targetAgentId);
           if (target) {
               setEditingAgent(target);
-              const stored = localStorage.getItem(target.id);
-              setTempPrompt(stored || target.fullPrompt || '');
+              setTempPrompt(target.fullPrompt || '');
               setActiveAgentTab('dna');
               setKnowledgeSearchTerm('');
               setCurrentView('intelligence');
@@ -221,7 +220,6 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
       if (editingAgent) {
           const updatedAgent = { ...editingAgent, fullPrompt: tempPrompt };
           onUpdateAgent(updatedAgent);
-          localStorage.setItem(editingAgent.id, tempPrompt); 
           alert(`DNA de ${editingAgent.name} atualizado.`);
           setEditingAgent(null); 
       }
@@ -378,8 +376,7 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
 
   const openAgentEditor = (agent: Agent) => {
       setEditingAgent(agent);
-      const stored = localStorage.getItem(agent.id);
-      setTempPrompt(stored || agent.fullPrompt || '');
+      setTempPrompt(agent.fullPrompt || '');
       setActiveAgentTab('dna');
       setKnowledgeSearchTerm(''); 
   };

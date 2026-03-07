@@ -482,6 +482,24 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     };
   }
 
+  if (table === 'agent_configs') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      agentId: String(r.agent_id ?? ''),
+      fullPrompt: r.full_prompt ?? '',
+      globalDocuments: r.global_documents ?? [],
+      docCount: Number(r.doc_count ?? 0),
+      version: Number(r.version ?? 1),
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      createdBy: r.created_by ?? undefined,
+      updatedBy: r.updated_by ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
   return r;
 };
 
@@ -765,6 +783,20 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     delete p.updatedAt;
   }
 
+  if (table === 'agent_configs') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
+    if (p.fullPrompt !== undefined) { p.full_prompt = p.fullPrompt; delete p.fullPrompt; }
+    if (p.globalDocuments !== undefined) { p.global_documents = p.globalDocuments; delete p.globalDocuments; }
+    if (p.docCount !== undefined) { p.doc_count = p.docCount; delete p.docCount; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
   return p;
 };
 
@@ -893,7 +925,7 @@ const buildDocSnapshot = (record: any | null, table: string) => ({
 
 const getBasePollingMs = (ref: AnyRef) => {
   const table = ref.table;
-  if (table === 'agents' || table === 'workspace_members') return 15000;
+  if (table === 'agents' || table === 'workspace_members' || table === 'agent_configs') return 15000;
   if (
     table === 'governance_global_culture' ||
     table === 'governance_compliance_rules' ||
