@@ -46,6 +46,9 @@ const STORAGE_KEYS = {
 };
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
+const isUuid = (value: any) =>
+  typeof value === 'string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 // IMAGENS ESTÁVEIS (ATUALIZADAS V5.3 - CDN LINKS)
 const PIETRO_IMAGE = "https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&q=80&w=200&h=200";
@@ -221,7 +224,12 @@ const App: React.FC = () => {
   const [attachment, setAttachment] = useState<{ data: string, mimeType: string, preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const activeWorkspaceId = userProfile?.workspaceId || workspaceMembers[0]?.workspaceId || (typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_active_workspace_v1') : null);
+  const rawWorkspaceId =
+    userProfile?.workspaceId ||
+    workspaceMembers[0]?.workspaceId ||
+    (typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_active_workspace_v1') : null);
+  const fallbackWorkspaceIdFromVenture = ventures.find(v => isUuid(v?.id))?.id || null;
+  const activeWorkspaceId = isUuid(rawWorkspaceId) ? rawWorkspaceId : fallbackWorkspaceIdFromVenture;
 
   useEffect(() => {
     if (activeWorkspaceId && typeof localStorage !== 'undefined') {
@@ -700,24 +708,39 @@ if (userId) {
 
   // Nova função para atualizar agentes diretamente da Governança (DNA Editor)
   const handleUpdateAgentData = async (updatedAgent: Agent) => {
-    if (!activeWorkspaceId) {
-      alert('Workspace não definido. Atualize seu perfil ou associação.');
-      return;
+    const workspaceIdForSave = isUuid(activeWorkspaceId)
+      ? activeWorkspaceId
+      : (isUuid(updatedAgent.ventureId) ? updatedAgent.ventureId : null);
+
+    if (!workspaceIdForSave) {
+      throw new Error('Workspace não definido. Atualize seu perfil ou associação.');
     }
+
+    const { id, fullPrompt, globalDocuments, docCount } = updatedAgent;
+    const currentUserId = userProfile?.uid || user?.id || null;
+    const normalizedGlobalDocuments = globalDocuments || [];
+    const normalizedDocCount = docCount ?? normalizedGlobalDocuments.length;
+
+    // Atualização do cadastro-base do agente é best-effort para não bloquear o salvamento do DNA.
+    // Tabelas em produção podem variar de schema e rejeitar colunas extras.
+    const minimalAgentPatch: Record<string, any> = {
+      name: updatedAgent.name,
+      description: updatedAgent.officialRole || updatedAgent.description || null,
+      status: updatedAgent.status
+    };
+    if (updatedAgent.ventureId) {
+      minimalAgentPatch.ventureId = updatedAgent.ventureId;
+    }
+
     try {
-      const { id, fullPrompt, globalDocuments, docCount, ...baseData } = updatedAgent;
-      const sanitizedBasePayload = Object.fromEntries(
-        Object.entries(baseData).filter(([_, v]) => v !== undefined && v !== null)
-      );
+      await updateDoc(doc(db, "agents", id), minimalAgentPatch);
+    } catch (e) {
+      console.warn("Aviso: falha ao atualizar dados-base em agents. Prosseguindo com agent_configs.", e);
+    }
 
-      await updateDoc(doc(db, "agents", id), sanitizedBasePayload);
-
-      const currentUserId = userProfile?.uid || user?.id || null;
-      const normalizedGlobalDocuments = globalDocuments || [];
-      const normalizedDocCount = docCount ?? normalizedGlobalDocuments.length;
-
+    try {
       await setDoc(doc(db, "agent_configs", id), {
-        workspaceId: activeWorkspaceId,
+        workspaceId: workspaceIdForSave,
         agentId: id,
         fullPrompt: fullPrompt || '',
         globalDocuments: normalizedGlobalDocuments,
@@ -726,8 +749,9 @@ if (userId) {
         updatedBy: currentUserId,
         updatedAt: new Date()
       }, { merge: true });
-    } catch (e) {
-      console.error("Error updating agent data:", e);
+    } catch (e: any) {
+      console.error("Erro ao salvar agent_configs:", e);
+      throw new Error(`Falha ao salvar DNA do agente no Supabase: ${String(e?.message || e)}`);
     }
   };
 

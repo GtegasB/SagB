@@ -30,7 +30,7 @@ type KnowledgeNodeInput = {
 interface GovernanceViewProps {
   onBack: () => void;
   agents: Agent[];
-  onUpdateAgent: (agent: Agent) => void;
+  onUpdateAgent: (agent: Agent) => Promise<void> | void;
   businessUnits: BusinessUnit[];
   onAddUnit: (unit: BusinessUnit) => void;
   targetAgentId?: string | null;
@@ -216,12 +216,17 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
   };
 
 
-  const handleSaveAgent = () => {
-      if (editingAgent) {
+  const handleSaveAgent = async () => {
+      if (!editingAgent) return;
+      try {
           const updatedAgent = { ...editingAgent, fullPrompt: tempPrompt };
-          onUpdateAgent(updatedAgent);
+          await Promise.resolve(onUpdateAgent(updatedAgent));
           alert(`DNA de ${editingAgent.name} atualizado.`);
-          setEditingAgent(null); 
+          setEditingAgent(null);
+      } catch (error: any) {
+          console.error('Erro ao salvar DNA do agente:', error);
+          const message = String(error?.message || 'Falha ao salvar DNA no banco de dados.');
+          alert(message);
       }
   };
 
