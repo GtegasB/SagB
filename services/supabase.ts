@@ -685,8 +685,8 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
         p.workspace_id = p.workspaceId;
         delete p.workspaceId;
       }
-      if (p.ventureId !== undefined && p.venture_id === undefined) {
-        p.venture_id = p.ventureId;
+      if (p.ventureId !== undefined) {
+        if (p.venture_id === undefined) p.venture_id = p.ventureId;
         delete p.ventureId;
       }
       if (p.buId !== undefined && p.bu_id === undefined) {
@@ -919,6 +919,12 @@ const parseMissingColumn = (error: any, table: string): string | null => {
   return m[1] || null;
 };
 
+const parseNonUpdatableColumn = (error: any): string | null => {
+  const raw = String(error?.details?.message || error?.message || '');
+  const m = raw.match(/column ["']?([^"']+)["']? can only be updated to DEFAULT/i);
+  return m ? (m[1] || null) : null;
+};
+
 const insertWithSchemaFallback = async (table: string, initialBody: Record<string, any>) => {
   const body: Record<string, any> = { ...initialBody };
   const removed = new Set<string>();
@@ -973,19 +979,21 @@ const patchWithSchemaFallback = async (
       if (error?.status !== 400) throw error;
 
       const missingColumn = parseMissingColumn(error, table);
-      if (!missingColumn || removed.has(missingColumn)) throw error;
+      const nonUpdatableColumn = parseNonUpdatableColumn(error);
+      const targetColumn = missingColumn || nonUpdatableColumn;
+      if (!targetColumn || removed.has(targetColumn)) throw error;
 
-      if (Object.prototype.hasOwnProperty.call(body, missingColumn)) {
-        const value = body[missingColumn];
-        delete body[missingColumn];
+      if (Object.prototype.hasOwnProperty.call(body, targetColumn)) {
+        const value = body[targetColumn];
+        delete body[targetColumn];
 
-        if (missingColumn !== 'payload') {
+        if (missingColumn && targetColumn !== 'payload') {
           body.payload = {
             ...(body.payload && typeof body.payload === 'object' ? body.payload : {}),
-            [missingColumn]: value
+            [targetColumn]: value
           };
         }
-        removed.add(missingColumn);
+        removed.add(targetColumn);
         continue;
       }
 
