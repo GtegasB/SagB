@@ -1178,6 +1178,7 @@ if (userId) {
           onActivate={handleActivateAgent}
           onRemove={handleRemoveAgent}
           activeBU={activeBU}
+          activeWorkspaceId={activeWorkspaceId}
           businessUnits={businessUnits}
           ventures={ventures} // NOVO v1.5.0
           onManageIntelligence={(agent) => {

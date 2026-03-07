@@ -535,6 +535,10 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
       knownKeys.add('bu_id');
       knownKeys.add('buId');
     }
+    if (table === 'agents') {
+      knownKeys.add('workspace_id');
+      knownKeys.add('workspaceId');
+    }
 
     // Converte campos de relacionamento apenas para tabelas que suportam esse schema.
     if ((table === 'tasks' || table === 'topics') && p.ventureId !== undefined && p.venture_id === undefined) {
@@ -548,6 +552,10 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
 
     // Em agents, preserva em payload para evitar erro de coluna inexistente (ex.: bu_id).
     if (table === 'agents') {
+      if (p.workspaceId !== undefined && p.workspace_id === undefined) {
+        p.workspace_id = p.workspaceId;
+        delete p.workspaceId;
+      }
       delete p.bu_id;
       delete p.venture_id;
     }

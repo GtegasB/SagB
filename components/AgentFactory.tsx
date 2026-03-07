@@ -10,6 +10,7 @@ interface AgentFactoryProps {
     onActivate: (agentData: any) => void;
     onRemove?: (agentId: string) => void;
     activeBU: BusinessUnit;
+    activeWorkspaceId?: string | null;
     businessUnits: BusinessUnit[];
     ventures: Venture[]; // NOVO v1.5.0
     agents: Agent[];
@@ -47,6 +48,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
     onActivate,
     onRemove,
     activeBU,
+    activeWorkspaceId,
     businessUnits,
     ventures,
     agents,
@@ -302,6 +304,13 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         setIsSaving(true); // INICIA BLOQUEIO
 
         const selectedBU = businessUnits.find(b => b.id === newAgent.buId);
+        const workspaceId = activeWorkspaceId || (typeof localStorage !== 'undefined' ? localStorage.getItem('grupob_active_workspace_v1') : null);
+
+        if (!workspaceId) {
+            alert("Workspace não definido. Atualize seu perfil ou associação.");
+            setIsSaving(false);
+            return;
+        }
 
         // Se tiver editingId, usamos ele. Se não, geramos automático (ca + seq + sigla)
         const tempId = editingId || Date.now().toString();
@@ -323,6 +332,7 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         const rawPayload = {
             ...newAgent,
             company: selectedBU ? selectedBU.name : 'GrupoB',
+            workspaceId,
             version: '1.0',
             fullPrompt: editingId ? (newAgent.fullPrompt || '') : '',
             sector: newAgent.division || 'Geral',
