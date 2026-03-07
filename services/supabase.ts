@@ -958,6 +958,47 @@ const insertWithSchemaFallback = async (table: string, initialBody: Record<strin
   });
 };
 
+const patchWithSchemaFallback = async (
+  table: string,
+  query: URLSearchParams,
+  initialBody: Record<string, any>
+) => {
+  const body: Record<string, any> = { ...initialBody };
+  const removed = new Set<string>();
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      return await restFetch(table, { method: 'PATCH', query, body });
+    } catch (error: any) {
+      if (error?.status !== 400) throw error;
+
+      const missingColumn = parseMissingColumn(error, table);
+      if (!missingColumn || removed.has(missingColumn)) throw error;
+
+      if (Object.prototype.hasOwnProperty.call(body, missingColumn)) {
+        const value = body[missingColumn];
+        delete body[missingColumn];
+
+        if (missingColumn !== 'payload') {
+          body.payload = {
+            ...(body.payload && typeof body.payload === 'object' ? body.payload : {}),
+            [missingColumn]: value
+          };
+        }
+        removed.add(missingColumn);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw createShimError({
+    code: 'supabase/http-400',
+    message: `Falha ao atualizar ${table} após tentativas de compatibilidade de schema.`
+  });
+};
+
 const buildCollectionSnapshot = (records: any[], table: string) => ({
   docs: (records || []).map((record) => ({
     id: String(record.id),
@@ -1098,6 +1139,10 @@ export const updateDoc = async (docRef: DocRef, payload: Record<string, any>) =>
   const params = new URLSearchParams();
   params.set('id', `eq.${docRef.id}`);
   const body = normalizePayloadForTable(docRef.table, payload);
+  if (docRef.table === 'agents') {
+    await patchWithSchemaFallback(docRef.table, params, body);
+    return;
+  }
   await restFetch(docRef.table, { method: 'PATCH', query: params, body });
 };
 
