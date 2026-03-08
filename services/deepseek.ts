@@ -10,7 +10,8 @@ const MAX_TOTAL_CHARS = 24000;
 const MAX_SYSTEM_CHARS = 16000;
 const PRIMARY_MAX_TOKENS = 1800;
 const FALLBACK_MAX_TOKENS = 900;
-const MAX_CONTINUATIONS = 3;
+const MAX_CONTINUATIONS = 12;
+const END_MARKER = '<END_RESPONSE>';
 
 const compactHistory = (messages: DeepSeekMessage[]): DeepSeekMessage[] => {
   const cleaned = (messages || [])
@@ -92,6 +93,7 @@ ${baseInstruction}
 2. Nao reutilize projeto/caso antigo se o usuario mudou o contexto.
 3. Se houver conflito entre historico antigo e pedido atual, siga o pedido atual.
 4. Se faltar dado critico, pergunte antes de concluir.
+5. So considere a resposta concluida quando terminar com o marcador literal ${END_MARKER}
 ${userContext}
 `.trim();
 };
@@ -123,6 +125,9 @@ const isLikelyTruncatedText = (text: string): boolean => {
 };
 
 const shouldRequestContinuation = (response: { text?: string; finishReason?: string | null; completionTokens?: number | null; requestedMaxTokens?: number | null }): boolean => {
+  const text = String(response.text || '');
+  if (text.includes(END_MARKER)) return false;
+
   const finishReason = String(response.finishReason || '').toLowerCase();
   if (finishReason === 'length' || finishReason === 'max_tokens') return true;
 
@@ -130,8 +135,10 @@ const shouldRequestContinuation = (response: { text?: string; finishReason?: str
   const requestedMaxTokens = Number(response.requestedMaxTokens || 0);
   if (requestedMaxTokens > 0 && completionTokens >= Math.floor(requestedMaxTokens * 0.92)) return true;
 
-  return isLikelyTruncatedText(String(response.text || ''));
+  return isLikelyTruncatedText(text);
 };
+
+const stripEndMarker = (text: string): string => text.replaceAll(END_MARKER, '').trim();
 
 export async function* streamDeepSeekResponse(
   messages: DeepSeekMessage[],
@@ -154,7 +161,7 @@ export async function* streamDeepSeekResponse(
         const continuationMessages: DeepSeekMessage[] = [
           ...truncateMessageContent(compactedMessages.slice(-8), 1100),
           { role: 'assistant', content: tailAssistant },
-          { role: 'user', content: 'Continue exatamente do ponto onde parou, sem repetir o que ja foi dito.' }
+          { role: 'user', content: `Continue exatamente do ponto onde parou, sem repetir o que ja foi dito. Finalize com ${END_MARKER}.` }
         ];
         const continuation = await requestDeepSeek(continuationMessages, compactedSystemInstruction, FALLBACK_MAX_TOKENS);
         const extra = String(continuation.text || '').trim();
@@ -167,7 +174,7 @@ export async function* streamDeepSeekResponse(
       }
     }
 
-    yield { text: finalText };
+    yield { text: stripEndMarker(finalText) };
   } catch (error) {
     const firstMessage = String((error as any)?.message || '');
 
