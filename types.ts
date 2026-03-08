@@ -250,7 +250,8 @@ export interface Message {
   isStreaming?: boolean;
   isDecision?: boolean;
   participantName?: string;
-  attachment?: { data: string, mimeType: string, preview: string };
+  attachment?: { data: string, mimeType: string, preview: string, name?: string, sizeBytes?: number };
+  attachments?: { data: string, mimeType: string, preview: string, name?: string, sizeBytes?: number }[];
 }
 
 export interface PersonaConfig {

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Message, Sender, PersonaConfig } from '../types';
-import { CheckIcon, XIcon, PencilIcon } from './Icon';
+import { CheckIcon, XIcon, PencilIcon, FileTextIcon } from './Icon';
 import { Avatar } from './Avatar';
 
 interface ChatMessageProps {
@@ -110,6 +110,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentCont
     };
 
     const messageParts = parseBotParts(message.text);
+    const messageAttachments = (Array.isArray(message.attachments) && message.attachments.length > 0)
+        ? message.attachments
+        : (message.attachment ? [message.attachment] : []);
 
     return (
         <div className={`flex w-full mb-4 animate-msg ${isBot ? 'justify-start' : 'justify-end'}`}>
@@ -193,22 +196,24 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentCont
                                 </div>
                             ) : (
                                 <div className="space-y-3">
-                                    {message.attachment && (
-                                        <div className="mb-2">
-                                            {message.attachment.mimeType.startsWith('image/') ? (
-                                                <img
-                                                    src={message.attachment.preview}
-                                                    alt="Anexo"
-                                                    className="max-w-full max-h-64 rounded-lg border border-white/20 shadow-sm"
-                                                />
-                                            ) : (
-                                                <div className="flex items-center gap-2 p-2 bg-black/5 rounded-lg border border-black/5">
-                                                    <div className="w-8 h-8 rounded bg-white flex items-center justify-center shadow-sm">
-                                                        <CheckIcon className="w-4 h-4 text-gray-400" />
-                                                    </div>
-                                                    <span className="text-[10px] font-bold text-gray-500 truncate max-w-[120px]">Documento</span>
+                                    {messageAttachments.length > 0 && (
+                                        <div className="mb-2 flex flex-wrap gap-2">
+                                            {messageAttachments.map((file, idx) => (
+                                                <div key={`${file.name || 'anexo'}-${idx}`} className="flex items-center gap-2 p-2 bg-black/5 rounded-lg border border-black/5">
+                                                    {file.mimeType.startsWith('image/') ? (
+                                                        <img
+                                                            src={file.preview}
+                                                            alt={file.name || 'Anexo'}
+                                                            className="w-12 h-12 rounded object-cover border border-white/20 shadow-sm"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-8 h-8 rounded bg-white flex items-center justify-center shadow-sm">
+                                                            <FileTextIcon className="w-4 h-4 text-gray-400" />
+                                                        </div>
+                                                    )}
+                                                    <span className="text-[10px] font-bold text-gray-500 truncate max-w-[130px]">{file.name || 'Arquivo'}</span>
                                                 </div>
-                                            )}
+                                            ))}
                                         </div>
                                     )}
                                     {isBot ? <ReactMarkdown>{part.content}</ReactMarkdown> : <span>{part.content}</span>}

@@ -81,7 +81,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // --- CHAT ATTACHMENT & DRAG/DROP STATE ---
-    const [attachment, setAttachment] = useState<{ data: string, mimeType: string, preview: string } | null>(null);
+    const [attachments, setAttachments] = useState<Array<{ data: string, mimeType: string, preview: string, name?: string, sizeBytes?: number }>>([]);
     const [isDragging, setIsDragging] = useState(false);
     const chatAttachmentRef = useRef<HTMLInputElement>(null);
 
@@ -266,7 +266,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             setCurrentSessionId(sessionRef.id);
             setTitleOptions(null);
             setTaskSuggestions(null);
-            setAttachment(null);
+            setAttachments([]);
             setActiveParticipants([]);
 
             const randomGreeting = HUMAN_GREETINGS[Math.floor(Math.random() * HUMAN_GREETINGS.length)];
@@ -303,7 +303,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setCurrentSessionId(sessionId);
         setTitleOptions(null);
         setTaskSuggestions(null);
-        setAttachment(null);
+        setAttachments([]);
         setActiveParticipants([]);
 
         setActiveMessages([]);
@@ -369,7 +369,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setActiveMessages([]);
         setTitleOptions(null);
         setTaskSuggestions(null);
-        setAttachment(null);
+        setAttachments([]);
         setActiveParticipants([]);
     };
 
@@ -464,13 +464,19 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     Sender.Bot;
                 const timestamp = data.createdAt instanceof Date ? data.createdAt : new Date(data.createdAt || Date.now());
                 const payload = (data.payload && typeof data.payload === 'object') ? data.payload : {};
-                const attachment = data.attachment && typeof data.attachment === 'object'
-                    ? {
-                        data: String(data.attachment.data || ''),
-                        mimeType: String(data.attachment.mimeType || 'application/octet-stream'),
-                        preview: String(data.attachment.preview || '')
-                    }
-                    : undefined;
+                const rawAttachment = data.attachment;
+                const attachments = Array.isArray(rawAttachment)
+                    ? rawAttachment
+                    : (rawAttachment && typeof rawAttachment === 'object' ? [rawAttachment] : []);
+                const normalizedAttachments = attachments
+                    .map((item: any) => ({
+                        data: String(item?.data || ''),
+                        mimeType: String(item?.mimeType || 'application/octet-stream'),
+                        preview: String(item?.preview || ''),
+                        name: item?.name ? String(item.name) : undefined,
+                        sizeBytes: item?.sizeBytes ? Number(item.sizeBytes) : undefined
+                    }))
+                    .filter((item: any) => Boolean(item.data));
 
                 return {
                     id: docSnap.id,
@@ -480,7 +486,8 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     buId: String(data.buId || activeBU.id),
                     isStreaming: Boolean(payload.isStreaming),
                     participantName: data.participantName ? String(data.participantName) : undefined,
-                    attachment
+                    attachment: normalizedAttachments[0],
+                    attachments: normalizedAttachments
                 } as Message;
             });
             setActiveMessages(loaded);
@@ -536,7 +543,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     };
 
     // --- CORE: LOGICA DE EDIÇÃO E REGENERAÇÃO ---
-    const handleUpdateAndRegenerate = async (msg: Message, newText: string, newAttachment?: { data: string, mimeType: string, preview: string } | null) => {
+    const handleUpdateAndRegenerate = async (msg: Message, newText: string, newAttachment?: { data: string, mimeType: string, preview: string, name?: string, sizeBytes?: number } | null) => {
         if (!selectedAgent) return;
         const canPersistChat = Boolean(useSupabaseChat && workspaceId && currentSessionId);
 
@@ -551,7 +558,8 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         truncatedMessages[msgIndex] = {
             ...truncatedMessages[msgIndex],
             text: newAttachment ? (newText ? newText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : newText,
-            attachment: newAttachment || undefined
+            attachment: newAttachment || undefined,
+            attachments: newAttachment ? [newAttachment] : []
         };
 
         if (canPersistChat) {
@@ -559,7 +567,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                 await updateDoc(doc(db, "chat_messages", msg.id), {
                     text: truncatedMessages[msgIndex].text,
                     hasAttachment: Boolean(newAttachment),
-                    attachment: newAttachment || null
+                    attachment: newAttachment ? [newAttachment] : null
                 });
                 const toRemove = activeMessages.slice(msgIndex + 1);
                 await Promise.all(
@@ -859,6 +867,13 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     reader.onloadend = async () => {
                         try {
                             const base64String = (reader.result as string).split(',')[1];
+                            setAttachments((prev) => [...prev, {
+                                data: base64String,
+                                mimeType: 'audio/webm',
+                                preview: reader.result as string,
+                                name: `gravacao-${Date.now()}.webm`,
+                                sizeBytes: audioBlob.size
+                            }]);
                             const transcription = await transcribeAudio(base64String, 'audio/webm');
                             if (transcription) {
                                 setInput(prev => prev ? `${prev} ${transcription}` : transcription);
@@ -892,24 +907,45 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         handleChatAttachmentSelect(e);
     };
 
-    const handleChatAttachmentSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+    const readFileAsAttachment = (file: File) => new Promise<{ data: string, mimeType: string, preview: string, name?: string, sizeBytes?: number }>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (ev) => {
-            if (ev.target?.result) {
-                setAttachment({
-                    data: (ev.target.result as string).split(',')[1],
-                    mimeType: file.type,
-                    preview: ev.target.result as string
-                });
+            if (!ev.target?.result) {
+                reject(new Error('Falha ao ler arquivo'));
+                return;
             }
+            const dataUrl = ev.target.result as string;
+            resolve({
+                data: dataUrl.split(',')[1] || '',
+                mimeType: file.type || 'application/octet-stream',
+                preview: dataUrl,
+                name: file.name,
+                sizeBytes: file.size
+            });
         };
+        reader.onerror = () => reject(new Error('Falha ao ler arquivo'));
         reader.readAsDataURL(file);
+    });
+
+    const appendAttachments = async (files: FileList | File[]) => {
+        const fileArray = Array.from(files || []);
+        if (fileArray.length === 0) return;
+        const loaded = await Promise.all(fileArray.map((file) => readFileAsAttachment(file).catch(() => null)));
+        const valid = loaded.filter(Boolean) as Array<{ data: string, mimeType: string, preview: string, name?: string, sizeBytes?: number }>;
+        if (valid.length === 0) return;
+        setAttachments((prev) => [...prev, ...valid]);
+    };
+
+    const handleChatAttachmentSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+        void appendAttachments(files);
         e.target.value = '';
     };
 
-    const handleRemoveAttachment = () => setAttachment(null);
+    const handleRemoveAttachment = (index: number) => {
+        setAttachments((prev) => prev.filter((_, i) => i !== index));
+    };
 
     const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
     const handleDragEnter = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
@@ -918,20 +954,9 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault();
         setIsDragging(false);
-        const file = e.dataTransfer.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                if (ev.target?.result) {
-                    setAttachment({
-                        data: (ev.target.result as string).split(',')[1],
-                        mimeType: file.type,
-                        preview: ev.target.result as string
-                    });
-                }
-            };
-            reader.readAsDataURL(file);
-        }
+        const files = e.dataTransfer.files;
+        if (!files || files.length === 0) return;
+        void appendAttachments(files);
     };
 
     const handleGlobalDragOver = (e: React.DragEvent) => {
@@ -980,11 +1005,12 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     const reader = new FileReader();
                     reader.onload = (ev) => {
                         if (ev.target?.result) {
-                            setAttachment({
+                            setAttachments((prev) => [...prev, {
                                 data: (ev.target.result as string).split(',')[1],
                                 mimeType: blob.type,
-                                preview: ev.target.result as string
-                            });
+                                preview: ev.target.result as string,
+                                name: `clipboard-image-${Date.now()}.png`
+                            }]);
                         }
                     };
                     reader.readAsDataURL(blob);
@@ -995,7 +1021,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
     const handleSendMessage = async (e?: React.FormEvent) => {
         e?.preventDefault();
-        if ((!input.trim() && !attachment) || isLoading || !selectedAgent) return;
+        if ((!input.trim() && attachments.length === 0) || isLoading || !selectedAgent) return;
 
         if (!workspaceId || !currentSessionId) {
             alert("Workspace ou sessão não definidos. Abra uma nova conversa.");
@@ -1003,12 +1029,12 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         }
 
         const userText = input.trim();
-        const currentAttachment = attachment;
+        const currentAttachments = attachments;
         const canPersistChat = Boolean(workspaceId && currentSessionId);
         const now = new Date();
 
         setInput('');
-        setAttachment(null);
+        setAttachments([]);
         setAutoScrollEnabled(true);
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
@@ -1023,14 +1049,10 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     sessionId: currentSessionId,
                     agentId: selectedAgent.id,
                     sender: Sender.User,
-                    text: currentAttachment ? (userText ? userText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : userText,
+                    text: currentAttachments.length > 0 ? (userText ? `${userText} 📎 [${currentAttachments.length} arquivo(s) anexado(s)]` : `📎 [${currentAttachments.length} arquivo(s) enviado(s)]`) : userText,
                     buId: activeBU.id,
-                    hasAttachment: Boolean(currentAttachment),
-                    attachment: currentAttachment ? {
-                        data: currentAttachment.data,
-                        mimeType: currentAttachment.mimeType,
-                        preview: currentAttachment.preview
-                    } : null,
+                    hasAttachment: currentAttachments.length > 0,
+                    attachment: currentAttachments.length > 0 ? currentAttachments : null,
                     createdAt: now
                 });
                 userMsgId = savedUser.id;
@@ -1041,15 +1063,12 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
         const userMsg: Message = {
             id: userMsgId,
-            text: currentAttachment ? (userText ? userText + " 📎 [Arquivo Anexado]" : "📎 [Arquivo Enviado]") : userText,
+            text: currentAttachments.length > 0 ? (userText ? `${userText} 📎 [${currentAttachments.length} arquivo(s) anexado(s)]` : `📎 [${currentAttachments.length} arquivo(s) enviado(s)]`) : userText,
             sender: Sender.User,
             timestamp: now,
             buId: activeBU.id,
-            attachment: currentAttachment ? {
-                data: currentAttachment.data,
-                mimeType: currentAttachment.mimeType,
-                preview: currentAttachment.preview
-            } : undefined
+            attachment: currentAttachments[0],
+            attachments: currentAttachments
         };
 
         setActiveMessages(prev => [...prev, userMsg]);
@@ -1109,7 +1128,10 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                 role: message.sender === Sender.User ? 'user' : 'assistant',
                                 content: message.text
                             })) as DeepSeekMessage[];
-                        const attachmentText = extractTextFromAttachment(currentAttachment);
+                        const attachmentText = currentAttachments
+                            .map((item) => extractTextFromAttachment(item))
+                            .filter(Boolean)
+                            .join('\n\n');
                         if (attachmentText) {
                             deepSeekHistory.push({ role: 'user', content: attachmentText });
                         }
@@ -1162,11 +1184,10 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                         if (participantsLabel) {
                             messagePayload = `${participantsLabel}\n${messagePayload}`;
                         }
-                        if (currentAttachment) {
-                            messagePayload = [
-                                { text: typeof messagePayload === 'string' ? messagePayload : userText },
-                                { inlineData: { mimeType: currentAttachment.mimeType, data: currentAttachment.data } }
-                            ];
+                        if (currentAttachments.length > 0) {
+                            const textPart = { text: typeof messagePayload === 'string' ? messagePayload : userText };
+                            const inlineParts = currentAttachments.map((file) => ({ inlineData: { mimeType: file.mimeType, data: file.data } }));
+                            messagePayload = [textPart, ...inlineParts];
                         }
 
                         const result = await speakerSession.sendMessageStream({ message: messagePayload });
@@ -1274,7 +1295,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             onDrop={handleGlobalDrop}
         >
             <input type="file" ref={fileInputRef} className="hidden" accept=".txt,.md,.json,.csv,.js,.ts,.tsx,.py,.html,.css,.xml,.env,.yml,.yaml" onChange={handleFileSelect} />
-            <input type="file" ref={chatAttachmentRef} className="hidden" accept="image/*,application/pdf,.txt,.md" onChange={handleChatAttachmentSelect} />
+            <input type="file" ref={chatAttachmentRef} className="hidden" multiple accept="image/*,audio/*,application/pdf,.txt,.md,.json,.csv,.xml,.yaml,.yml" onChange={handleChatAttachmentSelect} />
 
             {!forcedAgent && (
                 <div className="px-6 md:px-12 py-6 border-b border-gray-100 flex justify-between items-end shrink-0 bg-white z-10">
@@ -1714,23 +1735,26 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                 </div>
 
                                 <div className="p-4 md:p-8 bg-white border-t border-gray-50">
-                                    {attachment && (
-                                        <div className="max-w-4xl mx-auto mb-3 flex items-start animate-msg">
-                                            <div className="relative group">
-                                                <div className="w-12 h-12 md:w-16 md:h-16 rounded-xl border border-gray-200 overflow-hidden bg-gray-50 shadow-sm flex items-center justify-center">
-                                                    {attachment.mimeType.startsWith('image/') ? (
-                                                        <img src={attachment.preview} alt="Upload Preview" className="w-full h-full object-cover" />
-                                                    ) : (
-                                                        <FileTextIcon className="w-6 h-6 text-gray-400" />
-                                                    )}
+                                    {attachments.length > 0 && (
+                                        <div className="max-w-4xl mx-auto mb-3 flex items-start animate-msg gap-2 flex-wrap">
+                                            {attachments.map((file, idx) => (
+                                                <div key={`${file.name || 'file'}-${idx}`} className="relative group">
+                                                    <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl border border-gray-200 overflow-hidden bg-gray-50 shadow-sm flex items-center justify-center">
+                                                        {file.mimeType.startsWith('image/') ? (
+                                                            <img src={file.preview} alt={file.name || 'Upload Preview'} className="w-full h-full object-cover" />
+                                                        ) : (
+                                                            <FileTextIcon className="w-5 h-5 text-gray-500" />
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        onClick={() => handleRemoveAttachment(idx)}
+                                                        className="absolute -top-1 -right-1 w-4 h-4 bg-gray-700 text-white rounded-full flex items-center justify-center shadow-sm hover:bg-black transition-colors"
+                                                        title="Remover anexo"
+                                                    >
+                                                        <XIcon className="w-2.5 h-2.5" />
+                                                    </button>
                                                 </div>
-                                                <button
-                                                    onClick={handleRemoveAttachment}
-                                                    className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
-                                                >
-                                                    <XIcon className="w-3 h-3" />
-                                                </button>
-                                            </div>
+                                            ))}
                                         </div>
                                     )}
 
@@ -1753,7 +1777,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                             type="button"
                                             onClick={() => chatAttachmentRef.current?.click()}
                                             className="w-10 h-10 rounded-full flex items-center justify-center text-gray-300 hover:text-gray-500 transition-all shrink-0 mb-1"
-                                            title="Anexar arquivo ou imagem"
+                                                title="Anexar arquivos (imagem, texto, áudio, PDF)"
                                         >
                                             <PaperclipIcon className="w-5 h-5" />
                                         </button>
@@ -1806,7 +1830,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                                 type="button"
                                                 onClick={handleSendMessage}
                                                 className="w-10 h-10 flex items-center justify-center transition-all hover:scale-110 disabled:opacity-50 disabled:scale-100 shrink-0 text-emerald-600 mb-1 hover:text-emerald-700"
-                                                disabled={(!input.trim() && !attachment) || isTranscribing}
+                                                disabled={(!input.trim() && attachments.length === 0) || isTranscribing}
                                             >
                                                 <SendIcon className="w-6 h-6" />
                                             </button>
