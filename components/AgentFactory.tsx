@@ -42,6 +42,7 @@ const INITIAL_MOVABLE_COLUMNS = [
     { id: 'salary', label: 'Salário', width: 100, align: 'left' },
     { id: 'actions', label: '', width: 140, align: 'center' }
 ];
+const DEFAULT_WORKSPACE_ID = '00000000-0000-0000-0000-000000000000';
 
 const AgentFactory: React.FC<AgentFactoryProps> = ({
     onNavigateToEcosystem,
@@ -304,13 +305,10 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
         setIsSaving(true); // INICIA BLOQUEIO
 
         const selectedBU = businessUnits.find(b => b.id === newAgent.buId);
-        const workspaceId = activeWorkspaceId || null;
-
-        if (!workspaceId) {
-            alert("Workspace não definido. Atualize seu perfil ou associação.");
-            setIsSaving(false);
-            return;
-        }
+        const workspaceId =
+            (newAgent as any).workspaceId ||
+            activeWorkspaceId ||
+            DEFAULT_WORKSPACE_ID;
 
         // Se tiver editingId, usamos ele. Se não, geramos automático (ca + seq + sigla)
         const tempId = editingId || Date.now().toString();
