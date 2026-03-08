@@ -9,7 +9,7 @@ const MAX_MESSAGES = 24;
 const MAX_TOTAL_CHARS = 24000;
 const MAX_SYSTEM_CHARS = 16000;
 const PRIMARY_MAX_TOKENS = 1800;
-const FALLBACK_MAX_TOKENS = 900;
+const FALLBACK_MAX_TOKENS = 1400;
 const MAX_CONTINUATIONS = 12;
 const END_MARKER = '<END_RESPONSE>';
 
@@ -126,7 +126,7 @@ const isLikelyTruncatedText = (text: string): boolean => {
 
 const shouldRequestContinuation = (response: { text?: string; finishReason?: string | null; completionTokens?: number | null; requestedMaxTokens?: number | null }): boolean => {
   const text = String(response.text || '');
-  if (text.includes(END_MARKER)) return false;
+  if (text.trimEnd().endsWith(END_MARKER)) return false;
 
   const finishReason = String(response.finishReason || '').toLowerCase();
   if (finishReason === 'length' || finishReason === 'max_tokens') return true;
@@ -138,7 +138,7 @@ const shouldRequestContinuation = (response: { text?: string; finishReason?: str
   return isLikelyTruncatedText(text);
 };
 
-const stripEndMarker = (text: string): string => text.replaceAll(END_MARKER, '').trim();
+const stripEndMarker = (text: string): string => text.replace(new RegExp(`${END_MARKER}\\s*$`), '').trim();
 
 export async function* streamDeepSeekResponse(
   messages: DeepSeekMessage[],

@@ -249,6 +249,7 @@ const App: React.FC = () => {
   );
 
   const preferredWorkspaceId = userProfile?.workspaceId || null;
+  const DEFAULT_WORKSPACE_ID = '00000000-0000-0000-0000-000000000000';
   const activeWorkspaceId = useMemo(() => {
     if (isUuid(preferredWorkspaceId)) {
       if (memberWorkspaceIds.length === 0 || memberWorkspaceIds.includes(preferredWorkspaceId)) {
@@ -266,16 +267,18 @@ const App: React.FC = () => {
       activeComplianceRule?.workspaceId,
       activeVaultEntries[0]?.workspaceId,
       visibleKnowledgeNodes[0]?.workspaceId,
-      memberWorkspaceIds[0]
+      memberWorkspaceIds[0],
+      DEFAULT_WORKSPACE_ID
     ];
-    return candidates.find(isUuid) || null;
+    return candidates.find(isUuid) || DEFAULT_WORKSPACE_ID;
   }, [
     activeWorkspaceId,
     latestCultureEntry,
     activeComplianceRule,
     activeVaultEntries,
     visibleKnowledgeNodes,
-    memberWorkspaceIds
+    memberWorkspaceIds,
+    DEFAULT_WORKSPACE_ID
   ]);
 
   const scopeGovernanceRowsByWorkspace = <T extends { workspaceId?: string | null }>(rows: T[]): T[] => {
@@ -847,11 +850,8 @@ if (userId) {
     const workspaceIdForSave =
       (isUuid(activeWorkspaceId) ? activeWorkspaceId : null) ||
       resolveWorkspaceIdForWrites ||
-      (isUuid(updatedAgent.ventureId) ? updatedAgent.ventureId : null);
-
-    if (!workspaceIdForSave) {
-      throw new Error('Workspace não definido. Atualize seu perfil ou associação.');
-    }
+      (isUuid(updatedAgent.ventureId) ? updatedAgent.ventureId : null) ||
+      DEFAULT_WORKSPACE_ID;
 
     const { id, fullPrompt, globalDocuments, docCount } = updatedAgent;
     const currentUserId = userProfile?.uid || user?.id || null;
@@ -925,10 +925,7 @@ if (userId) {
   }
 
   const handleSaveCultureEntry = async ({ contentMd, title, summary }: { contentMd: string; title?: string; summary?: string; }) => {
-    if (!latestCultureEntry && !resolveWorkspaceIdForWrites) {
-      alert('Workspace não definido. Atualize seu perfil ou associação.');
-      return;
-    }
+    const workspaceForWrite = resolveWorkspaceIdForWrites || DEFAULT_WORKSPACE_ID;
     const now = new Date();
     try {
       if (latestCultureEntry) {
@@ -942,7 +939,7 @@ if (userId) {
         });
       } else {
         await addDoc(collection(db, "governance_global_culture"), {
-          workspaceId: resolveWorkspaceIdForWrites,
+          workspaceId: workspaceForWrite,
           title: title || 'Cultura Global',
           summary: summary || '',
           contentMd,
@@ -961,10 +958,7 @@ if (userId) {
   };
 
   const handleSaveComplianceMarkdown = async (markdown: string) => {
-    if (!activeComplianceRule && !resolveWorkspaceIdForWrites) {
-      alert('Workspace não definido. Atualize seu perfil ou associação.');
-      return;
-    }
+    const workspaceForWrite = resolveWorkspaceIdForWrites || DEFAULT_WORKSPACE_ID;
     const now = new Date();
     try {
       if (activeComplianceRule) {
@@ -976,7 +970,7 @@ if (userId) {
         });
       } else {
         await addDoc(collection(db, "governance_compliance_rules"), {
-          workspaceId: resolveWorkspaceIdForWrites,
+          workspaceId: workspaceForWrite,
           code: GLOBAL_COMPLIANCE_CODE,
           title: 'Diretrizes & Compliance',
           description: 'Regras e protocolos globais do ecossistema GrupoB.',
@@ -998,14 +992,11 @@ if (userId) {
   };
 
   const handleCreateVaultRecord = async (item: { name: string; provider: string; env: string; itemType: string; ownerEmail?: string; storagePath?: string; secretRef?: string; rotatePolicy?: string; payload?: Record<string, any>; }) => {
-    if (!resolveWorkspaceIdForWrites) {
-      alert('Workspace não definido. Atualize seu perfil ou associação.');
-      return;
-    }
+    const workspaceForWrite = resolveWorkspaceIdForWrites || DEFAULT_WORKSPACE_ID;
     const now = new Date();
     try {
       await addDoc(collection(db, "vault_items"), {
-        workspaceId: resolveWorkspaceIdForWrites,
+        workspaceId: workspaceForWrite,
         name: item.name,
         provider: item.provider,
         env: item.env,
@@ -1041,16 +1032,13 @@ if (userId) {
   };
 
   const handleCreateKnowledgeNode = async ({ title, nodeType, parentId = null, contentMd = '', linkUrl }: { title: string; nodeType: KnowledgeNode['nodeType']; parentId?: string | null; contentMd?: string; linkUrl?: string; }) => {
-    if (!resolveWorkspaceIdForWrites) {
-      alert('Workspace não definido. Atualize seu perfil ou associação.');
-      return;
-    }
+    const workspaceForWrite = resolveWorkspaceIdForWrites || DEFAULT_WORKSPACE_ID;
     const now = new Date();
     const siblings = visibleKnowledgeNodes.filter(node => (node.parentId ?? null) === (parentId ?? null));
     const nextOrderIndex = siblings.length > 0 ? Math.max(...siblings.map(node => node.orderIndex ?? 0)) + 1 : 1;
     try {
       const docRef = await addDoc(collection(db, "knowledge_nodes"), {
-        workspaceId: resolveWorkspaceIdForWrites,
+        workspaceId: workspaceForWrite,
         parentId: parentId ?? null,
         nodeType,
         title,
