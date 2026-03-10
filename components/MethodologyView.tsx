@@ -59,11 +59,15 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
 
   useEffect(() => {
     setExpandedNodes(prev => {
+      let changed = false;
       const next = new Set(prev);
       nodes.filter(n => n.nodeType === 'folder').forEach(folder => {
-        if (!next.has(folder.id)) next.add(folder.id);
+        if (!next.has(folder.id)) {
+          next.add(folder.id);
+          changed = true;
+        }
       });
-      return next;
+      return changed ? next : prev;
     });
   }, [nodes]);
 
@@ -77,12 +81,13 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
 
   useEffect(() => {
     if (!selectedNode) {
-      setSelectedNodeId(null);
-      setDraftContent('');
+      setSelectedNodeId((prev) => (prev === null ? prev : null));
+      setDraftContent((prev) => (prev === '' ? prev : ''));
       return;
     }
-    setSelectedNodeId(selectedNode.id);
-    setDraftContent(selectedNode.contentMd || '');
+    const nextContent = selectedNode.contentMd || '';
+    setSelectedNodeId((prev) => (prev === selectedNode.id ? prev : selectedNode.id));
+    setDraftContent((prev) => (prev === nextContent ? prev : nextContent));
   }, [selectedNode?.id, selectedNode?.contentMd]);
 
   const handleToggleNode = (nodeId: string) => {
@@ -190,7 +195,7 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
     };
 
     return (
-      <div className="animate-msg">
+      <div>
         <div
           onClick={handleClick}
           className={`
@@ -241,7 +246,7 @@ const MethodologyView: React.FC<MethodologyViewProps> = ({
       : 'Documento';
 
   return (
-    <div className="flex h-full bg-white font-nunito animate-msg overflow-hidden">
+    <div className="flex h-full bg-white font-nunito overflow-hidden">
       <div className="w-72 bg-gray-50 border-r border-gray-100 flex flex-col shrink-0">
         <header className="h-16 flex items-center justify-between px-5 border-b border-gray-100 bg-white/50">
           {onBack && (
