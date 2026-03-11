@@ -8,10 +8,22 @@ export default defineConfig(({ mode }) => {
   // Base padrão para deploy no domínio raiz
   // Se você quiser subpasta, defina VITE_BASE_PATH="/sua-subpasta/"
   const basePath = env.VITE_BASE_PATH && env.VITE_BASE_PATH.trim() ? env.VITE_BASE_PATH : '/'
+  const aiProxyTarget = env.VITE_AI_PROXY_TARGET && env.VITE_AI_PROXY_TARGET.trim()
+    ? env.VITE_AI_PROXY_TARGET
+    : 'https://sagb.piblo.com.br'
 
   return {
     base: basePath,
     plugins: [react()],
+    server: {
+      proxy: {
+        '/api': {
+          target: aiProxyTarget,
+          changeOrigin: true,
+          secure: true
+        }
+      }
+    },
     build: {
       rollupOptions: {
         output: {

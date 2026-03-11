@@ -108,6 +108,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         date: new Date().toISOString().split('T')[0]
     });
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+    const [sessionSearch, setSessionSearch] = useState('');
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
 
     const chatEndRef = useRef<HTMLDivElement>(null);
@@ -223,7 +224,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         const doDrag = (mouseMoveEvent: MouseEvent) => {
             if (isResizing.current) {
                 const newWidth = startWidth + (mouseMoveEvent.clientX - startX);
-                if (newWidth > 200 && newWidth < 600) {
+                if (newWidth > 260 && newWidth < 460) {
                     setSidebarWidth(newWidth);
                 }
             }
@@ -866,27 +867,30 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     reader.readAsDataURL(audioBlob);
                     reader.onloadend = async () => {
                         try {
-                            const base64String = (reader.result as string).split(',')[1];
-                            setAttachments((prev) => [...prev, {
-                                data: base64String,
-                                mimeType: 'audio/webm',
-                                preview: reader.result as string,
-                                name: `gravacao-${Date.now()}.webm`,
-                                sizeBytes: audioBlob.size
-                            }]);
+                            const dataUrl = (reader.result as string) || '';
+                            const base64String = dataUrl.split(',')[1] || '';
                             const transcription = await transcribeAudio(base64String, 'audio/webm');
-                            if (transcription) {
-                                setInput(prev => prev ? `${prev} ${transcription}` : transcription);
+                            const cleaned = String(transcription || '').trim();
+                            if (cleaned) {
+                                setInput(prev => prev ? `${prev} ${cleaned}` : cleaned);
                                 setTimeout(() => {
                                     if (textareaRef.current) {
                                         textareaRef.current.style.height = 'auto';
                                         textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
                                     }
                                 }, 10);
+                            } else {
+                                setInput(prev => {
+                                    const suffix = '(Não foi possível transcrever o áudio. Tente novamente.)';
+                                    return prev ? `${prev} ${suffix}` : suffix;
+                                });
                             }
                         } catch (e) {
                             console.error("Transcription Failed", e);
-                            setInput(prev => `${prev} (Erro na transcrição de áudio)`);
+                            setInput(prev => {
+                                const suffix = '(Erro na transcrição de áudio. Tente novamente.)';
+                                return prev ? `${prev} ${suffix}` : suffix;
+                            });
                         } finally {
                             setIsTranscribing(false);
                             stream.getTracks().forEach(track => track.stop());
@@ -1288,6 +1292,12 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         }))
     ];
 
+    const normalizedSessionSearch = sessionSearch.trim().toLowerCase();
+    const visibleSessions = useMemo(() => {
+        if (!normalizedSessionSearch) return sessions;
+        return sessions.filter((session) => session.title.toLowerCase().includes(normalizedSessionSearch));
+    }, [sessions, normalizedSessionSearch]);
+
     return (
         <div
             className="flex-1 h-full bg-[#FAFAFA] overflow-hidden flex flex-col relative font-nunito"
@@ -1390,32 +1400,26 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             )}
 
             {selectedAgent && (
-                <div className={`
-            fixed inset-0 z-[100] bg-bitrix-nav/60 backdrop-blur-xl flex justify-center overflow-hidden animate-msg
-            ${forcedAgent ? 'p-0 bg-white' : 'p-0 md:p-10'}
-        `}>
-                    <div className={`
-              relative bg-white w-full h-full shadow-2xl overflow-hidden flex
-              ${forcedAgent ? 'rounded-none max-w-full' : 'max-w-6xl rounded-none md:rounded-[3rem]'}
-          `}>
+                <div className="fixed inset-0 z-[100] bg-white overflow-hidden">
+                    <div className="relative bg-white w-full h-full overflow-hidden flex">
 
                         <div
                             ref={sidebarRef}
                             style={{ width: sidebarWidth }}
                             className={`
-                    flex-shrink-0 relative bg-gray-50 border-r border-gray-100 z-20 flex flex-col transition-all duration-75
-                    ${showHistorySidebar ? 'absolute inset-y-0 left-0 shadow-xl' : 'hidden md:flex'}
+                    flex-shrink-0 relative bg-[#F7F8FA] border-r border-gray-200 z-20 flex flex-col transition-all duration-75
+                    ${showHistorySidebar ? 'absolute inset-y-0 left-0 shadow-xl w-[88vw] max-w-[380px]' : 'hidden md:flex'}
                 `}
                         >
                             <div
-                                className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-bitrix-accent/50 z-50 transition-colors"
+                                className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-bitrix-accent/30 z-50 transition-colors hidden md:block"
                                 onMouseDown={startResizing}
                             />
 
-                            <div className="p-4 h-full flex flex-col">
-                                <div className="flex items-center justify-between mb-4">
+                            <div className="p-4 h-full flex flex-col gap-2">
+                                <div className="flex items-center justify-between">
                                     <div className="flex gap-4">
-                                        <span className="text-[9px] font-black uppercase tracking-widest text-bitrix-nav border-b-2 border-bitrix-nav pb-1">
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-bitrix-nav border-b-2 border-bitrix-nav pb-1">
                                             Histórico
                                         </span>
                                     </div>
@@ -1424,19 +1428,29 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                     </button>
                                 </div>
 
-                                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-0 pr-1">
-                                    {sessions.length === 0 && <p className="text-center text-[9px] text-gray-300 mt-10">Nenhum histórico.</p>}
-                                    {sessions.map(session => (
-                                        <div key={session.id} className="relative group/session mb-1">
+                                <div className="relative">
+                                    <input
+                                        value={sessionSearch}
+                                        onChange={(e) => setSessionSearch(e.target.value)}
+                                        placeholder="Buscar conversa..."
+                                        className="w-full h-10 rounded-xl border border-gray-200 bg-white px-3 text-xs font-medium text-gray-600 outline-none focus:border-bitrix-nav/50"
+                                    />
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-0.5 pr-1">
+                                    {sessions.length === 0 && <p className="text-center text-[10px] text-gray-300 mt-10">Nenhum histórico.</p>}
+                                    {sessions.length > 0 && visibleSessions.length === 0 && <p className="text-center text-[10px] text-gray-400 mt-10">Nenhuma conversa encontrada.</p>}
+                                    {visibleSessions.map(session => (
+                                        <div key={session.id} className="relative group/session mb-0.5">
                                             <button
                                                 onClick={() => selectSession(session.id, selectedAgent)}
-                                                className={`w-full text-left py-2.5 pl-3 pr-10 rounded-lg transition-all border ${currentSessionId === session.id
-                                                    ? 'bg-white border-gray-100 shadow-sm'
-                                                    : 'border-transparent hover:bg-white/50 text-gray-500'
+                                                className={`w-full text-left py-2 pl-3 pr-9 rounded-lg transition-all border ${currentSessionId === session.id
+                                                    ? 'bg-white border-gray-200 shadow-sm'
+                                                    : 'border-transparent hover:bg-white text-gray-500'
                                                     }`}
                                             >
                                                 <div className="w-full min-w-0">
-                                                    <h4 className={`text-[11px] font-bold truncate ${currentSessionId === session.id ? 'text-bitrix-nav' : 'text-gray-600'
+                                                    <h4 className={`text-[10px] font-bold truncate ${currentSessionId === session.id ? 'text-bitrix-nav' : 'text-gray-600'
                                                         }`}>
                                                         {session.title}
                                                     </h4>
@@ -1472,39 +1486,39 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                     ))}
                                 </div>
 
-                                <div className="mt-4 pt-4 border-t border-gray-100">
+                                <div className="mt-auto pt-3 border-t border-gray-200/80">
                                     <button
                                         onClick={() => createNewSession(selectedAgent)}
-                                        className="flex items-center justify-center gap-2 w-full p-3 bg-bitrix-nav text-white rounded-xl shadow-lg hover:bg-black transition-all group"
+                                        className="flex items-center justify-center gap-2 w-full h-11 bg-bitrix-nav text-white rounded-xl shadow-lg hover:bg-black transition-all group"
                                     >
                                         <PlusIcon className="w-3.5 h-3.5" />
-                                        <span className="text-[9px] font-black uppercase tracking-widest text-white">Nova Conversa</span>
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-white">Nova Conversa</span>
                                     </button>
                                 </div>
                             </div>
                         </div>
 
                         <div className="flex-1 flex flex-col bg-white h-full relative w-full min-w-0">
-                            <header className={`px-6 md:px-12 py-4 border-b border-gray-50 flex justify-between items-center shrink-0 ${selectedAgent.status === 'STAGING' ? 'bg-yellow-50' : ''}`}>
-                                <div className="flex items-center gap-6">
+                            <header className={`px-4 md:px-8 lg:px-10 py-3 md:py-4 border-b border-gray-100 flex flex-wrap gap-3 md:gap-4 justify-between items-center shrink-0 bg-white/95 backdrop-blur ${selectedAgent.status === 'STAGING' ? 'bg-yellow-50/90' : ''}`}>
+                                <div className="flex items-center gap-3 md:gap-5 min-w-0">
                                     <button onClick={() => setShowHistorySidebar(true)} className="md:hidden p-2 -ml-2 text-gray-400 hover:text-bitrix-nav">
                                         <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h16M4 18h7" /></svg>
                                     </button>
 
-                                    <div className="flex items-center">
+                                    <div className="flex items-center shrink-0">
                                         <div className="relative z-10">
-                                            <Avatar name={selectedAgent.name} url={selectedAgent.avatarUrl} className="w-16 h-16 md:w-20 md:h-20 rounded-2xl shadow-xl border-4 border-white" />
+                                            <Avatar name={selectedAgent.name} url={selectedAgent.avatarUrl} className="w-14 h-14 md:w-16 md:h-16 rounded-2xl shadow-lg border-2 border-white" />
                                         </div>
                                         {activeParticipants.map((p, idx) => (
                                             <div key={p.id} className="relative -ml-6 z-0 hover:z-20 transition-all hover:scale-110">
-                                                <Avatar name={p.name} url={p.avatarUrl} className="w-12 h-12 md:w-14 md:h-14 rounded-2xl shadow-lg border-2 border-white grayscale opacity-90 hover:grayscale-0 hover:opacity-100" />
+                                                <Avatar name={p.name} url={p.avatarUrl} className="w-10 h-10 md:w-12 md:h-12 rounded-2xl shadow-lg border-2 border-white grayscale opacity-90 hover:grayscale-0 hover:opacity-100" />
                                             </div>
                                         ))}
                                     </div>
 
-                                    <div>
-                                        <div className="flex items-center gap-3">
-                                            <h2 className="text-xl md:text-2xl font-black text-bitrix-nav uppercase tracking-tighter leading-none">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+                                            <h2 className="text-lg md:text-2xl font-black text-bitrix-nav uppercase tracking-tighter leading-none truncate">
                                                 {activeParticipants.length > 0 ? 'Mesa de Reunião' : selectedAgent.name}
                                             </h2>
                                             {selectedAgent.modelProvider !== 'deepseek' ? (
@@ -1529,10 +1543,14 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                                     </button>
                                                 </div>
                                             ) : (
-                                                <div className="flex items-center bg-blue-100 rounded-full px-2 py-0.5 ml-2">
-                                                    <span className="text-[8px] font-black text-blue-700 uppercase tracking-widest">🧠 DeepSeek V3 (Reasoning)</span>
+                                                <div className="flex items-center bg-blue-100 rounded-full px-2 py-0.5 ml-2 shrink-0">
+                                                    <span className="text-[8px] font-black text-blue-700 uppercase tracking-widest">🧠 DeepSeek V3</span>
                                                 </div>
                                             )}
+                                            <div className="hidden md:flex items-center gap-1.5 ml-1">
+                                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-gray-100 text-gray-500">OpenAI (em breve)</span>
+                                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-gray-100 text-gray-500">Claude (em breve)</span>
+                                            </div>
                                         </div>
 
                                         <div className="flex gap-2 items-center mt-1">
@@ -1544,31 +1562,31 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-2 md:gap-3">
+                                <div className="flex items-center gap-2 md:gap-3 overflow-x-auto max-w-full pb-1">
                                     <button
                                         onClick={() => setIsInviteModalOpen(true)}
-                                        className="h-10 px-4 rounded-xl bg-gray-100 text-gray-500 hover:bg-bitrix-nav hover:text-white transition-all flex items-center gap-2 shadow-sm border border-gray-200"
+                                        className="h-10 px-3 md:px-4 rounded-xl bg-gray-100 text-gray-500 hover:bg-bitrix-nav hover:text-white transition-all flex items-center gap-2 shadow-sm border border-gray-200 shrink-0"
                                         title="Convocar Agente para a Sala"
                                     >
                                         <PlusIcon className="w-3.5 h-3.5" />
-                                        <span className="text-[9px] font-black uppercase tracking-widest">Participantes</span>
+                                        <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Participantes</span>
                                     </button>
 
                                     <button
                                         onClick={handleManualSuggestTitle}
-                                        className="h-10 px-4 bg-white border border-gray-200 text-gray-600 rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest hover:border-bitrix-nav hover:text-bitrix-nav transition-all shadow-sm flex items-center gap-2"
+                                        className="h-10 px-3 md:px-4 bg-white border border-gray-200 text-gray-600 rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest hover:border-bitrix-nav hover:text-bitrix-nav transition-all shadow-sm flex items-center gap-2 shrink-0"
                                     >
                                         <BotIcon className="w-3.5 h-3.5" />
-                                        <span className="hidden md:inline">Sugerir Título</span>
+                                        <span className="hidden sm:inline">Sugerir Título</span>
                                     </button>
 
                                     {onConvertToTopic && (
                                         <button
                                             onClick={() => openTaskModal()}
-                                            className="h-10 px-4 bg-white border border-gray-200 text-gray-600 rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest hover:border-bitrix-nav hover:text-bitrix-nav transition-all shadow-sm flex items-center gap-2"
+                                            className="h-10 px-3 md:px-4 bg-white border border-gray-200 text-gray-600 rounded-xl text-[8px] md:text-[9px] font-black uppercase tracking-widest hover:border-bitrix-nav hover:text-bitrix-nav transition-all shadow-sm flex items-center gap-2 shrink-0"
                                         >
                                             <BookIcon className="w-3.5 h-3.5" />
-                                            <span className="hidden md:inline">Gerar Pauta</span>
+                                            <span className="hidden sm:inline">Gerar Pauta</span>
                                         </button>
                                     )}
 
@@ -1591,7 +1609,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                 </div>
                             </header>
 
-                            <div className="flex-1 flex flex-col overflow-hidden bg-white relative">
+                            <div className="flex-1 flex flex-col overflow-hidden bg-[#F8FAFC] relative">
                                 {isInviteModalOpen && (
                                     <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex items-center justify-center animate-msg p-10">
                                         <div className="bg-white w-full max-w-2xl h-[500px] shadow-2xl rounded-[2.5rem] border border-gray-100 overflow-hidden flex flex-col">
@@ -1685,58 +1703,60 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                 <div
                                     ref={messagesScrollRef}
                                     onScroll={handleMessagesScroll}
-                                    className="flex-1 overflow-y-auto p-4 md:p-8 space-y-0 custom-scrollbar"
+                                    className="flex-1 overflow-y-auto px-3 md:px-6 lg:px-8 py-4 md:py-6 space-y-0 custom-scrollbar"
                                 >
-                                    {activeMessages.map(msg => (
-                                        <ChatMessage
-                                            key={msg.id}
-                                            message={msg}
-                                            directors={directorsList}
-                                            agentContext={selectedAgent ? { name: selectedAgent.name, avatarUrl: selectedAgent.avatarUrl } : undefined}
-                                            onEdit={handleUpdateAndRegenerate}
-                                        />
-                                    ))}
+                                    <div className="w-full">
+                                        {activeMessages.map(msg => (
+                                            <ChatMessage
+                                                key={msg.id}
+                                                message={msg}
+                                                directors={directorsList}
+                                                agentContext={selectedAgent ? { name: selectedAgent.name, avatarUrl: selectedAgent.avatarUrl } : undefined}
+                                                onEdit={handleUpdateAndRegenerate}
+                                            />
+                                        ))}
 
-                                    {titleOptions && (
-                                        <div className="flex flex-col items-center gap-4 animate-msg pt-6 pb-6 border-t border-dashed border-gray-200 mt-6">
-                                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Rodrigues, qual destas opções define melhor esta pauta?</p>
-                                            <div className="flex flex-wrap justify-center gap-3">
-                                                {titleOptions.map((title, idx) => (
-                                                    <button
-                                                        key={idx}
-                                                        onClick={() => handleApplyTitle(title)}
-                                                        className="px-6 py-3 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:border-bitrix-nav hover:text-bitrix-nav hover:shadow-md transition-all shadow-sm"
-                                                    >
-                                                        {title}
-                                                    </button>
-                                                ))}
+                                        {titleOptions && (
+                                            <div className="flex flex-col items-center gap-4 animate-msg pt-6 pb-6 border-t border-dashed border-gray-200 mt-6">
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Rodrigues, qual destas opções define melhor esta pauta?</p>
+                                                <div className="flex flex-wrap justify-center gap-3">
+                                                    {titleOptions.map((title, idx) => (
+                                                        <button
+                                                            key={idx}
+                                                            onClick={() => handleApplyTitle(title)}
+                                                            className="px-6 py-3 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:border-bitrix-nav hover:text-bitrix-nav hover:shadow-md transition-all shadow-sm"
+                                                        >
+                                                            {title}
+                                                        </button>
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </div>
-                                    )}
-                                    {taskSuggestions && (
-                                        <div className="flex flex-col items-center gap-4 animate-msg pt-4 pb-6 mt-4">
-                                            <p className="text-[10px] font-black text-green-600 uppercase tracking-widest bg-green-50 px-3 py-1 rounded-full border border-green-100">Sugestão de Tarefa</p>
-                                            <div className="flex flex-wrap justify-center gap-3">
-                                                {taskSuggestions.map((title, idx) => (
-                                                    <button
-                                                        key={idx}
-                                                        onClick={() => handleSuggestionClick(title)}
-                                                        className="px-5 py-3 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:border-green-500 hover:text-green-600 hover:shadow-md transition-all shadow-sm flex items-center gap-2"
-                                                    >
-                                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                                                        {title}
-                                                    </button>
-                                                ))}
+                                        )}
+                                        {taskSuggestions && (
+                                            <div className="flex flex-col items-center gap-4 animate-msg pt-4 pb-6 mt-4">
+                                                <p className="text-[10px] font-black text-green-600 uppercase tracking-widest bg-green-50 px-3 py-1 rounded-full border border-green-100">Sugestão de Tarefa</p>
+                                                <div className="flex flex-wrap justify-center gap-3">
+                                                    {taskSuggestions.map((title, idx) => (
+                                                        <button
+                                                            key={idx}
+                                                            onClick={() => handleSuggestionClick(title)}
+                                                            className="px-5 py-3 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:border-green-500 hover:text-green-600 hover:shadow-md transition-all shadow-sm flex items-center gap-2"
+                                                        >
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                                                            {title}
+                                                        </button>
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </div>
-                                    )}
+                                        )}
+                                    </div>
 
                                     <div ref={chatEndRef} />
                                 </div>
 
-                                <div className="p-4 md:p-8 bg-white border-t border-gray-50">
+                                <div className="p-3 md:p-5 lg:p-6 bg-white/95 backdrop-blur border-t border-gray-100">
                                     {attachments.length > 0 && (
-                                        <div className="max-w-4xl mx-auto mb-3 flex items-start animate-msg gap-2 flex-wrap">
+                                        <div className="w-full mb-3 flex items-start animate-msg gap-2 flex-wrap">
                                             {attachments.map((file, idx) => (
                                                 <div key={`${file.name || 'file'}-${idx}`} className="relative group">
                                                     <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl border border-gray-200 overflow-hidden bg-gray-50 shadow-sm flex items-center justify-center">
@@ -1759,7 +1779,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                     )}
 
                                     <div
-                                        className={`max-w-4xl mx-auto flex items-end gap-2 md:gap-4 p-2 rounded-[2rem] relative transition-all duration-300 bg-white ${isDragging ? 'shadow-xl ring-2 ring-blue-100' : ''}`}
+                                        className={`w-full flex items-end gap-2 md:gap-4 p-2 md:p-2.5 rounded-[1.5rem] md:rounded-[2rem] relative transition-all duration-300 bg-white border border-gray-200 ${isDragging ? 'shadow-xl ring-2 ring-blue-100' : ''}`}
                                         style={{ boxShadow: isDragging ? 'none' : '0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.03)' }}
                                         onDragOver={handleDragOver}
                                         onDragEnter={handleDragEnter}

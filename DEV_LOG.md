@@ -48,6 +48,12 @@ As telas abaixo foram aprovadas pelo Chairman e **NÃO DEVEM** ser alteradas em 
 
 ## 4. Histórico de Mudanças (Changelog)
 
+### [v1.6.5] - Whisper Local para Transcrição
+- **Transcrição local habilitada**: fluxo de áudio pode operar sem Gemini API para transcrição.
+- **Servidor local**: criado `tools/local_whisper_server.py` (FastAPI + faster-whisper), endpoint compatível `/v1/audio/transcriptions`.
+- **Script**: `npm run whisper:local` para subir o servidor local.
+- **Documentação**: criado `docs/WHISPER_LOCAL_TRANSCRICAO.md` com setup e troubleshooting.
+
 ### [v1.6.4] - Ergonomia Chat
 - **Resizable Sidebar**: Barra lateral de histórico agora pode ser arrastada para aumentar a largura (ideal para telas 24").
 - **Avatares**: Fotos do Agente (esquerda) e Douglas (direita) restauradas em todas as mensagens do chat individual.

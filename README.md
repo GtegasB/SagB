@@ -49,6 +49,17 @@ O sistema opera sob o conceito de **"Cluster View"**, permitindo visão orbital 
     netlify dev
     ```
 
+### Transcrição de áudio 100% local (Whisper)
+- Documento técnico: `docs/WHISPER_LOCAL_TRANSCRICAO.md`
+- Subir Whisper local:
+  ```bash
+  npm run whisper:local
+  ```
+- Em outro terminal, subir app:
+  ```bash
+  npm run dev
+  ```
+
 ## 🔒 Protocolo de Segurança (Golden Seal)
 
 Certos módulos possuem "Golden Seal" e não devem ter sua lógica alterada sem aprovação do Chairman (Douglas Rodrigues):

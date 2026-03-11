@@ -295,7 +295,82 @@ export const generateTaskSuggestions = async (contextText: string): Promise<stri
   }
 };
 
+const LOCAL_TRANSCRIBE_PROVIDER = String(import.meta.env.VITE_TRANSCRIBE_PROVIDER || '').trim().toLowerCase();
+const RESOLVED_TRANSCRIBE_PROVIDER = LOCAL_TRANSCRIBE_PROVIDER || (import.meta.env.DEV ? 'local_whisper' : 'proxy');
+const LOCAL_WHISPER_URL = String(import.meta.env.VITE_LOCAL_WHISPER_URL || '').trim();
+const LOCAL_WHISPER_MODEL = String(import.meta.env.VITE_LOCAL_WHISPER_MODEL || 'whisper-1').trim();
+const LOCAL_WHISPER_LANGUAGE = String(import.meta.env.VITE_LOCAL_WHISPER_LANGUAGE || 'pt').trim();
+const LOCAL_WHISPER_API_KEY = String(import.meta.env.VITE_LOCAL_WHISPER_API_KEY || '').trim();
+let warnedMissingLocalWhisperUrl = false;
+
+const resolveLocalWhisperEndpoint = (rawUrl: string): string => {
+  const cleaned = rawUrl.replace(/\/+$/, '');
+  if (!cleaned) return '';
+  if (cleaned.endsWith('/v1/audio/transcriptions')) return cleaned;
+  return `${cleaned}/v1/audio/transcriptions`;
+};
+
+const decodeBase64ToBlob = (base64Audio: string, mimeType: string): Blob => {
+  const binary = atob(base64Audio);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: mimeType || 'audio/webm' });
+};
+
+const transcribeAudioViaLocalWhisper = async (base64Audio: string, mimeType: string): Promise<string> => {
+  const endpoint = resolveLocalWhisperEndpoint(LOCAL_WHISPER_URL);
+  if (!endpoint) return '';
+
+  const formData = new FormData();
+  const audioBlob = decodeBase64ToBlob(base64Audio, mimeType);
+  const extension = (mimeType || 'audio/webm').includes('wav') ? 'wav' : 'webm';
+  formData.append('file', audioBlob, `recording.${extension}`);
+  formData.append('model', LOCAL_WHISPER_MODEL || 'whisper-1');
+  if (LOCAL_WHISPER_LANGUAGE) formData.append('language', LOCAL_WHISPER_LANGUAGE);
+
+  const headers: Record<string, string> = {};
+  if (LOCAL_WHISPER_API_KEY) headers.Authorization = `Bearer ${LOCAL_WHISPER_API_KEY}`;
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: formData
+  });
+
+  if (!response.ok) {
+    const rawError = await response.text().catch(() => '');
+    throw new Error(`Local Whisper transcription failed (${response.status}): ${rawError}`);
+  }
+
+  const json = await response.json().catch(() => ({}));
+  const text = String(json?.text || json?.transcript || '').trim();
+  return text;
+};
+
 export const transcribeAudio = async (base64Audio: string, mimeType: string = 'audio/webm'): Promise<string> => {
+  const wantsLocalWhisper = RESOLVED_TRANSCRIBE_PROVIDER === 'local_whisper' || Boolean(LOCAL_WHISPER_URL);
+
+  if (wantsLocalWhisper) {
+    if (!LOCAL_WHISPER_URL) {
+      if (!warnedMissingLocalWhisperUrl) {
+        console.warn('Transcrição local ativa, mas VITE_LOCAL_WHISPER_URL não está configurada.');
+        warnedMissingLocalWhisperUrl = true;
+      }
+      return "";
+    }
+    try {
+      return await transcribeAudioViaLocalWhisper(base64Audio, mimeType);
+    } catch (error) {
+      console.warn("Local Whisper audio transcription failed", error);
+      // Em modo local, evita cascata de erro de API remota quando a intenção é 100% local.
+      if (RESOLVED_TRANSCRIBE_PROVIDER === 'local_whisper') return "";
+    }
+  }
+
+  if (RESOLVED_TRANSCRIBE_PROVIDER !== 'proxy') return "";
+
   try {
     const response = await callAiProxy<{ text: string }>('transcribe_audio', { base64Audio, mimeType });
     return response.text || "";
