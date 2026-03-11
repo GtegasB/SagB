@@ -538,8 +538,12 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                 case 'model':
                     return wrapCell(
                         <select className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none font-bold" value={newAgent.modelProvider || 'gemini'} onChange={e => setNewAgent({ ...newAgent, modelProvider: e.target.value as ModelProvider })}>
-                            <option value="gemini">⚡ Gemini 2.0 (Google)</option>
-                            <option value="deepseek">🧠 DeepSeek V3 (Reasoning)</option>
+                            <option value="llama_local">Llama</option>
+                            <option value="gemini">Gemini</option>
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude</option>
+                            <option value="qwen">Qwen</option>
                         </select>
                     );
                 case 'status':
@@ -598,11 +602,35 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
                 case 'division': return wrapCell(<span className="text-[10px] text-gray-500 font-bold block text-center truncate">{agent.division || agent.sector || '—'}</span>);
                 case 'type': return wrapCell(renderTypeSelect(agent));
                 case 'model':
+                    if (agent.modelProvider === 'llama_local') {
+                        return wrapCell(
+                            <span className="text-[8px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full uppercase border border-emerald-100 flex items-center justify-center gap-1">Llama</span>,
+                            'center'
+                        );
+                    }
+                    if (agent.modelProvider === 'openai') {
+                        return wrapCell(
+                            <span className="text-[8px] font-black text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full uppercase border border-sky-100 flex items-center justify-center gap-1">OpenAI</span>,
+                            'center'
+                        );
+                    }
+                    if (agent.modelProvider === 'claude') {
+                        return wrapCell(
+                            <span className="text-[8px] font-black text-orange-700 bg-orange-50 px-2 py-0.5 rounded-full uppercase border border-orange-100 flex items-center justify-center gap-1">Claude</span>,
+                            'center'
+                        );
+                    }
+                    if (agent.modelProvider === 'qwen') {
+                        return wrapCell(
+                            <span className="text-[8px] font-black text-violet-700 bg-violet-50 px-2 py-0.5 rounded-full uppercase border border-violet-100 flex items-center justify-center gap-1">Qwen</span>,
+                            'center'
+                        );
+                    }
                     return wrapCell(
                         agent.modelProvider === 'deepseek' ? (
-                            <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full uppercase border border-blue-100 flex items-center justify-center gap-1">🧠 DeepSeek</span>
+                            <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full uppercase border border-blue-100 flex items-center justify-center gap-1">DeepSeek</span>
                         ) : (
-                            <span className="text-[8px] font-bold text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full uppercase border border-gray-100 flex items-center justify-center gap-1">⚡ Gemini</span>
+                            <span className="text-[8px] font-bold text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full uppercase border border-gray-100 flex items-center justify-center gap-1">Gemini</span>
                         ), 'center'
                     );
                 case 'status':

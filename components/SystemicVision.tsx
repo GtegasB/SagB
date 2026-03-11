@@ -1,9 +1,11 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Agent, Message, Sender, BusinessUnit, AgentTier, AgentStatus, Topic, PersonaConfig, UserProfile } from '../types';
+import { Agent, Message, Sender, BusinessUnit, AgentTier, AgentStatus, Topic, PersonaConfig, UserProfile, ModelProvider } from '../types';
 import { startAgentSession, generateTitleOptions, transcribeAudio, generateTaskSuggestions, consolidateChatMemory } from '../services/gemini';
 import { streamDeepSeekResponse, DeepSeekMessage } from '../services/deepseek';
+import { streamLlamaLocalResponse, LlamaMessage } from '../services/llamaLocal';
+import { streamProxyProviderResponse, ProxyProviderMessage } from '../services/providerProxy';
 import { retrieveRelevantContext, retrieveLearnedMemory } from '../services/knowledge';
 import { db, collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '../services/supabase';
 import { SendIcon, NewChatIcon, MicIcon, StopCircleIcon, BackIcon, FolderIcon, PlusIcon, FileTextIcon, CloudUploadIcon, PaperclipIcon, XIcon, BookIcon, BotIcon, PencilIcon, CheckIcon, TrashIcon } from './Icon';
@@ -74,7 +76,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     // A lógica de edição agora é controlada diretamente pelo handleUpdateAndRegenerate
 
     // --- MODEL SELECTION STATE ---
-    const [modelMode, setModelMode] = useState<'flash' | 'pro'>('flash');
+    const [selectedModelProvider, setSelectedModelProvider] = useState<ModelProvider>('gemini');
 
     // --- KNOWLEDGE BASE STATE (SIDEBAR REMOVIDA - SÓ HISTÓRICO AGORA) ---
     const [isTraining, setIsTraining] = useState(false);
@@ -92,7 +94,6 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [geminiSession, setGeminiSession] = useState<any>(null);
 
     // --- AUDIO RECORDING STATE ---
     const [isRecording, setIsRecording] = useState(false);
@@ -122,6 +123,25 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const workspaceId = activeWorkspaceId || userProfile?.workspaceId || DEFAULT_WORKSPACE_ID;
     const useSupabaseChat = true;
     const ownerUserId = userProfile?.uid || null;
+
+    const resolveProvider = (provider?: ModelProvider | null) => provider || 'gemini';
+    const isDeepSeekProvider = (provider?: ModelProvider | null) => resolveProvider(provider) === 'deepseek';
+    const isLlamaLocalProvider = (provider?: ModelProvider | null) => resolveProvider(provider) === 'llama_local';
+    const isGeminiProvider = (provider?: ModelProvider | null) => resolveProvider(provider) === 'gemini';
+    const isProxyProvider = (provider?: ModelProvider | null) => ['openai', 'claude', 'qwen'].includes(resolveProvider(provider));
+
+    const MODEL_PROVIDER_OPTIONS: Array<{ value: ModelProvider; label: string }> = [
+        { value: 'llama_local', label: 'Llama' },
+        { value: 'gemini', label: 'Gemini' },
+        { value: 'deepseek', label: 'DeepSeek' },
+        { value: 'openai', label: 'OpenAI' },
+        { value: 'claude', label: 'Claude' },
+        { value: 'qwen', label: 'Qwen' }
+    ];
+    const getProviderLabel = (provider?: ModelProvider | null) => {
+        const normalized = resolveProvider(provider);
+        return MODEL_PROVIDER_OPTIONS.find((item) => item.value === normalized)?.label || 'Gemini';
+    };
 
     // New Agent Modal State
     const [isAdding, setIsAdding] = useState(false);
@@ -180,17 +200,19 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
     // --- RE-INIT SESSION ON MODEL CHANGE ---
     useEffect(() => {
-        if (selectedAgent && selectedAgent.modelProvider !== 'deepseek') {
+        if (selectedAgent && isGeminiProvider(selectedModelProvider)) {
             initializeSession(selectedAgent);
         }
-    }, [modelMode]);
+    }, [selectedModelProvider, selectedAgent?.id]);
 
     useEffect(() => {
         setAutoScrollEnabled(true);
     }, [selectedAgent?.id, currentSessionId]);
 
-    const initializeSession = (agent: Agent, history: any[] = []) => {
-        const modelId = modelMode === 'flash' ? 'gemini-2.5-flash' : 'gemini-1.5-pro';
+    const initializeSession = (agent: Agent, history: any[] = [], forcedProvider?: ModelProvider) => {
+        const modelId = resolveProvider(forcedProvider || selectedModelProvider) === 'gemini'
+            ? 'gemini-2.5-flash'
+            : 'gemini-2.5-flash';
         // Busca memória de longo prazo
         const longTerm = retrieveLearnedMemory(agent);
 
@@ -210,7 +232,6 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             longTerm, // Memória consolidada
             docsInventory // Inventário para o prompt do sistema
         );
-        setGeminiSession(gs);
         return gs;
     };
 
@@ -283,10 +304,8 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                 createdAt: now
             });
 
-            if (agent.modelProvider !== 'deepseek') {
+            if (isGeminiProvider(selectedModelProvider)) {
                 initializeSession(agent);
-            } else {
-                setGeminiSession(null);
             }
             setShowHistorySidebar(false);
         } catch (error) {
@@ -365,6 +384,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const handleOpenAgent = (agent: Agent) => {
         if (agent.status === 'PLANNED') return;
 
+        setSelectedModelProvider((agent.modelProvider || 'gemini') as ModelProvider);
         setSelectedAgent(agent);
         setCurrentSessionId(null);
         setActiveMessages([]);
@@ -619,8 +639,9 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             // --- LOGICA DE GERAÇÃO (Cópia da handleSendMessage adaptada) ---
             const ragContext = retrieveRelevantContext(selectedAgent, newText);
             let finalBotText = '';
+            const providerForMessage = resolveProvider(selectedModelProvider);
 
-            if (selectedAgent.modelProvider === 'deepseek') {
+            if (isDeepSeekProvider(providerForMessage)) {
                 const deepSeekHistory = truncatedMessages.map(m => ({
                     role: m.sender === Sender.User ? 'user' : 'assistant',
                     content: m.text
@@ -644,6 +665,52 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                 setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
                 finalBotText = fullText;
 
+            } else if (isLlamaLocalProvider(providerForMessage)) {
+                const llamaHistory = truncatedMessages.map(m => ({
+                    role: m.sender === Sender.User ? 'user' : 'assistant',
+                    content: m.text
+                })) as LlamaMessage[];
+                const editedAttachmentText = extractTextFromAttachment(newAttachment);
+                if (editedAttachmentText) {
+                    llamaHistory.push({ role: 'user', content: editedAttachmentText });
+                }
+                if (ragContext) {
+                    llamaHistory.push({ role: 'system', content: ragContext });
+                }
+
+                const stream = streamLlamaLocalResponse(llamaHistory, selectedAgent.fullPrompt || '');
+                let fullText = "";
+
+                for await (const chunk of stream) {
+                    fullText += chunk.text;
+                    setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
+                }
+                setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
+                finalBotText = fullText;
+
+            } else if (isProxyProvider(providerForMessage)) {
+                const proxyHistory = truncatedMessages.map(m => ({
+                    role: m.sender === Sender.User ? 'user' : 'assistant',
+                    content: m.text
+                })) as ProxyProviderMessage[];
+                const editedAttachmentText = extractTextFromAttachment(newAttachment);
+                if (editedAttachmentText) {
+                    proxyHistory.push({ role: 'user', content: editedAttachmentText });
+                }
+                if (ragContext) {
+                    proxyHistory.push({ role: 'system', content: ragContext });
+                }
+
+                const stream = streamProxyProviderResponse(providerForMessage, proxyHistory, selectedAgent.fullPrompt || '');
+                let fullText = '';
+
+                for await (const chunk of stream) {
+                    fullText += chunk.text;
+                    setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
+                }
+                setActiveMessages(prev => prev.map(m => m.id === botMsgId ? { ...m, isStreaming: false } : m));
+                finalBotText = fullText;
+
             } else {
                 // GEMINI: Precisamos reiniciar a sessão com o histórico cortado para garantir consistência
                 // Convertendo histórico para formato Gemini
@@ -653,8 +720,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                 }));
 
                 // Reinicializa sessão com histórico limpo
-                initializeSession(selectedAgent, geminiHistory);
-                await new Promise(r => setTimeout(r, 500)); // Breve delay para garantir init
+                const session = initializeSession(selectedAgent, geminiHistory, 'gemini');
 
                 let messagePayload: any = newText;
                 if (ragContext) {
@@ -664,7 +730,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     messagePayload = `[MESA: ${activeParticipants.map(p => p.name).join(', ')}]\n${messagePayload}`;
                 }
 
-                const result = await geminiSession?.sendMessageStream({ message: messagePayload });
+                const result = await session?.sendMessageStream({ message: messagePayload });
                 let fullText = '';
 
                 for await (const chunk of result) {
@@ -1082,6 +1148,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             const participantsLabel = activeParticipants.length > 0
                 ? `[MESA: ${activeParticipants.map((participant) => participant.name).join(', ')}]`
                 : '';
+            const providerForMessage = resolveProvider(selectedModelProvider);
             const speakerQueue = [selectedAgent, ...activeParticipants];
             const generatedReplies: Message[] = [];
 
@@ -1124,7 +1191,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     const ragContext = retrieveRelevantContext(speaker, userText);
                     let finalBotText = '';
 
-                    if (speaker.modelProvider === 'deepseek') {
+                    if (isDeepSeekProvider(providerForMessage)) {
                         const deepSeekHistory = activeMessages
                             .concat(userMsg)
                             .concat(generatedReplies)
@@ -1154,8 +1221,68 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                 message.id === botMsgId ? { ...message, text: finalBotText } : message
                             )));
                         }
+                    } else if (isLlamaLocalProvider(providerForMessage)) {
+                        const llamaHistory = activeMessages
+                            .concat(userMsg)
+                            .concat(generatedReplies)
+                            .map((message) => ({
+                                role: message.sender === Sender.User ? 'user' : 'assistant',
+                                content: message.text
+                            })) as LlamaMessage[];
+
+                        const attachmentText = currentAttachments
+                            .map((item) => extractTextFromAttachment(item))
+                            .filter(Boolean)
+                            .join('\n\n');
+                        if (attachmentText) {
+                            llamaHistory.push({ role: 'user', content: attachmentText });
+                        }
+                        if (ragContext) {
+                            llamaHistory.push({ role: 'system', content: ragContext });
+                        }
+                        if (participantsLabel) {
+                            llamaHistory.push({ role: 'system', content: participantsLabel });
+                        }
+
+                        const stream = streamLlamaLocalResponse(llamaHistory, speaker.fullPrompt || '');
+                        for await (const chunk of stream) {
+                            finalBotText += chunk.text;
+                            setActiveMessages((prev) => prev.map((message) => (
+                                message.id === botMsgId ? { ...message, text: finalBotText } : message
+                            )));
+                        }
+                    } else if (isProxyProvider(providerForMessage)) {
+                        const proxyHistory = activeMessages
+                            .concat(userMsg)
+                            .concat(generatedReplies)
+                            .map((message) => ({
+                                role: message.sender === Sender.User ? 'user' : 'assistant',
+                                content: message.text
+                            })) as ProxyProviderMessage[];
+
+                        const attachmentText = currentAttachments
+                            .map((item) => extractTextFromAttachment(item))
+                            .filter(Boolean)
+                            .join('\n\n');
+                        if (attachmentText) {
+                            proxyHistory.push({ role: 'user', content: attachmentText });
+                        }
+                        if (ragContext) {
+                            proxyHistory.push({ role: 'system', content: ragContext });
+                        }
+                        if (participantsLabel) {
+                            proxyHistory.push({ role: 'system', content: participantsLabel });
+                        }
+
+                        const stream = streamProxyProviderResponse(providerForMessage, proxyHistory, speaker.fullPrompt || '');
+                        for await (const chunk of stream) {
+                            finalBotText += chunk.text;
+                            setActiveMessages((prev) => prev.map((message) => (
+                                message.id === botMsgId ? { ...message, text: finalBotText } : message
+                            )));
+                        }
                     } else {
-                        const modelId = modelMode === 'flash' ? 'gemini-2.5-flash' : 'gemini-1.5-pro';
+                        const modelId = 'gemini-2.5-flash';
                         const historyForSpeaker = activeMessages
                             .concat(userMsg)
                             .concat(generatedReplies)
@@ -1367,7 +1494,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                             {sortedAgents.map(agent => {
                                                 const isPlanned = agent.status === 'PLANNED';
                                                 const isStaging = agent.status === 'STAGING';
-                                                const isDeepSeek = agent.modelProvider === 'deepseek';
+                                                const providerLabel = getProviderLabel(agent.modelProvider);
 
                                                 return (
                                                     <button
@@ -1384,7 +1511,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                                             <div className="flex items-center gap-1.5">
                                                                 <p className="text-[9px] font-medium text-gray-400 uppercase tracking-wider truncate">{agent.officialRole}</p>
                                                                 {isStaging && <span className="text-[7px] font-bold text-yellow-600 bg-yellow-50 px-1 rounded uppercase">Beta</span>}
-                                                                {isDeepSeek && <span className="text-[6px] font-black text-white bg-blue-600 px-1 rounded uppercase ml-auto">DeepSeek</span>}
+                                                                <span className="text-[6px] font-black text-gray-700 bg-gray-100 px-1 rounded uppercase ml-auto">{providerLabel}</span>
                                                             </div>
                                                         </div>
                                                     </button>
@@ -1521,35 +1648,19 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                             <h2 className="text-lg md:text-2xl font-black text-bitrix-nav uppercase tracking-tighter leading-none truncate">
                                                 {activeParticipants.length > 0 ? 'Mesa de Reunião' : selectedAgent.name}
                                             </h2>
-                                            {selectedAgent.modelProvider !== 'deepseek' ? (
-                                                <div className="flex items-center bg-gray-100 rounded-full p-0.5 ml-2">
-                                                    <button
-                                                        onClick={() => setModelMode('flash')}
-                                                        className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest flex items-center gap-1 transition-all ${modelMode === 'flash'
-                                                            ? 'bg-white text-gray-800 shadow-sm'
-                                                            : 'text-gray-400 hover:text-gray-600'
-                                                            }`}
-                                                    >
-                                                        <span>⚡</span> Flash
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setModelMode('pro')}
-                                                        className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest flex items-center gap-1 transition-all ${modelMode === 'pro'
-                                                            ? 'bg-bitrix-accent text-white shadow-sm'
-                                                            : 'text-gray-400 hover:text-gray-600'
-                                                            }`}
-                                                    >
-                                                        <span>🧠</span> Pro
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <div className="flex items-center bg-blue-100 rounded-full px-2 py-0.5 ml-2 shrink-0">
-                                                    <span className="text-[8px] font-black text-blue-700 uppercase tracking-widest">🧠 DeepSeek V3</span>
-                                                </div>
-                                            )}
-                                            <div className="hidden md:flex items-center gap-1.5 ml-1">
-                                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-gray-100 text-gray-500">OpenAI (em breve)</span>
-                                                <span className="px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest bg-gray-100 text-gray-500">Claude (em breve)</span>
+                                            <div className="flex items-center gap-2 ml-2">
+                                                <span className="text-[8px] font-black uppercase tracking-widest text-gray-400">Modelo</span>
+                                                <select
+                                                    value={selectedModelProvider}
+                                                    onChange={(e) => setSelectedModelProvider(e.target.value as ModelProvider)}
+                                                    className="h-7 min-w-[130px] rounded-full border border-gray-200 bg-gray-50 px-3 text-[10px] font-black uppercase tracking-widest text-gray-700 outline-none focus:border-gray-400"
+                                                >
+                                                    {MODEL_PROVIDER_OPTIONS.map((option) => (
+                                                        <option key={option.value} value={option.value}>
+                                                            {option.label}
+                                                        </option>
+                                                    ))}
+                                                </select>
                                             </div>
                                         </div>
 

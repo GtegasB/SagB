@@ -17,6 +17,48 @@ const pickDeepSeekKey = () => {
   return (process.env.DEEPSEEK_API_KEY || process.env.VITE_DEEPSEEK_API_KEY || '').trim();
 };
 
+const pickOpenAIKey = () => {
+  return (process.env.OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY || '').trim();
+};
+
+const pickAnthropicKey = () => {
+  return (process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY || '').trim();
+};
+
+const pickQwenKey = () => {
+  return (process.env.QWEN_API_KEY || process.env.VITE_QWEN_API_KEY || '').trim();
+};
+
+const pickOpenAIBaseUrl = () => {
+  return (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1/chat/completions').trim();
+};
+
+const pickQwenBaseUrl = () => {
+  return (process.env.QWEN_BASE_URL || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions').trim();
+};
+
+const pickLlamaLocalUrl = () => {
+  return (
+    process.env.LLAMA_LOCAL_URL ||
+    process.env.OLLAMA_URL ||
+    process.env.LLAMA_API_URL ||
+    process.env.VITE_LOCAL_LLAMA_URL ||
+    ''
+  ).trim();
+};
+
+const pickLlamaLocalModel = () => {
+  return (
+    process.env.LLAMA_LOCAL_MODEL ||
+    process.env.VITE_LOCAL_LLAMA_MODEL ||
+    'llama3.1:8b'
+  ).trim();
+};
+
+const pickLlamaLocalApiKey = () => {
+  return (process.env.LLAMA_LOCAL_API_KEY || process.env.VITE_LOCAL_LLAMA_API_KEY || '').trim();
+};
+
 const hasGeminiKey = () => Boolean(pickGeminiKey());
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -103,6 +145,204 @@ const requestDeepSeekCompletion = async (payload) => {
   }
 
   throw lastError || createHttpError(500, 'DeepSeek request failed unexpectedly.');
+};
+
+const normalizeTextMessages = (payload) => {
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  const cleaned = messages
+    .filter((message) => message && typeof message.content === 'string')
+    .map((message) => ({
+      role: message.role === 'system' ? 'system' : message.role === 'assistant' ? 'assistant' : 'user',
+      content: String(message.content || '').trim()
+    }))
+    .filter((message) => message.content.length > 0);
+
+  if (payload?.systemInstruction && typeof payload.systemInstruction === 'string' && payload.systemInstruction.trim()) {
+    return [{ role: 'system', content: payload.systemInstruction.trim() }, ...cleaned];
+  }
+  return cleaned;
+};
+
+const requestOpenAICompletion = async (payload) => {
+  const apiKey = pickOpenAIKey();
+  if (!apiKey) {
+    throw createHttpError(500, 'Missing OpenAI API key in function environment.');
+  }
+
+  const response = await fetch(pickOpenAIBaseUrl(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: payload.model || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      messages: normalizeTextMessages(payload),
+      temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.4,
+      max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 1800,
+      stream: false
+    })
+  });
+
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    throw createHttpError(response.status, `OpenAI request failed (${response.status}): ${raw}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  const text = String(data?.choices?.[0]?.message?.content || '').trim();
+  return { text };
+};
+
+const requestClaudeCompletion = async (payload) => {
+  const apiKey = pickAnthropicKey();
+  if (!apiKey) {
+    throw createHttpError(500, 'Missing Anthropic API key in function environment.');
+  }
+
+  const allMessages = normalizeTextMessages(payload);
+  const systemMessages = allMessages.filter((message) => message.role === 'system').map((message) => message.content);
+  const messages = allMessages
+    .filter((message) => message.role !== 'system')
+    .map((message) => ({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: message.content
+    }));
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: payload.model || process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest',
+      system: systemMessages.join('\n\n'),
+      messages,
+      temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.4,
+      max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 1800
+    })
+  });
+
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    throw createHttpError(response.status, `Claude request failed (${response.status}): ${raw}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  const text = Array.isArray(data?.content)
+    ? data.content
+      .filter((item) => item?.type === 'text' && typeof item?.text === 'string')
+      .map((item) => item.text)
+      .join('\n')
+      .trim()
+    : '';
+  return { text };
+};
+
+const requestQwenCompletion = async (payload) => {
+  const apiKey = pickQwenKey();
+  if (!apiKey) {
+    throw createHttpError(500, 'Missing Qwen API key in function environment.');
+  }
+
+  const response = await fetch(pickQwenBaseUrl(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: payload.model || process.env.QWEN_MODEL || 'qwen-plus',
+      messages: normalizeTextMessages(payload),
+      temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.4,
+      max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 1800,
+      stream: false
+    })
+  });
+
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    throw createHttpError(response.status, `Qwen request failed (${response.status}): ${raw}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  const text = String(data?.choices?.[0]?.message?.content || '').trim();
+  return { text };
+};
+
+const resolveLlamaEndpoint = (rawUrl) => {
+  const cleaned = String(rawUrl || '').replace(/\/+$/, '');
+  if (!cleaned) return '';
+  if (cleaned.endsWith('/api/chat') || cleaned.endsWith('/v1/chat/completions')) return cleaned;
+  return `${cleaned}/api/chat`;
+};
+
+const normalizeLlamaMessages = (payload) => {
+  const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+  const normalized = messages
+    .filter((message) => message && typeof message.content === 'string')
+    .map((message) => ({
+      role: message.role === 'system' ? 'system' : message.role === 'assistant' ? 'assistant' : 'user',
+      content: message.content.trim()
+    }))
+    .filter((message) => message.content.length > 0);
+
+  if (payload?.systemInstruction && typeof payload.systemInstruction === 'string' && payload.systemInstruction.trim()) {
+    return [{ role: 'system', content: payload.systemInstruction.trim() }, ...normalized];
+  }
+  return normalized;
+};
+
+const requestLlamaLocalCompletion = async (payload) => {
+  const endpoint = resolveLlamaEndpoint(pickLlamaLocalUrl());
+  if (!endpoint) {
+    throw createHttpError(500, 'Missing LLAMA_LOCAL_URL/OLLAMA_URL in function environment.');
+  }
+
+  const model = payload.model || pickLlamaLocalModel() || 'llama3.1:8b';
+  const apiKey = pickLlamaLocalApiKey();
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const messages = normalizeLlamaMessages(payload);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: endpoint.endsWith('/v1/chat/completions')
+      ? JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.4,
+        max_tokens: typeof payload.maxTokens === 'number' ? payload.maxTokens : 1800
+      })
+      : JSON.stringify({
+        model,
+        messages,
+        stream: false,
+        options: {
+          temperature: typeof payload.temperature === 'number' ? payload.temperature : 0.4,
+          num_predict: typeof payload.maxTokens === 'number' ? payload.maxTokens : 1800
+        }
+      })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw createHttpError(response.status, `Llama local request failed (${response.status}): ${errText}`);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  const text = String(
+    data?.message?.content ||
+    data?.response ||
+    data?.choices?.[0]?.message?.content ||
+    ''
+  );
+
+  return { text };
 };
 
 const normalizeMessageParts = (message) => {
@@ -211,6 +451,22 @@ const handleGeminiChat = async (payload) => {
 
 const handleDeepSeekChat = async (payload) => {
   return requestDeepSeekCompletion(payload);
+};
+
+const handleLlamaLocalChat = async (payload) => {
+  return requestLlamaLocalCompletion(payload);
+};
+
+const handleOpenAIChat = async (payload) => {
+  return requestOpenAICompletion(payload);
+};
+
+const handleClaudeChat = async (payload) => {
+  return requestClaudeCompletion(payload);
+};
+
+const handleQwenChat = async (payload) => {
+  return requestQwenCompletion(payload);
 };
 
 const handleTranscribeAudio = async (payload) => {
@@ -381,6 +637,10 @@ const handleCreateAgentFromScratch = async (payload) => {
 const actionHandlers = {
   gemini_chat: handleGeminiChat,
   deepseek_chat: handleDeepSeekChat,
+  llama_local_chat: handleLlamaLocalChat,
+  openai_chat: handleOpenAIChat,
+  claude_chat: handleClaudeChat,
+  qwen_chat: handleQwenChat,
   transcribe_audio: handleTranscribeAudio,
   consolidate_chat_memory: handleConsolidateChatMemory,
   generate_title_options: handleGenerateTitleOptions,

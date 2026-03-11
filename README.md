@@ -15,7 +15,7 @@ O sistema opera sob o conceito de **"Cluster View"**, permitindo visão orbital 
 
 ### Módulos Principais
 *   **HubView:** Visão sistêmica das 19 unidades de negócio.
-*   **SystemicVision:** Interface de chat e gestão de agentes (DeepSeek + Gemini).
+*   **SystemicVision:** Interface de chat e gestão de agentes (DeepSeek + Gemini + Llama Local).
 *   **AgentFactory:** Módulo de RH para criação e "contratação" de novos agentes (Prompt Engineering automatizado).
 *   **GovernanceView:** Painel de controle da Constituição Global e regras do sistema.
 *   **ManagementView:** Gestão de tarefas híbrida (Chat + Lista Rápida).
@@ -42,6 +42,8 @@ O sistema opera sob o conceito de **"Cluster View"**, permitindo visão orbital 
     VITE_SUPABASE_ANON_KEY=sua_chave_anon_aqui
     GEMINI_API_KEY=sua_chave_gemini_aqui
     DEEPSEEK_API_KEY=sua_chave_deepseek_aqui
+    VITE_LOCAL_LLAMA_URL=http://127.0.0.1:11434
+    VITE_LOCAL_LLAMA_MODEL=llama3.1:8b
     ```
 
 4.  **Rode o projeto**
@@ -69,7 +71,7 @@ Certos módulos possuem "Golden Seal" e não devem ter sua lógica alterada sem 
 ## 🛠 Stack Tecnológica
 
 *   **Frontend:** React 18+, TypeScript, TailwindCSS.
-*   **AI Core:** Google GenAI SDK (Gemini 2.0 Flash Exp) & DeepSeek API (V3).
+*   **AI Core:** Gemini, DeepSeek, Llama local, OpenAI, Claude e Qwen (via Netlify Function + variáveis de ambiente).
 *   **Build:** Vite.
 *   **Deploy:** Netlify (integração nativa recomendada) + GitHub Actions (backup opcional).
 

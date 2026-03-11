@@ -9,7 +9,7 @@ export type AgentTier = 'ESTRATÉGICO' | 'TÁTICO' | 'OPERACIONAL' | 'CONTROLE';
 
 export type AgentStatus = 'PLANNED' | 'STAGING' | 'ACTIVE' | 'MAINTENANCE' | 'BLOCKED';
 
-export type ModelProvider = 'gemini' | 'deepseek'; // NOVO: Opções de Cérebro
+export type ModelProvider = 'gemini' | 'deepseek' | 'llama_local' | 'openai' | 'claude' | 'qwen'; // Opções de Cérebro
 
 // V4.2 - Adicionado 'home' como Dashboard Inicial
 export type TabId = 'home' | 'ecosystem' | 'team' | 'conversations' | 'management' | 'redir' | 'vault' | 'fabrica-ca' | 'governance' | 'methodology' | 'hub' | 'alignment' | 'market' | 'sales' | 'expansion' | '3forb-home' | 'audacus-home' | 'startyb-home' | 'requests' | 'unit-room' | 'chat-room' | 'ventures';
@@ -238,7 +238,7 @@ export interface Agent {
   ambientPhotoUrl?: string; // Base64 Image Data (Ambiente)
 
   // V2.1 - MULTI-MODELO (CÉREBRO)
-  modelProvider?: ModelProvider; // 'gemini' | 'deepseek'
+  modelProvider?: ModelProvider; // 'gemini' | 'deepseek' | 'llama_local' | 'openai' | 'claude' | 'qwen'
 }
 
 export interface Message {
