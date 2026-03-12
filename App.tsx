@@ -16,6 +16,7 @@ import ManagementView from './components/ManagementView';
 import GovernanceView from './components/GovernanceView';
 import QualitySensorView from './components/QualitySensorView';
 import IntelligenceFlowView from './components/IntelligenceFlowView';
+import CIDView from './components/CIDView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView';
 import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
@@ -1474,6 +1475,16 @@ if (userId) {
         return (
           <IntelligenceFlowView
             workspaceId={activeWorkspaceId}
+            onBack={() => setActiveTab('ecosystem')}
+          />
+        );
+      case 'cid':
+        return (
+          <CIDView
+            workspaceId={activeWorkspaceId}
+            ownerUserId={ownerUserId}
+            userProfile={userProfile}
+            ventures={ventures}
             onBack={() => setActiveTab('ecosystem')}
           />
         );

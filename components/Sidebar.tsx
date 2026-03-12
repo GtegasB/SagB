@@ -78,6 +78,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       icon: 'M4 7h6m4 0h6M4 12h4m6 0h6M4 17h8m2 0h6'
     },
     {
+      id: 'cid',
+      label: 'CID',
+      icon: 'M4 7a2 2 0 012-2h6l2 2h4a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V7zm8 2v8m0 0l-3-3m3 3l3-3'
+    },
+    {
       id: 'quality',
       label: 'Sensor de Qualidade',
       icon: 'M3 3v18h18M7 14l3-3 3 2 4-5'
