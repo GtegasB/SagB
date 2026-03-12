@@ -1,9 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Agent, BusinessUnit, AgentStatus, AgentTier, ModelProvider, Venture } from '../types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Agent, AgentStatus, AgentTier, BusinessUnit, ModelProvider, Venture } from '../types';
 import { Avatar } from './Avatar';
-import { PaperclipIcon, PlusIcon, SearchIcon, ChevronDownIcon, XIcon, TrashIcon, PencilIcon, CloudUploadIcon, BotIcon, BackIcon } from './Icon';
-import { db, auth } from '../services/supabase';
-import { collection, addDoc, updateDoc, doc, setDoc, Timestamp } from '../services/supabase';
+import { BackIcon, BotIcon, CloudUploadIcon, PencilIcon, PlusIcon, SearchIcon, TrashIcon, XIcon } from './Icon';
+import { auth, db } from '../services/supabase';
+import { addDoc, collection, deleteDoc, doc, Timestamp, updateDoc } from '../services/supabase';
 
 interface AgentFactoryProps {
     onNavigateToEcosystem: () => void;
@@ -12,37 +12,293 @@ interface AgentFactoryProps {
     activeBU: BusinessUnit;
     activeWorkspaceId?: string | null;
     businessUnits: BusinessUnit[];
-    ventures: Venture[]; // NOVO v1.5.0
+    ventures: Venture[];
     agents: Agent[];
     initialAgent?: Agent | null;
     onManageIntelligence?: (agent: Agent) => void;
 }
 
-interface DynamicOption {
-    id: string;
-    label: string;
-    colorClass: string;
-    isSystem?: boolean;
+type EntityType = 'HUMANO' | 'AGENTE' | 'HIBRIDO';
+type RoleType = 'LIDERANCA' | 'CONSULTORIA' | 'AUDITORIA' | 'EXECUCAO' | 'MENTORIA' | 'APOIO';
+type StructuralStatus = 'ESTRUTURAL' | 'EM_CONFIGURACAO' | 'HOMOLOGACAO' | 'ATIVO' | 'ARQUIVADO';
+type OperationalActivation = 'ATIVO_NASCIMENTO' | 'PREVISTO_GATILHO' | 'RESERVADO_FUTURO' | 'COMPARTILHADO';
+type DnaStatus = 'SEM_DNA' | 'DNA_BASE' | 'DNA_PARCIAL' | 'DNA_COMPLETO' | 'REVISAR';
+type OperationalClass = 'ECONOMICA' | 'BALANCEADA' | 'PREMIUM' | 'CRITICA';
+
+interface FormCustomField {
+    key: string;
+    value: string;
 }
 
-// Definição das colunas móveis
-const INITIAL_MOVABLE_COLUMNS = [
-    { id: 'photo', label: 'Rosto', width: 60, align: 'center' },
-    { id: 'ambient', label: 'Ambiente', width: 60, align: 'center' },
-    { id: 'role', label: 'Cargo Principal', width: 220, align: 'left' },
-    { id: 'docs', label: 'Doc. Vinculados', width: 100, align: 'left' },
-    { id: 'company', label: 'Marca / Venture', width: 180, align: 'left' },
-    { id: 'division', label: 'Divisão', width: 100, align: 'left' },
-    { id: 'type', label: 'Tipo', width: 130, align: 'left' },
-    { id: 'model', label: 'Cérebro', width: 100, align: 'left' },
-    { id: 'status', label: 'Status', width: 150, align: 'left' },
-    { id: 'resp', label: 'Resp.', width: 80, align: 'center' },
-    { id: 'dept', label: 'Depto.', width: 120, align: 'left' },
-    { id: 'start', label: 'Início', width: 100, align: 'left' },
-    { id: 'salary', label: 'Salário', width: 100, align: 'left' },
-    { id: 'actions', label: '', width: 140, align: 'center' }
-];
+interface AgentFormState {
+    name: string;
+    entityType: EntityType;
+    shortDescription: string;
+    avatarUrl: string;
+    origin: string;
+    ventureId: string;
+    unitName: string;
+    area: string;
+    functionName: string;
+    baseRoleUniversal: string;
+    level: AgentTier;
+    roleType: RoleType;
+    structuralStatus: StructuralStatus;
+    operationalActivation: OperationalActivation;
+    dnaStatus: DnaStatus;
+    operationalClass: OperationalClass;
+    allowedStacks: ModelProvider[];
+    preferredModel: ModelProvider | '';
+    aiMentor: string;
+    humanOwner: string;
+    documentCount: string;
+    startDate: string;
+    salary: string;
+    customFields: FormCustomField[];
+}
+
 const DEFAULT_WORKSPACE_ID = '00000000-0000-0000-0000-000000000000';
+
+const ENTITY_TYPE_OPTIONS: Array<{ value: EntityType; label: string }> = [
+    { value: 'HUMANO', label: 'Humano' },
+    { value: 'AGENTE', label: 'Agente' },
+    { value: 'HIBRIDO', label: 'Hibrido' }
+];
+
+const LEVEL_OPTIONS: Array<{ value: AgentTier; label: string }> = [
+    { value: 'ESTRATÉGICO', label: 'Estrategico' },
+    { value: 'TÁTICO', label: 'Tatico' },
+    { value: 'OPERACIONAL', label: 'Operacional' }
+];
+
+const ROLE_TYPE_OPTIONS: Array<{ value: RoleType; label: string }> = [
+    { value: 'LIDERANCA', label: 'Lideranca' },
+    { value: 'CONSULTORIA', label: 'Consultoria' },
+    { value: 'AUDITORIA', label: 'Auditoria' },
+    { value: 'EXECUCAO', label: 'Execucao' },
+    { value: 'MENTORIA', label: 'Mentoria' },
+    { value: 'APOIO', label: 'Apoio' }
+];
+
+const STRUCTURAL_STATUS_OPTIONS: Array<{ value: StructuralStatus; label: string }> = [
+    { value: 'ESTRUTURAL', label: 'Estrutural' },
+    { value: 'EM_CONFIGURACAO', label: 'Em configuracao' },
+    { value: 'HOMOLOGACAO', label: 'Homologacao' },
+    { value: 'ATIVO', label: 'Ativo' },
+    { value: 'ARQUIVADO', label: 'Arquivado' }
+];
+
+const OPERATIONAL_ACTIVATION_OPTIONS: Array<{ value: OperationalActivation; label: string }> = [
+    { value: 'ATIVO_NASCIMENTO', label: 'Ativo no nascimento' },
+    { value: 'PREVISTO_GATILHO', label: 'Previsto por gatilho' },
+    { value: 'RESERVADO_FUTURO', label: 'Reservado para futuro' },
+    { value: 'COMPARTILHADO', label: 'Compartilhado' }
+];
+
+const DNA_STATUS_OPTIONS: Array<{ value: DnaStatus; label: string }> = [
+    { value: 'SEM_DNA', label: 'Sem DNA' },
+    { value: 'DNA_BASE', label: 'DNA base' },
+    { value: 'DNA_PARCIAL', label: 'DNA parcial' },
+    { value: 'DNA_COMPLETO', label: 'DNA completo' },
+    { value: 'REVISAR', label: 'Revisar' }
+];
+
+const OPERATIONAL_CLASS_OPTIONS: Array<{ value: OperationalClass; label: string }> = [
+    { value: 'ECONOMICA', label: 'Economica' },
+    { value: 'BALANCEADA', label: 'Balanceada' },
+    { value: 'PREMIUM', label: 'Premium' },
+    { value: 'CRITICA', label: 'Critica' }
+];
+
+const STACK_OPTIONS: Array<{ value: ModelProvider; label: string }> = [
+    { value: 'llama_local', label: 'Llama' },
+    { value: 'gemini', label: 'Gemini' },
+    { value: 'deepseek', label: 'Deepseek' },
+    { value: 'openai', label: 'Openai' },
+    { value: 'claude', label: 'Claude' },
+    { value: 'qwen', label: 'Qwen' }
+];
+
+const STRUCTURAL_TO_AGENT_STATUS: Record<StructuralStatus, AgentStatus> = {
+    ESTRUTURAL: 'PLANNED',
+    EM_CONFIGURACAO: 'PLANNED',
+    HOMOLOGACAO: 'STAGING',
+    ATIVO: 'ACTIVE',
+    ARQUIVADO: 'BLOCKED'
+};
+
+const normalizeText = (value: string) =>
+    String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase();
+
+const toDisplayOption = (value: any) => {
+    const raw = String(value ?? '').trim();
+    if (!raw || raw === '-') return '-';
+    const normalized = raw.replace(/[_-]+/g, ' ').trim().toLowerCase();
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const isUuid = (value: string) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+const toCustomFieldObject = (fields: FormCustomField[]) => {
+    const out: Record<string, string> = {};
+    fields.forEach((field) => {
+        const key = field.key.trim();
+        if (!key) return;
+        out[key] = field.value.trim();
+    });
+    return out;
+};
+
+const fromCustomFieldObject = (record?: Record<string, string>) => {
+    if (!record || typeof record !== 'object') return [] as FormCustomField[];
+    return Object.entries(record).map(([key, value]) => ({ key, value: String(value ?? '') }));
+};
+
+const parseCsvLine = (line: string) => {
+    const out: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i += 1) {
+        const char = line[i];
+        if (char === '"') {
+            const next = line[i + 1];
+            if (inQuotes && next === '"') {
+                current += '"';
+                i += 1;
+            } else {
+                inQuotes = !inQuotes;
+            }
+            continue;
+        }
+
+        if (char === ',' && !inQuotes) {
+            out.push(current);
+            current = '';
+            continue;
+        }
+
+        current += char;
+    }
+
+    out.push(current);
+    return out.map((value) => value.trim());
+};
+
+const parseCsvRecords = (content: string) => {
+    const lines = content
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    if (lines.length < 2) return [] as Array<Record<string, string>>;
+
+    const headers = parseCsvLine(lines[0]).map((header) => normalizeText(header));
+
+    return lines.slice(1).map((line) => {
+        const values = parseCsvLine(line);
+        return headers.reduce<Record<string, string>>((acc, header, index) => {
+            acc[header] = values[index] ?? '';
+            return acc;
+        }, {});
+    });
+};
+
+const readByAliases = (row: Record<string, string>, aliases: string[]) => {
+    const normalizedAliases = aliases.map((alias) => normalizeText(alias));
+    for (const alias of normalizedAliases) {
+        const value = row[alias];
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+            return String(value).trim();
+        }
+    }
+    return '';
+};
+
+const mapEntityToCollaboratorType = (entityType: EntityType) => {
+    if (entityType === 'HUMANO') return 'HUMANO';
+    if (entityType === 'HIBRIDO') return 'HIBRIDO';
+    return 'AGENTE_IA';
+};
+
+const normalizeModelValue = (value: string): ModelProvider | '' => {
+    const normalized = normalizeText(value);
+    if (!normalized) return '';
+    if (normalized.includes('llama')) return 'llama_local';
+    if (normalized.includes('gemini')) return 'gemini';
+    if (normalized.includes('deepseek') || normalized.includes('deep')) return 'deepseek';
+    if (normalized.includes('openai') || normalized.includes('gpt')) return 'openai';
+    if (normalized.includes('claude')) return 'claude';
+    if (normalized.includes('qwen') || normalized.includes('quinn')) return 'qwen';
+    return '';
+};
+
+const createEmptyForm = (activeBU: BusinessUnit, ventures: Venture[]): AgentFormState => ({
+    name: '',
+    entityType: 'AGENTE',
+    shortDescription: '',
+    avatarUrl: '',
+    origin: 'Cadastro manual',
+    ventureId: ventures[0]?.id || '',
+    unitName: activeBU.name,
+    area: '',
+    functionName: '',
+    baseRoleUniversal: '',
+    level: 'TÁTICO',
+    roleType: 'EXECUCAO',
+    structuralStatus: 'EM_CONFIGURACAO',
+    operationalActivation: 'ATIVO_NASCIMENTO',
+    dnaStatus: 'SEM_DNA',
+    operationalClass: 'BALANCEADA',
+    allowedStacks: ['deepseek'],
+    preferredModel: 'deepseek',
+    aiMentor: '',
+    humanOwner: '',
+    documentCount: '0',
+    startDate: '',
+    salary: '',
+    customFields: []
+});
+
+const agentToForm = (agent: Agent, activeBU: BusinessUnit, ventures: Venture[]): AgentFormState => {
+    const fallback = createEmptyForm(activeBU, ventures);
+    const preferredModel = (agent.preferredModel || agent.modelProvider || '') as ModelProvider | '';
+
+    return {
+        ...fallback,
+        name: agent.name || '',
+        entityType: (agent.entityType || (agent.collaboratorType === 'HUMANO' ? 'HUMANO' : 'AGENTE')) as EntityType,
+        shortDescription: agent.shortDescription || '',
+        avatarUrl: agent.avatarUrl || '',
+        origin: agent.origin || 'Cadastro manual',
+        ventureId: agent.ventureId || fallback.ventureId,
+        unitName: agent.unitName || agent.division || activeBU.name,
+        area: agent.area || agent.sector || '',
+        functionName: agent.functionName || agent.officialRole || '',
+        baseRoleUniversal: agent.baseRoleUniversal || agent.officialRole || '',
+        level: (agent.tier || 'TÁTICO') as AgentTier,
+        roleType: (agent.roleType || 'EXECUCAO') as RoleType,
+        structuralStatus: (agent.structuralStatus || (agent.status === 'ACTIVE' ? 'ATIVO' : agent.status === 'STAGING' ? 'HOMOLOGACAO' : agent.status === 'BLOCKED' ? 'ARQUIVADO' : 'EM_CONFIGURACAO')) as StructuralStatus,
+        operationalActivation: (agent.operationalActivation || 'ATIVO_NASCIMENTO') as OperationalActivation,
+        dnaStatus: (agent.dnaStatus || 'SEM_DNA') as DnaStatus,
+        operationalClass: (agent.operationalClass || 'BALANCEADA') as OperationalClass,
+        allowedStacks: Array.isArray(agent.allowedStacks) && agent.allowedStacks.length > 0
+            ? agent.allowedStacks
+            : preferredModel ? [preferredModel] : fallback.allowedStacks,
+        preferredModel,
+        aiMentor: agent.aiMentor || '',
+        humanOwner: agent.humanOwner || '',
+        documentCount: String(agent.docCount ?? 0),
+        startDate: agent.startDate || '',
+        salary: agent.salary || '',
+        customFields: fromCustomFieldObject(agent.customFields)
+    };
+};
 
 const AgentFactory: React.FC<AgentFactoryProps> = ({
     onNavigateToEcosystem,
@@ -53,800 +309,573 @@ const AgentFactory: React.FC<AgentFactoryProps> = ({
     businessUnits,
     ventures,
     agents,
+    initialAgent,
     onManageIntelligence
 }) => {
-    const [viewMode, setViewMode] = useState<'list' | 'group'>('list');
     const [searchTerm, setSearchTerm] = useState('');
-    const [grouping, setGrouping] = useState<'none' | 'company'>('none');
-
-    // --- STATE COLUNAS ---
-    const [columnOrder, setColumnOrder] = useState(INITIAL_MOVABLE_COLUMNS.map(c => c.id));
-    const [draggedColumn, setDraggedColumn] = useState<string | null>(null);
-
-    // --- ESTADOS PARA CRIAÇÃO INLINE ---
-    const [isAdding, setIsAdding] = useState(false);
-    const [editingId, setEditingId] = useState<string | null>(null);
-    const [newAgent, setNewAgent] = useState<Partial<Agent>>({
-        name: '',
-        officialRole: '',
-        company: activeBU.name,
-        buId: activeBU.id,
-        ventureId: '', // NOVO v1.5.0
-        status: 'ACTIVE',
-        tier: 'OPERACIONAL',
-        division: '',
-        salary: '',
-        collaboratorType: 'AGENTE_IA',
-        avatarUrl: '',
-        ambientPhotoUrl: '',
-        modelProvider: 'gemini'
-    });
+    const [form, setForm] = useState<AgentFormState>(() => createEmptyForm(activeBU, ventures));
+    const [isFormOpen, setIsFormOpen] = useState(false);
+    const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const [batchOrigin, setBatchOrigin] = useState('Importacao StartyB');
+    const [batchVentureId, setBatchVentureId] = useState('');
+    const [importFeedback, setImportFeedback] = useState('');
 
     const avatarInputRef = useRef<HTMLInputElement>(null);
-    const ambientInputRef = useRef<HTMLInputElement>(null);
+    const batchInputRef = useRef<HTMLInputElement>(null);
 
-    const handleSaveAgent = async () => {
-        // Validação simples
-        if (!newAgent.name || !newAgent.officialRole) {
-            alert("Preencha Nome e Cargo.");
+    useEffect(() => {
+        if (!batchVentureId && ventures.length > 0) {
+            setBatchVentureId(ventures[0].id);
+        }
+    }, [batchVentureId, ventures]);
+
+    useEffect(() => {
+        if (!initialAgent) return;
+        setEditingAgentId(initialAgent.id);
+        setForm(agentToForm(initialAgent, activeBU, ventures));
+        setIsFormOpen(true);
+    }, [initialAgent, activeBU, ventures]);
+
+    const filteredAgents = useMemo(() => {
+        const term = normalizeText(searchTerm);
+        const list = [...agents].sort((a, b) => a.name.localeCompare(b.name));
+        if (!term) return list;
+
+        return list.filter((agent) => {
+            const ventureName = ventures.find((venture) => venture.id === agent.ventureId)?.name || '';
+            const haystack = [
+                agent.name,
+                agent.functionName,
+                agent.officialRole,
+                agent.area,
+                agent.unitName,
+                ventureName,
+                agent.origin
+            ]
+                .map((value) => normalizeText(String(value || '')))
+                .join(' ');
+
+            return haystack.includes(term);
+        });
+    }, [agents, searchTerm, ventures]);
+
+    const mentorCandidates = useMemo(
+        () => agents.filter((agent) => agent.id !== editingAgentId),
+        [agents, editingAgentId]
+    );
+
+    const currentEditingAgent = useMemo(
+        () => agents.find((agent) => agent.id === editingAgentId),
+        [agents, editingAgentId]
+    );
+
+    const handleOpenNew = () => {
+        setEditingAgentId(null);
+        setForm(createEmptyForm(activeBU, ventures));
+        setIsFormOpen(true);
+    };
+
+    const handleOpenEdit = (agent: Agent) => {
+        setEditingAgentId(agent.id);
+        setForm(agentToForm(agent, activeBU, ventures));
+        setIsFormOpen(true);
+    };
+
+    const handleAvatarUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        if (file.size > 1024 * 1024) {
+            window.alert('Avatar acima de 1MB. Use um arquivo menor.');
             return;
         }
-
-        // Trava botão para evitar duplo clique
-        const originalLabel = document.getElementById('btn-save')?.innerText;
-        if (document.getElementById('btn-save')) {
-            document.getElementById('btn-save')!.innerText = "Salvando...";
-            (document.getElementById('btn-save') as HTMLButtonElement).disabled = true;
-        }
-
-        try {
-            // Gera ID se não existir
-            const agentId = editingId || newAgent.id || `ag_${Date.now()}`;
-
-            // Prepara dados
-            const payload: any = {
-                ...newAgent,
-                id: agentId,
-                universalId: agentId,
-                updatedAt: Timestamp.now(),
-                // Se for novo, marca data de criação
-                ...(editingId ? {} : { createdAt: Timestamp.now(), status: 'ACTIVE' })
-            };
-
-            // Limpeza de campos vazios
-            Object.keys(payload).forEach(key =>
-                (payload[key] === undefined || payload[key] === null) && delete payload[key]
-            );
-
-            // SALVAMENTO NO BANCO DE DADOS (Cria coleção automaticamente se não existir)
-            await setDoc(doc(db, "agents", agentId), payload, { merge: true });
-
-            // Sucesso
-            console.log("Agente salvo:", agentId);
-
-            // Limpa formulário e fecha modal
-            setNewAgent({
-                id: '', name: '', officialRole: '', company: activeBU.name, buId: activeBU.id,
-                status: 'ACTIVE', tier: 'TÁTICO', type: 'agent', modelProvider: 'gemini'
-            });
-            setIsAdding(false);
-            setEditingId(null);
-
-        } catch (error: any) {
-            console.error("Erro ao salvar:", error);
-            alert("Erro ao salvar: " + error.message);
-        } finally {
-            // Destrava botão (Correção do Loop Infinito)
-            if (document.getElementById('btn-save')) {
-                document.getElementById('btn-save')!.innerText = originalLabel || "Salvar Agente";
-                (document.getElementById('btn-save') as HTMLButtonElement).disabled = false;
-            }
-        }
-    };
-
-    const [statusOptions, setStatusOptions] = useState<DynamicOption[]>([
-        { id: 'ACTIVE', label: 'ATIVOS', colorClass: 'bg-green-500 text-white hover:bg-green-600', isSystem: true },
-        { id: 'STAGING', label: 'HOMOLOGAÇÃO', colorClass: 'bg-purple-500 text-white hover:bg-purple-600', isSystem: true },
-        { id: 'MAINTENANCE', label: 'EM DESENV...', colorClass: 'bg-gray-100 text-gray-500 hover:bg-gray-200', isSystem: true },
-        { id: 'PLANNED', label: 'PLANEJADO', colorClass: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200', isSystem: true },
-        { id: 'BLOCKED', label: 'BLOQUEADO', colorClass: 'bg-red-100 text-red-600 hover:bg-red-200', isSystem: false }
-    ]);
-
-    const [typeOptions, setTypeOptions] = useState<DynamicOption[]>([
-        { id: 'HUMANO', label: 'HUMANO', colorClass: 'bg-[#8b5cf6] text-white', isSystem: true },
-        { id: 'AGENTE_IA', label: 'AGENTE IA', colorClass: 'bg-[#f43f5e] text-white', isSystem: true },
-        { id: 'TERCEIRO', label: 'TERCEIRO', colorClass: 'bg-orange-500 text-white', isSystem: false }
-    ]);
-
-    // --- RESIZABLE COLUMNS STATE ---
-    const [colWidths, setColWidths] = useState({
-        expand: 40,
-        name: 380,
-        ...INITIAL_MOVABLE_COLUMNS.reduce((acc, col) => ({ ...acc, [col.id]: col.width }), {})
-    });
-
-    const resizingRef = useRef<{ colId: string, startX: number, startWidth: number } | null>(null);
-
-    const startResize = (e: React.MouseEvent, colId: string) => {
-        e.preventDefault();
-        e.stopPropagation();
-        resizingRef.current = {
-            colId,
-            startX: e.clientX,
-            startWidth: colWidths[colId as keyof typeof colWidths]
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setForm((prev) => ({ ...prev, avatarUrl: String(reader.result || '') }));
         };
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
+        reader.readAsDataURL(file);
     };
 
-    const handleMouseMove = (e: MouseEvent) => {
-        if (!resizingRef.current) return;
-        const { colId, startX, startWidth } = resizingRef.current;
-        const diff = e.clientX - startX;
-        const newWidth = Math.max(40, startWidth + diff);
+    const setFormField = <K extends keyof AgentFormState>(key: K, value: AgentFormState[K]) => {
+        setForm((prev) => ({ ...prev, [key]: value }));
+    };
 
-        setColWidths(prev => ({
+    const toggleStack = (stack: ModelProvider) => {
+        setForm((prev) => {
+            const hasStack = prev.allowedStacks.includes(stack);
+            const allowedStacks = hasStack
+                ? prev.allowedStacks.filter((item) => item !== stack)
+                : [...prev.allowedStacks, stack];
+            let preferredModel = prev.preferredModel;
+            if (preferredModel && !allowedStacks.includes(preferredModel)) {
+                preferredModel = allowedStacks[0] || '';
+            }
+            return { ...prev, allowedStacks, preferredModel };
+        });
+    };
+
+    const upsertCustomField = (index: number, patch: Partial<FormCustomField>) => {
+        setForm((prev) => ({
             ...prev,
-            [colId]: newWidth
+            customFields: prev.customFields.map((field, fieldIndex) => (
+                fieldIndex === index ? { ...field, ...patch } : field
+            ))
         }));
     };
 
-    const handleMouseUp = () => {
-        resizingRef.current = null;
-        document.body.style.cursor = 'default';
-        document.body.style.userSelect = 'auto';
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
+    const removeCustomField = (index: number) => {
+        setForm((prev) => ({
+            ...prev,
+            customFields: prev.customFields.filter((_, fieldIndex) => fieldIndex !== index)
+        }));
     };
 
-    // --- DRAG AND DROP HANDLERS ---
-    const handleDragStart = (e: React.DragEvent, colId: string) => {
-        setDraggedColumn(colId);
-        e.dataTransfer.effectAllowed = 'move';
-        // Pequeno hack para a imagem fantasma não ser gigante
-        const img = new Image();
-        img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-        e.dataTransfer.setDragImage(img, 0, 0);
+    const addCustomField = () => {
+        setForm((prev) => ({
+            ...prev,
+            customFields: [...prev.customFields, { key: '', value: '' }]
+        }));
     };
 
-    const handleDragOver = (e: React.DragEvent, colId: string) => {
-        e.preventDefault();
-        if (!draggedColumn || draggedColumn === colId) return;
+    const buildAgentPayload = (draft: AgentFormState, originOverride?: string) => {
+        const selectedVenture = ventures.find((venture) => venture.id === draft.ventureId);
+        const selectedBu = businessUnits.find((unit) => unit.id === activeBU.id);
+        const userId = (auth as any)?.currentUser?.id;
+        const normalizedStacks = draft.allowedStacks.length > 0 ? draft.allowedStacks : ['deepseek'];
+        const preferredModel = (draft.preferredModel || normalizedStacks[0] || 'deepseek') as ModelProvider;
+        const structuralStatus = draft.structuralStatus;
+        const status = STRUCTURAL_TO_AGENT_STATUS[structuralStatus] || 'STAGING';
 
-        const newOrder = [...columnOrder];
-        const draggedIdx = newOrder.indexOf(draggedColumn);
-        const targetIdx = newOrder.indexOf(colId);
-
-        if (draggedIdx !== -1 && targetIdx !== -1) {
-            newOrder.splice(draggedIdx, 1);
-            newOrder.splice(targetIdx, 0, draggedColumn);
-            setColumnOrder(newOrder);
-        }
+        return {
+            name: draft.name.trim(),
+            entityType: draft.entityType,
+            shortDescription: draft.shortDescription.trim(),
+            origin: (originOverride || draft.origin || 'Cadastro manual').trim(),
+            ventureId: selectedVenture?.id,
+            company: selectedVenture?.name || selectedBu?.name || activeBU.name,
+            buId: activeBU.id,
+            unitName: draft.unitName.trim(),
+            area: draft.area.trim(),
+            functionName: draft.functionName.trim(),
+            baseRoleUniversal: (draft.baseRoleUniversal || draft.functionName).trim(),
+            officialRole: (draft.functionName || draft.baseRoleUniversal).trim(),
+            tier: draft.level,
+            roleType: draft.roleType,
+            structuralStatus,
+            operationalActivation: draft.operationalActivation,
+            dnaStatus: draft.dnaStatus,
+            operationalClass: draft.operationalClass,
+            allowedStacks: normalizedStacks,
+            preferredModel,
+            modelProvider: preferredModel,
+            aiMentor: draft.aiMentor || undefined,
+            humanOwner: draft.humanOwner || undefined,
+            division: draft.unitName.trim() || undefined,
+            sector: draft.area.trim() || undefined,
+            collaboratorType: mapEntityToCollaboratorType(draft.entityType),
+            docCount: Number(draft.documentCount || 0),
+            startDate: draft.startDate || undefined,
+            salary: draft.salary || undefined,
+            avatarUrl: draft.avatarUrl || undefined,
+            customFields: toCustomFieldObject(draft.customFields),
+            status,
+            active: status === 'ACTIVE' || status === 'STAGING',
+            workspaceId: activeWorkspaceId || DEFAULT_WORKSPACE_ID,
+            updatedAt: Timestamp.now(),
+            updatedBy: userId || undefined
+        };
     };
 
-    const handleDragEnd = () => {
-        setDraggedColumn(null);
-    };
+    const persistAgent = async (draft: AgentFormState, originOverride?: string) => {
+        const payload = buildAgentPayload(draft, originOverride);
 
-    const Resizer = ({ colId }: { colId: string }) => (
-        <div
-            className="absolute top-0 right-0 bottom-0 w-4 cursor-col-resize flex justify-center group z-20 translate-x-2"
-            onMouseDown={(e) => startResize(e, colId)}
-            onClick={(e) => e.stopPropagation()}
-        >
-            <div className="w-[2px] h-full bg-transparent group-hover:bg-purple-400 transition-colors"></div>
-        </div>
-    );
+        if (!payload.name) throw new Error('Nome e obrigatorio.');
+        if (!payload.ventureId) throw new Error('Venture e obrigatoria.');
+        if (!payload.functionName && !payload.baseRoleUniversal) throw new Error('Funcao e obrigatoria.');
 
-    // --- LOGICA DE CRIAÇÃO/EDIÇÃO ---
-
-    const handleEditAgent = (agent: Agent) => {
-        setNewAgent({ ...agent });
-        setEditingId(agent.id);
-        setIsAdding(true);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-
-    const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            if (file.size > 400000) {
-                alert("⚠️ ARQUIVO MUITO GRANDE: O Rosto do agente deve ter no máximo 400KB.");
-                return;
-            }
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setNewAgent(prev => ({ ...prev, avatarUrl: reader.result as string }));
+        if (editingAgentId && isUuid(editingAgentId)) {
+            await updateDoc(doc(db, 'agents', editingAgentId), payload);
+            const hydrated = {
+                ...(currentEditingAgent || {}),
+                ...payload,
+                id: editingAgentId,
+                universalId: currentEditingAgent?.universalId || editingAgentId
             };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleAmbientUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            if (file.size > 400000) {
-                alert("⚠️ ARQUIVO MUITO GRANDE: A foto de ambiente deve ter no máximo 400KB.");
-                return;
-            }
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setNewAgent(prev => ({ ...prev, ambientPhotoUrl: reader.result as string }));
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const [isSaving, setIsSaving] = useState(false); // NOVO STATE PARA BLOQUEAR CLIQUES
-
-    const handleSaveNewAgent = async () => {
-        if (isSaving) return; // PREVINE DUPLO CLIQUE
-
-        if (!newAgent.name || !newAgent.officialRole) {
-            alert("Nome e Cargo são obrigatórios.");
-            return;
+            onActivate(hydrated);
+            return hydrated as Agent;
         }
 
-        if (!newAgent.avatarUrl || !newAgent.ambientPhotoUrl) {
-            alert("PROTOCOLO QUADRO DE ELITE: É obrigatório adicionar DUAS fotos (Rosto e Ambiente) para o agente.");
-            return;
-        }
-
-        // VERIFICAÇÃO DE TAMANHO DA IMAGEM (V1.5.0 - Rigidez Total)
-        const photoLimit = 400000; // 400KB
-        if ((newAgent.avatarUrl?.length || 0) > photoLimit || (newAgent.ambientPhotoUrl?.length || 0) > photoLimit) {
-            alert(`⚠️ ESCALA EXCEDIDA: Uma das imagens é muito pesada (>400KB). \n\nO banco de dados tem um limite total de 1MB por agente. Por favor, use imagens menores ou comprimas.`);
-            return;
-        }
-
-        setIsSaving(true); // INICIA BLOQUEIO
-
-        const selectedBU = businessUnits.find(b => b.id === newAgent.buId);
-        const workspaceId =
-            (newAgent as any).workspaceId ||
-            activeWorkspaceId ||
-            DEFAULT_WORKSPACE_ID;
-
-        // Se tiver editingId, usamos ele. Se não, geramos automático (ca + seq + sigla)
-        const tempId = editingId || Date.now().toString();
-
-        const generateAutoId = () => {
-            const venture = ventures.find(v => v.id === newAgent.ventureId);
-            const sigla = venture?.name?.substring(0, 3).toLowerCase() || 'gpb';
-            // Pega o número sequencial baseado no total de agentes (V1.2 Scale)
-            const sequence = agents.length + 1;
-            const padded = sequence.toString().padStart(3, '0');
-            return `ca${padded}${sigla}`;
+        const userId = (auth as any)?.currentUser?.id;
+        const createPayload = {
+            ...payload,
+            createdAt: Timestamp.now(),
+            createdBy: userId || undefined
         };
 
-        const universalId = editingId
-            ? agents.find(a => a.id === editingId)?.universalId
-            : generateAutoId();
+        const docRef = await addDoc(collection(db, 'agents'), createPayload);
+        await updateDoc(docRef, {
+            id: docRef.id,
+            universalId: docRef.id,
+            updatedAt: Timestamp.now(),
+            updatedBy: userId || undefined
+        });
 
-        // LIMPEZA DE PAYLOAD: O banco de dados não aceita valores 'undefined'
-        const rawPayload = {
-            ...newAgent,
-            company: selectedBU ? selectedBU.name : 'GrupoB',
-            workspaceId,
-            version: '1.0',
-            fullPrompt: editingId ? (newAgent.fullPrompt || '') : '',
-            sector: newAgent.division || 'Geral',
-            id: tempId,
-            universalId: universalId,
-            active: true
-        };
+        const hydrated = { ...payload, id: docRef.id, universalId: docRef.id };
+        onActivate(hydrated);
+        return hydrated as Agent;
+    };
 
-        // Remove undefined and null fields to avoid banco de dados 'invalid-argument'
-        const payload = Object.fromEntries(
-            Object.entries(rawPayload).filter(([_, v]) => v !== undefined && v !== null)
-        );
-
-        console.log("DEBUG: Payload Preparado para banco de dados:", payload);
-
-        // --- SUPABASE INTEGRATION (COM TIMEOUT PARA OFFLINE MODE) ---
+    const handleSave = async () => {
+        if (isSaving) return;
+        setIsSaving(true);
         try {
-            // Validação de Autenticação antes de salvar
-            const currentUser = (auth as any).currentUser || (await auth.getUser()).data.user;
-            if (!currentUser) {
-                alert("Sessão expirada. Por favor, saia e entre novamente.");
-                setIsSaving(false);
-                return;
-            }
-
-            // Promise wrapper para forçar timeout de 10 segundos
-            const saveToDatabase = async () => {
-                try {
-                    if (editingId) {
-                        await updateDoc(doc(db, "agents", editingId), payload);
-                        alert("✅ Agente atualizado com sucesso no banco de dados!");
-                    } else {
-                        console.log("Tentando criar agente em 'agents'...", payload);
-                        const docRef = await addDoc(collection(db, "agents"), payload);
-                        alert(`✅ Sucesso! Agente criado no banco de dados.\nID: ${docRef.id}\nColeção: agents`);
-                        await updateDoc(docRef, { id: docRef.id });
-                        payload.id = docRef.id;
-                    }
-                } catch (e: any) {
-                    console.error("banco de dados Save Error:", e);
-                    throw e; // Repassa para o catch externo
-                }
-            };
-
-            // V1.5.0 - Removido Promise.race para evitar silenciar erros reais e facilitar debug no Mac
-            await saveToDatabase();
-
+            await persistAgent(form);
+            setIsFormOpen(false);
+            setEditingAgentId(null);
+            setForm(createEmptyForm(activeBU, ventures));
+            window.alert('Cadastro salvo com sucesso.');
         } catch (error: any) {
-            console.error("banco de dados Info:", error);
-            if (error.message === "TIMEOUT") {
-                // SUCESSO OFFLINE: Se demorar, assume que salvou localmente (Persistence cuida do resto)
-                console.warn("Salvando em modo Offline (Timeout)");
-                alert("⚠️ Conexão lenta: Seu agente foi salvo no dispositivo e será sincronizado assim que possível.");
-            }
-            else {
-                console.error("Erro Crítico banco de dados:", error);
-                alert(`Erro ao salvar no banco de dados (${error.code || error.message}). Verifique as permissões com o Newton.`);
-                setIsSaving(false);
-                return; // Bloqueia se der erro real
-            }
-        }
-
-        // SUCESSO
-        onActivate(payload);
-        setIsAdding(false);
-        setEditingId(null);
-        setNewAgent({
-            name: '', officialRole: '', company: activeBU.name, buId: activeBU.id,
-            status: 'ACTIVE', tier: 'OPERACIONAL', division: '', salary: '',
-            collaboratorType: 'AGENTE_IA', avatarUrl: '', modelProvider: 'gemini'
-        });
-
-    };
-
-
-    const handleCancel = () => {
-        setIsAdding(false);
-        setEditingId(null);
-        setNewAgent({
-            name: '', officialRole: '', company: activeBU.name, buId: activeBU.id,
-            status: 'ACTIVE', tier: 'OPERACIONAL', division: '', salary: '',
-            collaboratorType: 'AGENTE_IA', avatarUrl: '', modelProvider: 'gemini'
-        });
-    }
-
-    const handleStatusChange = (agent: Agent, value: string) => {
-        if (value === '__NEW__') {
-            const newLabel = prompt("Nome do Novo Status (ex: FÉRIAS):");
-            if (newLabel) {
-                const newId = newLabel.toUpperCase().replace(/\s+/g, '_');
-                setStatusOptions(prev => [...prev, { id: newId, label: newLabel.toUpperCase(), colorClass: 'bg-blue-500 text-white', isSystem: false }]);
-                const updatedAgent = { ...agent, status: newId as AgentStatus };
-                onActivate(updatedAgent);
-            }
-        } else {
-            const updatedAgent = { ...agent, status: value as AgentStatus };
-            onActivate(updatedAgent);
+            console.error('Erro ao salvar cadastro estrutural:', error);
+            window.alert(error?.message || 'Falha ao salvar cadastro estrutural.');
+        } finally {
+            setIsSaving(false);
         }
     };
 
-    const handleTypeChange = (agent: Agent, value: string) => {
-        console.log(`Tipo alterado para ${value} para ${agent.name}`);
-    };
-
-    const getStatusOption = (statusId: string) => {
-        return statusOptions.find(s => s.id === statusId) ||
-            { id: statusId, label: statusId, colorClass: 'bg-gray-100 text-gray-500' };
-    };
-
-    const getRenderGroups = () => {
-        const filteredList = agents.filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()));
-
-        if (grouping === 'none') {
-            return {
-                'ALL': { id: 'all', name: 'Todos os Colaboradores', color: '#111827', agents: filteredList }
-            };
+    const handleDelete = async (agent: Agent) => {
+        if (!onRemove) return;
+        const confirmed = window.confirm(`Excluir ${agent.name} do cadastro estrutural?`);
+        if (!confirmed) return;
+        try {
+            if (isUuid(agent.id)) {
+                await deleteDoc(doc(db, 'agents', agent.id));
+            }
+            onRemove(agent.id);
+        } catch (error: any) {
+            console.error('Erro ao excluir agente:', error);
+            window.alert(error?.message || 'Falha ao excluir cadastro.');
         }
-
-        return filteredList.reduce((acc, agent) => {
-            const venture = ventures.find(v => v.id === agent.ventureId);
-            const ventureName = venture ? venture.name : (agent.company || 'Outros');
-            const themeColor = '#6366f1'; // Default Indigo
-            const ventureId = venture ? venture.id : 'custom_unit';
-
-            if (!acc[ventureName]) {
-                acc[ventureName] = { id: ventureId, name: ventureName, color: themeColor, agents: [] };
-            }
-            acc[ventureName].agents.push(agent);
-            return acc;
-        }, {} as Record<string, { id: string, name: string, color: string, agents: Agent[] }>);
     };
 
-    const groups = getRenderGroups();
-    const sortedGroupKeys = Object.keys(groups).sort();
-
-    const renderTypeSelect = (agent: Agent) => {
-        const isHuman = agent.collaboratorType === 'HUMANO' || agent.officialRole.toLowerCase().includes('humano');
-        const currentTypeId = agent.collaboratorType || (isHuman ? 'HUMANO' : 'AGENTE_IA');
-        const currentOption = typeOptions.find(t => t.id === currentTypeId) || typeOptions[1];
-
-        return (
-            <div className="relative group/type w-full h-6">
-                <select
-                    value={currentTypeId}
-                    onChange={(e) => handleTypeChange(agent, e.target.value)}
-                    className={`appearance-none w-full h-full pl-2 pr-4 rounded-[4px] text-[9px] font-bold uppercase shadow-sm whitespace-nowrap outline-none cursor-pointer text-center ${currentOption.colorClass}`}
-                >
-                    {typeOptions.map(opt => (
-                        <option key={opt.id} value={opt.id} className="bg-white text-gray-800">{opt.label}</option>
-                    ))}
-                </select>
-            </div>
-        );
+    const resolveVentureId = (raw: string) => {
+        const value = raw.trim();
+        if (!value) return '';
+        const byId = ventures.find((venture) => venture.id === value);
+        if (byId) return byId.id;
+        const byName = ventures.find((venture) => normalizeText(venture.name) === normalizeText(value));
+        if (byName) return byName.id;
+        return '';
     };
 
-    // --- RENDER DYNAMIC CELL ---
-    const renderCellContent = (colId: string, agent: Agent | null, isInputRow: boolean = false, badgeName: string = '', badgeColor: string = '') => {
-        // Helper para renderizar célula de tabela
-        const wrapCell = (content: React.ReactNode, align: string = 'left') => (
-            <td className={`px-4 align-middle overflow-hidden ${align === 'center' ? 'text-center' : 'text-left'}`}>
-                {content}
-            </td>
-        );
+    const mapImportRowToForm = (row: Record<string, string>): AgentFormState => {
+        const draft = createEmptyForm(activeBU, ventures);
+        const typeRaw = readByAliases(row, ['tipo', 'type', 'entity_type']);
+        const normalizedType = normalizeText(typeRaw);
+        let entityType: EntityType = 'AGENTE';
+        if (normalizedType.includes('human')) entityType = 'HUMANO';
+        if (normalizedType.includes('hibr') || normalizedType.includes('hybrid')) entityType = 'HIBRIDO';
 
-        if (isInputRow) {
-            // RENDERIZAÇÃO DA LINHA DE CRIAÇÃO (INPUTS)
-            switch (colId) {
-                case 'photo':
-                    return (
-                        <td className="px-2 align-middle text-center">
-                            <input type="file" ref={avatarInputRef} className="hidden" accept="image/*" onChange={handleAvatarUpload} />
-                            <div onClick={() => avatarInputRef.current?.click()} className={`w-8 h-8 rounded-full mx-auto flex items-center justify-center text-[8px] font-bold border cursor-pointer hover:scale-110 transition-all relative overflow-hidden ${!newAgent.avatarUrl ? 'bg-red-100 border-red-300 text-red-500 animate-pulse' : 'bg-gray-200 border-gray-300'}`} title="ROSTO OBRIGATÓRIO">
-                                {newAgent.avatarUrl ? <img src={newAgent.avatarUrl} className="w-full h-full object-cover" /> : <CloudUploadIcon className="w-4 h-4" />}
-                            </div>
-                        </td>
-                    );
-                case 'ambient':
-                    return (
-                        <td className="px-2 align-middle text-center">
-                            <input type="file" ref={ambientInputRef} className="hidden" accept="image/*" onChange={handleAmbientUpload} />
-                            <div onClick={() => ambientInputRef.current?.click()} className={`w-8 h-8 rounded-lg mx-auto flex items-center justify-center text-[8px] font-bold border cursor-pointer hover:scale-110 transition-all relative overflow-hidden ${!newAgent.ambientPhotoUrl ? 'bg-red-100 border-red-300 text-red-500 animate-pulse' : 'bg-gray-200 border-gray-300'}`} title="AMBIENTE OBRIGATÓRIO">
-                                {newAgent.ambientPhotoUrl ? <img src={newAgent.ambientPhotoUrl} className="w-full h-full object-cover" /> : <CloudUploadIcon className="w-4 h-4" />}
-                            </div>
-                        </td>
-                    );
-                case 'role': return wrapCell(<input className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none focus:ring-1 focus:ring-blue-400" placeholder="Cargo" value={newAgent.officialRole} onChange={e => setNewAgent({ ...newAgent, officialRole: e.target.value })} />);
-                case 'docs': return wrapCell(<span className="text-[10px] text-gray-300">-</span>, 'center');
-                case 'company':
-                    return wrapCell(
-                        <select className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none font-bold" value={newAgent.ventureId} onChange={e => {
-                            const selectedVenture = ventures.find(v => v.id === e.target.value);
-                            setNewAgent({ ...newAgent, ventureId: e.target.value, company: selectedVenture?.name || 'GrupoB' });
-                        }}>
-                            <option value="">-- Selecione a Venture --</option>
-                            {ventures.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                        </select>
-                    );
-                case 'division': return wrapCell(<input className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none focus:ring-1 focus:ring-blue-400" placeholder="Divisão" value={newAgent.division || ''} onChange={e => setNewAgent({ ...newAgent, division: e.target.value })} />);
-                case 'type':
-                    return wrapCell(
-                        <select className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none" value={newAgent.collaboratorType} onChange={e => setNewAgent({ ...newAgent, collaboratorType: e.target.value })}>
-                            {typeOptions.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-                        </select>
-                    );
-                case 'model':
-                    return wrapCell(
-                        <select className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none font-bold" value={newAgent.modelProvider || 'gemini'} onChange={e => setNewAgent({ ...newAgent, modelProvider: e.target.value as ModelProvider })}>
-                            <option value="llama_local">Llama</option>
-                            <option value="gemini">Gemini</option>
-                            <option value="deepseek">DeepSeek</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="claude">Claude</option>
-                            <option value="qwen">Qwen</option>
-                        </select>
-                    );
-                case 'status':
-                    return wrapCell(
-                        <select className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none" value={newAgent.status} onChange={e => setNewAgent({ ...newAgent, status: e.target.value as AgentStatus })}>
-                            {statusOptions.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                        </select>
-                    );
-                case 'resp': return wrapCell(<span className="text-[10px] text-gray-300">-</span>, 'center');
-                case 'dept': return wrapCell(<span className="text-[10px] text-gray-300">-</span>, 'center');
-                case 'start': return wrapCell(<input type="date" className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none" value={newAgent.startDate || ''} onChange={e => setNewAgent({ ...newAgent, startDate: e.target.value })} />);
-                case 'salary': return wrapCell(<input className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none focus:ring-1 focus:ring-blue-400" placeholder="R$ 0,00" value={newAgent.salary || ''} onChange={e => setNewAgent({ ...newAgent, salary: e.target.value })} />);
-                case 'actions':
-                    return wrapCell(
-                        <div className="flex items-center justify-center gap-2">
-                            <button
-                                onClick={handleSaveNewAgent}
-                                disabled={isSaving}
-                                className={`w-6 h-6 rounded flex items-center justify-center shadow-sm transition-all ${isSaving ? 'bg-gray-300 text-white cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-white'}`}
-                                title="Salvar"
-                            >
-                                {isSaving ? (
-                                    <div className="w-3 h-3 border-2 border-white/50 border-t-white rounded-full animate-spin" />
-                                ) : (
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="4"><path d="M5 13l4 4L19 7" /></svg>
-                                )}
-                            </button>
-                            <button onClick={handleCancel} disabled={isSaving} className="w-6 h-6 bg-red-100 hover:bg-red-200 text-red-500 rounded flex items-center justify-center shadow-sm transition-all" title="Cancelar"><XIcon className="w-3 h-3" /></button>
-                        </div>, 'center'
-                    );
-                default: return <td />;
-            }
-        } else if (agent) {
-            // RENDERIZAÇÃO DE LINHA NORMAL
-            const isMaintenance = agent.status === 'MAINTENANCE';
-            const currentStatusOpt = getStatusOption(agent.status);
+        const levelRaw = normalizeText(readByAliases(row, ['nivel', 'level', 'tier']));
+        const level = levelRaw.includes('estrateg')
+            ? 'ESTRATÉGICO'
+            : levelRaw.includes('opera')
+                ? 'OPERACIONAL'
+                : 'TÁTICO';
 
-            switch (colId) {
-                case 'photo':
-                    return (
-                        <td className="px-2 flex justify-center items-center h-8 overflow-hidden">
-                            <div className={`transition-all ${agent.status === 'PLANNED' ? 'opacity-50 grayscale' : ''}`}>
-                                <Avatar name={agent.name} url={agent.avatarUrl} className="w-6 h-6 rounded-md" />
-                            </div>
-                        </td>
-                    );
-                case 'role': return wrapCell(<div className={`text-[10px] whitespace-nowrap overflow-hidden text-ellipsis max-w-full cursor-text ${isMaintenance ? 'text-gray-400' : 'text-gray-600'}`} title={agent.officialRole}>{agent.officialRole}</div>);
-                case 'docs': return wrapCell(<span className="text-[10px] text-gray-300 font-bold">{agent.docCount || '—'}</span>);
-                case 'company':
-                    const vnt = ventures.find(v => v.id === agent.ventureId);
-                    return wrapCell(
-                        <div className="h-6 w-full flex items-center justify-center rounded-[4px] bg-indigo-50 border border-indigo-100 text-indigo-600 text-[9px] font-black uppercase shadow-sm cursor-pointer hover:bg-indigo-100 transition-all mx-auto px-2 truncate">
-                            {vnt ? vnt.name : (agent.company || 'GPB')}
-                        </div>
-                    );
-                case 'division': return wrapCell(<span className="text-[10px] text-gray-500 font-bold block text-center truncate">{agent.division || agent.sector || '—'}</span>);
-                case 'type': return wrapCell(renderTypeSelect(agent));
-                case 'model':
-                    if (agent.modelProvider === 'llama_local') {
-                        return wrapCell(
-                            <span className="text-[8px] font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full uppercase border border-emerald-100 flex items-center justify-center gap-1">Llama</span>,
-                            'center'
-                        );
-                    }
-                    if (agent.modelProvider === 'openai') {
-                        return wrapCell(
-                            <span className="text-[8px] font-black text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full uppercase border border-sky-100 flex items-center justify-center gap-1">OpenAI</span>,
-                            'center'
-                        );
-                    }
-                    if (agent.modelProvider === 'claude') {
-                        return wrapCell(
-                            <span className="text-[8px] font-black text-orange-700 bg-orange-50 px-2 py-0.5 rounded-full uppercase border border-orange-100 flex items-center justify-center gap-1">Claude</span>,
-                            'center'
-                        );
-                    }
-                    if (agent.modelProvider === 'qwen') {
-                        return wrapCell(
-                            <span className="text-[8px] font-black text-violet-700 bg-violet-50 px-2 py-0.5 rounded-full uppercase border border-violet-100 flex items-center justify-center gap-1">Qwen</span>,
-                            'center'
-                        );
-                    }
-                    return wrapCell(
-                        agent.modelProvider === 'deepseek' ? (
-                            <span className="text-[8px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full uppercase border border-blue-100 flex items-center justify-center gap-1">DeepSeek</span>
-                        ) : (
-                            <span className="text-[8px] font-bold text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full uppercase border border-gray-100 flex items-center justify-center gap-1">Gemini</span>
-                        ), 'center'
-                    );
-                case 'status':
-                    return wrapCell(
-                        <div className="relative group/status w-full h-6">
-                            <select value={agent.status} onChange={(e) => handleStatusChange(agent, e.target.value)} className={`appearance-none w-full h-full pl-2 pr-6 rounded-[4px] text-[9px] font-black uppercase tracking-widest outline-none cursor-pointer transition-all truncate flex items-center ${currentStatusOpt.colorClass}`}>
-                                {statusOptions.map(opt => <option key={opt.id} value={opt.id} className="bg-white text-gray-800 font-bold">{opt.label}</option>)}
-                                <option disabled>──────────</option>
-                                <option value="__NEW__" className="bg-gray-50 text-gray-400 text-[10px]">+ Novo</option>
-                            </select>
-                            <div className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none text-current opacity-70"><ChevronDownIcon className="w-2.5 h-2.5" /></div>
-                        </div>
-                    );
-                case 'resp':
-                    return wrapCell(
-                        <div className="w-5 h-5 rounded-full bg-gray-100 border border-white flex items-center justify-center text-[10px] text-gray-400 shadow-sm cursor-pointer hover:bg-gray-200 mx-auto">
-                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" /></svg>
-                        </div>, 'center'
-                    );
-                case 'dept': return wrapCell(<div className="border border-gray-100 rounded px-2 py-0.5 bg-gray-50 text-[9px] text-gray-400 text-center whitespace-nowrap">{agent.tier === 'ESTRATÉGICO' ? 'Diretoria' : '—'}</div>);
-                case 'start': return wrapCell(<div className="flex items-center gap-1 text-[10px] text-gray-400">{agent.startDate ? agent.startDate : '—'}</div>);
-                case 'salary': return wrapCell(<div className="text-[10px] text-gray-600 overflow-hidden font-mono">{agent.salary || '—'}</div>);
-                case 'actions':
-                    return wrapCell(
-                        <div className="flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => handleEditAgent(agent)} className="text-gray-300 hover:text-blue-500 transition-colors w-6 h-6 flex items-center justify-center bg-gray-50 rounded-lg hover:bg-blue-50" title="Editar"><PencilIcon className="w-3.5 h-3.5" /></button>
-                            {onManageIntelligence && <button onClick={() => onManageIntelligence(agent)} className="text-gray-300 hover:text-purple-600 transition-colors w-6 h-6 flex items-center justify-center bg-gray-50 rounded-lg hover:bg-purple-50" title="Cérebro"><BotIcon className="w-3.5 h-3.5" /></button>}
-                            {onRemove && <button onClick={() => { if (window.confirm(`Excluir ${agent.name}?`)) onRemove(agent.id); }} className="text-gray-300 hover:text-red-500 transition-colors w-6 h-6 flex items-center justify-center bg-gray-50 rounded-lg hover:bg-red-50" title="Excluir"><TrashIcon className="w-3.5 h-3.5" /></button>}
-                        </div>, 'center'
-                    );
-                default: return <td />;
+        const structuralRaw = normalizeText(readByAliases(row, ['status estrutural', 'structural_status', 'structuralstatus']));
+        const structuralStatus: StructuralStatus = structuralRaw.includes('ativo')
+            ? 'ATIVO'
+            : structuralRaw.includes('homo')
+                ? 'HOMOLOGACAO'
+                : structuralRaw.includes('arquiv')
+                    ? 'ARQUIVADO'
+                    : structuralRaw.includes('estrutural')
+                        ? 'ESTRUTURAL'
+                        : 'EM_CONFIGURACAO';
+
+        const dnaRaw = normalizeText(readByAliases(row, ['status dna', 'dna_status', 'dnastatus']));
+        const dnaStatus: DnaStatus = dnaRaw.includes('completo')
+            ? 'DNA_COMPLETO'
+            : dnaRaw.includes('parcial')
+                ? 'DNA_PARCIAL'
+                : dnaRaw.includes('base')
+                    ? 'DNA_BASE'
+                    : dnaRaw.includes('revis')
+                        ? 'REVISAR'
+                        : 'SEM_DNA';
+
+        const stackRaw = readByAliases(row, ['stack permitida', 'allowed_stacks', 'stack']);
+        const parsedStacks = stackRaw
+            .split(/[;,|]/)
+            .map((part) => normalizeModelValue(part))
+            .filter((value): value is ModelProvider => Boolean(value));
+
+        const preferredModel = normalizeModelValue(readByAliases(row, ['modelo preferencial', 'preferred_model', 'model']));
+        const ventureRaw = readByAliases(row, ['venture', 'venture_id', 'marca']);
+        const roleRaw = normalizeText(readByAliases(row, ['papel', 'role_type'])) || 'execucao';
+        const activationRaw = normalizeText(readByAliases(row, ['ativacao operacional', 'operational_activation']));
+        const classRaw = normalizeText(readByAliases(row, ['classe operacional', 'operational_class']));
+
+        return {
+            ...draft,
+            name: readByAliases(row, ['nome', 'name']),
+            entityType,
+            shortDescription: readByAliases(row, ['descricao', 'descricao curta', 'short_description', 'description']),
+            origin: readByAliases(row, ['origem', 'origin']) || batchOrigin,
+            ventureId: resolveVentureId(ventureRaw) || batchVentureId,
+            unitName: readByAliases(row, ['unidade', 'unit', 'unit_name']) || activeBU.name,
+            area: readByAliases(row, ['area']),
+            functionName: readByAliases(row, ['funcao', 'function', 'function_name']),
+            baseRoleUniversal: readByAliases(row, ['cargo-base universal', 'base_role_universal', 'base role', 'cargo base']),
+            level,
+            roleType: roleRaw.includes('lider')
+                ? 'LIDERANCA'
+                : roleRaw.includes('consult')
+                    ? 'CONSULTORIA'
+                    : roleRaw.includes('audit')
+                        ? 'AUDITORIA'
+                        : roleRaw.includes('mentor')
+                            ? 'MENTORIA'
+                            : roleRaw.includes('apoio')
+                                ? 'APOIO'
+                                : 'EXECUCAO',
+            structuralStatus,
+            operationalActivation: activationRaw.includes('gatilho')
+                ? 'PREVISTO_GATILHO'
+                : activationRaw.includes('reserv')
+                    ? 'RESERVADO_FUTURO'
+                    : activationRaw.includes('compart')
+                        ? 'COMPARTILHADO'
+                        : 'ATIVO_NASCIMENTO',
+            dnaStatus,
+            operationalClass: classRaw.includes('econom')
+                ? 'ECONOMICA'
+                : classRaw.includes('premium')
+                    ? 'PREMIUM'
+                    : classRaw.includes('crit')
+                        ? 'CRITICA'
+                        : 'BALANCEADA',
+            allowedStacks: parsedStacks.length > 0 ? parsedStacks : draft.allowedStacks,
+            preferredModel: preferredModel || (parsedStacks[0] || draft.preferredModel),
+            aiMentor: readByAliases(row, ['mentor ia', 'ai_mentor']),
+            humanOwner: readByAliases(row, ['responsavel humano', 'human_owner']),
+            documentCount: readByAliases(row, ['documentos vinculados', 'doc_count']) || '0',
+            startDate: readByAliases(row, ['inicio', 'start_date']),
+            salary: readByAliases(row, ['salario', 'salary']),
+            customFields: []
+        };
+    };
+
+    const handleBatchFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+        setIsImporting(true);
+        setImportFeedback('Processando lote...');
+        try {
+            const content = await file.text();
+            let rows: Array<Record<string, string>> = [];
+            if (file.name.toLowerCase().endsWith('.json')) {
+                const parsed = JSON.parse(content);
+                if (!Array.isArray(parsed)) throw new Error('JSON de importacao precisa ser um array de objetos.');
+                rows = parsed.map((item) => {
+                    const row: Record<string, string> = {};
+                    Object.entries(item || {}).forEach(([key, value]) => {
+                        row[normalizeText(key)] = String(value ?? '');
+                    });
+                    return row;
+                });
+            } else {
+                rows = parseCsvRecords(content);
             }
+            if (rows.length === 0) throw new Error('Arquivo sem registros validos para importar.');
+
+            let successCount = 0;
+            let failCount = 0;
+            for (const row of rows) {
+                try {
+                    const draft = mapImportRowToForm(row);
+                    if (!draft.name) {
+                        failCount += 1;
+                        continue;
+                    }
+                    const originLabel = `${batchOrigin} (Lote ${new Date().toISOString()})`;
+                    await persistAgent(draft, originLabel);
+                    successCount += 1;
+                } catch (error) {
+                    console.warn('Falha ao importar linha:', error);
+                    failCount += 1;
+                }
+            }
+            setImportFeedback(`Lote finalizado: ${successCount} importado(s), ${failCount} com falha.`);
+        } catch (error: any) {
+            console.error('Erro na importacao em lote:', error);
+            setImportFeedback(`Falha na importacao: ${error?.message || 'erro desconhecido'}`);
+        } finally {
+            setIsImporting(false);
         }
-        return <td />;
+    };
+
+    const renderBadge = (label: string, tone: 'default' | 'green' | 'yellow' | 'purple' | 'gray' = 'default') => {
+        const toneClass = {
+            default: 'bg-slate-100 text-slate-700 border-slate-200',
+            green: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+            yellow: 'bg-amber-100 text-amber-700 border-amber-200',
+            purple: 'bg-violet-100 text-violet-700 border-violet-200',
+            gray: 'bg-gray-100 text-gray-600 border-gray-200'
+        }[tone];
+        return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${toneClass}`}>{label}</span>;
     };
 
     return (
-        <div className="flex-1 h-full bg-[#F9FAFB] flex flex-col font-nunito overflow-hidden">
-            {/* Header */}
-            <div className="h-20 bg-white border-b border-gray-100 flex justify-between items-center px-8 shrink-0">
+        <div className="flex h-full flex-col overflow-hidden bg-[#F9FAFB] font-nunito">
+            <header className="flex h-20 shrink-0 items-center justify-between border-b border-gray-100 bg-white px-8">
                 <div className="flex items-center gap-4">
-                    <button onClick={onNavigateToEcosystem} className="hover:bg-gray-100 p-2 rounded-lg text-gray-400 transition-colors">
-                        <BackIcon className="w-6 h-6" />
+                    <button onClick={onNavigateToEcosystem} className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100">
+                        <BackIcon className="h-6 w-6" />
                     </button>
                     <div>
-                        <h1 className="text-2xl font-black text-bitrix-nav uppercase tracking-tighter">Quadro de Elite</h1>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Gestão de Colaboradores Estratégicos & I.A.</p>
+                        <h1 className="text-2xl font-black uppercase tracking-tight text-bitrix-nav">Quadro de Elite</h1>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gray-400">Cadastro estrutural de humanos e agentes</p>
                     </div>
                 </div>
+                <button onClick={handleOpenNew} className="inline-flex items-center gap-2 rounded-xl bg-bitrix-nav px-5 py-2.5 text-[10px] font-black uppercase tracking-wider text-white shadow-lg transition hover:bg-black">
+                    <PlusIcon className="h-3.5 w-3.5" />
+                    Novo cadastro
+                </button>
+            </header>
 
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 w-64 focus-within:border-blue-300 transition-all">
-                        <SearchIcon className="w-4 h-4 text-gray-400" />
-                        <input
-                            value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
-                            placeholder="Buscar profissional..."
-                            className="bg-transparent border-none outline-none text-xs font-bold text-gray-600 ml-2 w-full placeholder:text-gray-300"
-                        />
+            <div className={`grid flex-1 gap-0 overflow-hidden ${isFormOpen ? 'grid-cols-[1fr_440px]' : 'grid-cols-1'}`}>
+                <section className="flex min-w-0 flex-col overflow-hidden border-r border-gray-100 bg-white">
+                    <div className="flex flex-wrap items-end gap-3 border-b border-gray-100 px-6 py-4">
+                        <label className="relative min-w-[280px] flex-1">
+                            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Buscar por nome, area, funcao, origem..." className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-3 text-xs font-semibold text-gray-700 outline-none transition focus:border-indigo-300" />
+                        </label>
+                        <div className="grid min-w-[240px] gap-1">
+                            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">Venture do lote</span>
+                            <select value={batchVentureId} onChange={(event) => setBatchVentureId(event.target.value)} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 outline-none focus:border-indigo-300">
+                                <option value="">Selecionar...</option>
+                                {ventures.map((venture) => <option key={venture.id} value={venture.id}>{venture.name}</option>)}
+                            </select>
+                        </div>
+                        <div className="grid min-w-[220px] gap-1">
+                            <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-gray-400">Origem do lote</span>
+                            <input value={batchOrigin} onChange={(event) => setBatchOrigin(event.target.value)} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 outline-none focus:border-indigo-300" />
+                        </div>
+                        <input ref={batchInputRef} type="file" accept=".csv,.json" className="hidden" onChange={handleBatchFile} />
+                        <button onClick={() => batchInputRef.current?.click()} disabled={isImporting} className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-[10px] font-black uppercase tracking-wider text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50">
+                            <CloudUploadIcon className="h-4 w-4" />
+                            {isImporting ? 'Importando...' : 'Importar lote'}
+                        </button>
                     </div>
+                    {importFeedback && <div className="border-b border-gray-100 bg-gray-50 px-6 py-2 text-[11px] font-semibold text-gray-600">{importFeedback}</div>}
 
-                    <div className="flex bg-gray-100 p-1 rounded-lg">
-                        <button onClick={() => setGrouping('none')} className={`px-3 py-1.5 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${grouping === 'none' ? 'bg-white text-bitrix-nav shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Lista</button>
-                        <button onClick={() => setGrouping('company')} className={`px-3 py-1.5 rounded-md text-[9px] font-black uppercase tracking-widest transition-all ${grouping === 'company' ? 'bg-white text-bitrix-nav shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}>Agrupar</button>
-                    </div>
-
-                    <button onClick={() => { setIsAdding(true); setEditingId(null); }} className="px-5 py-2.5 bg-bitrix-nav text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg flex items-center gap-2">
-                        <PlusIcon className="w-3 h-3" />
-                        Novo Colaborador
-                    </button>
-                </div>
-            </div>
-
-            {/* Content Table */}
-            <div className="flex-1 overflow-auto pb-40 bg-white relative">
-                <table className="w-full border-collapse table-fixed min-w-[1400px]">
-                    <colgroup>
-                        <col style={{ width: colWidths.expand }} />
-                        <col style={{ width: colWidths.name }} />
-                        {columnOrder.map(colId => (
-                            <col key={colId} style={{ width: colWidths[colId as keyof typeof colWidths] || 100 }} />
-                        ))}
-                    </colgroup>
-
-                    <thead>
-                        <tr className="border-b border-gray-100 bg-white sticky top-0 z-40 shadow-sm h-10">
-                            {/* FIXADO: Coluna Expand */}
-                            <th className="text-center px-2 bg-white relative group border-b border-gray-100" style={{ position: 'sticky', left: 0, zIndex: 40 }}>
-                                <Resizer colId="expand" />
-                            </th>
-                            {/* FIXADO: Coluna Nome */}
-                            <th className="text-left px-4 text-[9px] font-bold text-gray-400 uppercase tracking-widest whitespace-nowrap bg-white relative group border-b border-gray-100 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]" style={{ position: 'sticky', left: colWidths.expand, zIndex: 40 }}>
-                                Nome / I.D. <Resizer colId="name" />
-                            </th>
-
-                            {/* COLUNAS MÓVEIS (DRAGGABLE) */}
-                            {columnOrder.map(colId => {
-                                const colDef = INITIAL_MOVABLE_COLUMNS.find(c => c.id === colId);
-                                if (!colDef) return null;
-                                return (
-                                    <th
-                                        key={colId}
-                                        className={`
-                                        ${colDef.align === 'center' ? 'text-center' : 'text-left'} px-4 
-                                        text-[9px] font-bold text-gray-400 uppercase tracking-widest whitespace-nowrap 
-                                        bg-white relative group cursor-grab active:cursor-grabbing hover:bg-gray-50 transition-colors
-                                        ${draggedColumn === colId ? 'opacity-30 bg-gray-100' : ''}
-                                    `}
-                                        draggable
-                                        onDragStart={(e) => handleDragStart(e, colId)}
-                                        onDragOver={(e) => handleDragOver(e, colId)}
-                                        onDragEnd={handleDragEnd}
-                                    >
-                                        {colDef.label}
-                                        <Resizer colId={colId} />
-                                    </th>
-                                );
-                            })}
-                        </tr>
-                    </thead>
-
-                    {isAdding && (
-                        <tbody>
-                            <tr className="bg-blue-50/30 border-b border-blue-100 transition-all h-10 animate-msg shadow-inner group">
-                                {/* FIXADO: Coluna Expand */}
-                                <td className="px-2 text-center align-middle bg-white group-hover:bg-blue-50/30" style={{ position: 'sticky', left: 0, zIndex: 30 }}>
-                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mx-auto animate-pulse"></div>
-                                </td>
-                                {/* FIXADO: Coluna Nome */}
-                                <td className="px-4 align-middle bg-white group-hover:bg-blue-50/30 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)] border-r border-gray-100" style={{ position: 'sticky', left: colWidths.expand, zIndex: 30 }}>
-                                    <input
-                                        autoFocus
-                                        className="w-full bg-white border border-blue-200 rounded px-2 py-1 text-[10px] outline-none focus:ring-1 focus:ring-blue-400"
-                                        placeholder="Nome do Agente"
-                                        value={newAgent.name}
-                                        onChange={e => setNewAgent({ ...newAgent, name: e.target.value })}
-                                    />
-                                </td>
-
-                                {/* Células Dinâmicas de Criação */}
-                                {columnOrder.map(colId => (
-                                    <React.Fragment key={colId}>
-                                        {renderCellContent(colId, null, true)}
-                                    </React.Fragment>
-                                ))}
-                            </tr>
-                        </tbody>
-                    )}
-
-                    {sortedGroupKeys.map(groupKey => {
-                        const group = groups[groupKey];
-                        if (group.agents.length === 0) return null;
-
-                        return (
-                            <tbody key={group.name}>
-                                {grouping === 'company' && (
-                                    <tr className="bg-white group/header sticky top-9 z-10">
-                                        <td colSpan={15} className="pt-6 pb-2 px-4 bg-gray-50/50 border-b border-gray-100">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`px-4 py-1 rounded-[4px] text-white text-[11px] font-black uppercase shadow-sm tracking-wider flex items-center gap-2 cursor-pointer hover:brightness-110 transition-all`} style={{ backgroundColor: group.color }}>
-                                                    {group.name}
-                                                    <span className="bg-black/20 px-1.5 py-0.5 rounded text-[9px] min-w-[20px] text-center">{group.agents.length}</span>
-                                                </div>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                )}
-
-                                {group.agents.map(agent => {
-                                    const agentBu = businessUnits.find(b => b.id === agent.buId);
-                                    const badgeColor = agentBu ? agentBu.themeColor : '#6B7280';
-                                    const badgeName = agentBu ? agentBu.name : (agent.company || 'Outros');
-                                    const isActive = agent.status === 'ACTIVE';
-                                    const isPlanned = agent.status === 'PLANNED';
-
-                                    let nameColorClass = isPlanned ? 'text-yellow-600' : 'text-gray-700';
-
+                    <div className="flex-1 overflow-auto">
+                        <table className="min-w-[1700px] table-fixed border-collapse">
+                            <thead className="sticky top-0 z-10 bg-white shadow-sm">
+                                <tr className="border-b border-gray-100 text-left text-[10px] font-black uppercase tracking-[0.14em] text-gray-400">
+                                    <th className="px-3 py-3">Nome</th><th className="px-3 py-3">Tipo</th><th className="px-3 py-3">Venture</th><th className="px-3 py-3">Unidade</th><th className="px-3 py-3">Area</th><th className="px-3 py-3">Funcao</th><th className="px-3 py-3">Cargo-base</th><th className="px-3 py-3">Nivel</th><th className="px-3 py-3">Papel</th><th className="px-3 py-3">Status estrutural</th><th className="px-3 py-3">Ativacao</th><th className="px-3 py-3">DNA</th><th className="px-3 py-3">Classe</th><th className="px-3 py-3">Stack permitida</th><th className="px-3 py-3">Modelo preferencial</th><th className="px-3 py-3">Responsavel humano</th><th className="px-3 py-3">Documentos</th><th className="px-3 py-3">Origem</th><th className="px-3 py-3">Ultima atualizacao</th><th className="px-3 py-3 text-center">Acoes</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredAgents.map((agent) => {
+                                    const ventureName = ventures.find((venture) => venture.id === agent.ventureId)?.name || agent.company || '-';
+                                    const stackText = Array.isArray(agent.allowedStacks) && agent.allowedStacks.length > 0
+                                        ? agent.allowedStacks.map((stack) => toDisplayOption(stack)).join(', ')
+                                        : toDisplayOption(agent.modelProvider || '-');
+                                    const updatedAt = (agent as any).updatedAt || (agent as any).updated_at || (agent as any).createdAt;
+                                    const updatedAtText = updatedAt ? new Date(updatedAt).toLocaleString('pt-BR') : '-';
+                                    const structuralStatus = agent.structuralStatus || (agent.status === 'ACTIVE' ? 'ATIVO' : agent.status === 'STAGING' ? 'HOMOLOGACAO' : 'EM_CONFIGURACAO');
+                                    const dnaStatus = agent.dnaStatus || 'SEM_DNA';
                                     return (
-                                        <tr
-                                            key={agent.id}
-                                            className="group border-b border-gray-100 transition-all bg-white h-8 hover:bg-gray-50"
-                                        >
-                                            {/* FIXADO: Coluna Expand */}
-                                            <td className="px-2 text-center align-middle overflow-hidden bg-white group-hover:bg-gray-50 transition-colors" style={{ position: 'sticky', left: 0, zIndex: 30 }}>
-                                                <div className="w-0 group-hover:w-full transition-all overflow-hidden flex justify-center">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
-                                                </div>
-                                            </td>
-
-                                            {/* FIXADO: Coluna Nome */}
-                                            <td className="px-4 align-middle border-r border-transparent group-hover:border-gray-100 overflow-hidden bg-white group-hover:bg-gray-50 transition-colors shadow-[4px_0_8px_-4px_rgba(0,0,0,0.1)]" style={{ position: 'sticky', left: colWidths.expand, zIndex: 30 }}>
-                                                <div className="flex items-center gap-3 w-full">
-                                                    <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
-                                                    <span className={`text-[11px] font-medium whitespace-nowrap overflow-hidden text-ellipsis block max-w-full ${nameColorClass}`} title={agent.name}>
-                                                        {agent.name}
-                                                    </span>
-                                                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity ml-auto shrink-0">
-                                                        <span className="text-[9px] text-gray-400 bg-gray-100 px-1 rounded flex items-center gap-1">📞 1</span>
-                                                        <span className="text-gray-300 hover:text-gray-500 cursor-pointer"><PaperclipIcon className="w-3 h-3" /></span>
+                                        <tr key={agent.id} className="border-b border-gray-100 text-[12px] text-gray-700 hover:bg-gray-50">
+                                            <td className="px-3 py-2">
+                                                <div className="flex items-center gap-3">
+                                                    <Avatar name={agent.name} url={agent.avatarUrl} className="h-9 w-9" />
+                                                    <div className="min-w-0">
+                                                        <p className="truncate text-[12px] font-bold text-gray-800">{agent.name}</p>
+                                                        <p className="truncate text-[10px] font-semibold text-gray-400">{agent.shortDescription || agent.officialRole || '-'}</p>
                                                     </div>
                                                 </div>
                                             </td>
-
-                                            {/* Células Dinâmicas */}
-                                            {columnOrder.map(colId => (
-                                                <React.Fragment key={colId}>
-                                                    {renderCellContent(colId, agent, false, badgeName, badgeColor)}
-                                                </React.Fragment>
-                                            ))}
+                                            <td className="px-3 py-2">{toDisplayOption(agent.entityType || (agent.collaboratorType === 'HUMANO' ? 'HUMANO' : 'AGENTE'))}</td>
+                                            <td className="px-3 py-2">{ventureName}</td>
+                                            <td className="px-3 py-2">{agent.unitName || agent.division || '-'}</td>
+                                            <td className="px-3 py-2">{agent.area || agent.sector || '-'}</td>
+                                            <td className="px-3 py-2">{agent.functionName || agent.officialRole || '-'}</td>
+                                            <td className="px-3 py-2">{agent.baseRoleUniversal || agent.officialRole || '-'}</td>
+                                            <td className="px-3 py-2">{toDisplayOption(agent.tier || '-')}</td>
+                                            <td className="px-3 py-2">{toDisplayOption(agent.roleType || '-')}</td>
+                                            <td className="px-3 py-2">{renderBadge(toDisplayOption(structuralStatus), structuralStatus === 'ATIVO' ? 'green' : structuralStatus === 'HOMOLOGACAO' ? 'purple' : 'gray')}</td>
+                                            <td className="px-3 py-2">{toDisplayOption(agent.operationalActivation || '-')}</td>
+                                            <td className="px-3 py-2">{renderBadge(toDisplayOption(dnaStatus), dnaStatus === 'DNA_COMPLETO' ? 'green' : dnaStatus === 'DNA_PARCIAL' ? 'yellow' : 'gray')}</td>
+                                            <td className="px-3 py-2">{toDisplayOption(agent.operationalClass || '-')}</td>
+                                            <td className="px-3 py-2">{stackText}</td>
+                                            <td className="px-3 py-2">{toDisplayOption(agent.preferredModel || agent.modelProvider || '-')}</td>
+                                            <td className="px-3 py-2">{agent.humanOwner || '-'}</td>
+                                            <td className="px-3 py-2">{Number(agent.docCount || 0)}</td>
+                                            <td className="px-3 py-2">{agent.origin || '-'}</td>
+                                            <td className="px-3 py-2 text-[11px]">{updatedAtText}</td>
+                                            <td className="px-3 py-2">
+                                                <div className="flex items-center justify-center gap-2">
+                                                    <button onClick={() => handleOpenEdit(agent)} className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-500 transition hover:bg-blue-50 hover:text-blue-600" title="Editar"><PencilIcon className="h-3.5 w-3.5" /></button>
+                                                    {onManageIntelligence && <button onClick={() => onManageIntelligence(agent)} className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-500 transition hover:bg-purple-50 hover:text-purple-600" title="Status DNA"><BotIcon className="h-3.5 w-3.5" /></button>}
+                                                    {onRemove && <button onClick={() => handleDelete(agent)} className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-gray-100 text-gray-500 transition hover:bg-red-50 hover:text-red-600" title="Excluir"><TrashIcon className="h-3.5 w-3.5" /></button>}
+                                                </div>
+                                            </td>
                                         </tr>
                                     );
                                 })}
+                                {filteredAgents.length === 0 && <tr><td colSpan={20} className="px-6 py-10 text-center text-sm font-semibold text-gray-400">Nenhum cadastro encontrado para o filtro atual.</td></tr>}
                             </tbody>
-                        );
-                    })}
-                </table>
+                        </table>
+                    </div>
+                </section>
+
+                {isFormOpen && (
+                    <aside className="flex h-full flex-col overflow-hidden bg-[#FCFCFE]">
+                        <div className="flex items-start justify-between border-b border-gray-100 px-6 py-5">
+                            <div>
+                                <h2 className="text-lg font-black uppercase tracking-tight text-bitrix-nav">{editingAgentId ? 'Editar cadastro' : 'Novo cadastro'}</h2>
+                                <p className="mt-1 text-[11px] font-semibold text-gray-500">Quadro estrutural sem exposicao de DNA, cultura ou compliance.</p>
+                            </div>
+                            <button onClick={() => setIsFormOpen(false)} className="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"><XIcon className="h-5 w-5" /></button>
+                        </div>
+                        <div className="flex-1 space-y-6 overflow-auto px-6 py-5">
+                            <section className="space-y-3">
+                                <h3 className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-400">Identidade</h3>
+                                <div className="grid grid-cols-1 gap-3">
+                                    <label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Nome *</span><input value={form.name} onChange={(e) => setFormField('name', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Tipo *</span><select value={form.entityType} onChange={(e) => setFormField('entityType', e.target.value as EntityType)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300">{ENTITY_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+                                        <label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Origem</span><input value={form.origin} onChange={(e) => setFormField('origin', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label>
+                                    </div>
+                                    <label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Descricao curta</span><textarea value={form.shortDescription} onChange={(e) => setFormField('shortDescription', e.target.value)} rows={2} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label>
+                                    <div className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-3">
+                                        <Avatar name={form.name || 'Novo Cadastro'} url={form.avatarUrl} className="h-12 w-12" />
+                                        <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-gray-700">Avatar / Foto</p><p className="truncate text-[10px] font-semibold text-gray-400">Imagem publica para visualizacao de lista</p></div>
+                                        <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
+                                        <button onClick={() => avatarInputRef.current?.click()} className="rounded-lg border border-gray-200 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-gray-600 transition hover:bg-gray-50">Selecionar</button>
+                                    </div>
+                                </div>
+                            </section>
+                            <section className="space-y-3"><h3 className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-400">Estrutura organizacional</h3><div className="grid grid-cols-1 gap-3"><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Venture *</span><select value={form.ventureId} onChange={(e) => setFormField('ventureId', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300"><option value="">Selecionar...</option>{ventures.map((venture) => <option key={venture.id} value={venture.id}>{venture.name}</option>)}</select></label><div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Unidade</span><input value={form.unitName} onChange={(e) => setFormField('unitName', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Area</span><input value={form.area} onChange={(e) => setFormField('area', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label></div><div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Funcao *</span><input value={form.functionName} onChange={(e) => setFormField('functionName', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Cargo-base universal</span><input value={form.baseRoleUniversal} onChange={(e) => setFormField('baseRoleUniversal', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label></div><div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Nivel</span><select value={form.level} onChange={(e) => setFormField('level', e.target.value as AgentTier)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300">{LEVEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Papel</span><select value={form.roleType} onChange={(e) => setFormField('roleType', e.target.value as RoleType)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300">{ROLE_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div></div></section>
+                            <section className="space-y-3"><h3 className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-400">Status</h3><div className="grid grid-cols-1 gap-3"><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Status estrutural</span><select value={form.structuralStatus} onChange={(e) => setFormField('structuralStatus', e.target.value as StructuralStatus)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300">{STRUCTURAL_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Ativacao operacional</span><select value={form.operationalActivation} onChange={(e) => setFormField('operationalActivation', e.target.value as OperationalActivation)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300">{OPERATIONAL_ACTIVATION_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Status DNA (somente status)</span><select value={form.dnaStatus} onChange={(e) => setFormField('dnaStatus', e.target.value as DnaStatus)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300">{DNA_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div></section>
+                            <section className="space-y-3"><h3 className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-400">Operacao</h3><div className="grid grid-cols-1 gap-3"><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Classe operacional</span><select value={form.operationalClass} onChange={(e) => setFormField('operationalClass', e.target.value as OperationalClass)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300">{OPERATIONAL_CLASS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><div className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Stack permitida (multiplos)</span><div className="grid grid-cols-2 gap-2 rounded-lg border border-gray-200 bg-white p-2">{STACK_OPTIONS.map((option) => (<label key={option.value} className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50"><input type="checkbox" checked={form.allowedStacks.includes(option.value)} onChange={() => toggleStack(option.value)} className="h-3.5 w-3.5" />{option.label}</label>))}</div></div><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Modelo preferencial</span><select value={form.preferredModel} onChange={(e) => setFormField('preferredModel', e.target.value as ModelProvider | '')} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300"><option value="">Selecionar...</option>{STACK_OPTIONS.filter((option) => form.allowedStacks.includes(option.value)).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label></div></section>
+                            <section className="space-y-3"><h3 className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-400">Vinculos e documentos</h3><div className="grid grid-cols-1 gap-3"><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Mentor IA</span><select value={form.aiMentor} onChange={(e) => setFormField('aiMentor', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300"><option value="">Selecionar...</option>{mentorCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}</select></label><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Responsavel humano</span><select value={form.humanOwner} onChange={(e) => setFormField('humanOwner', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300"><option value="">Selecionar...</option>{mentorCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}</select></label><div className="grid grid-cols-3 gap-3"><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Documentos vinculados</span><input type="number" min="0" value={form.documentCount} onChange={(e) => setFormField('documentCount', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Inicio</span><input type="date" value={form.startDate} onChange={(e) => setFormField('startDate', e.target.value)} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label><label className="space-y-1"><span className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Salario</span><input value={form.salary} onChange={(e) => setFormField('salary', e.target.value)} placeholder="R$ 0,00" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /></label></div></div></section>
+                            <section className="space-y-3"><div className="flex items-center justify-between"><h3 className="text-[11px] font-black uppercase tracking-[0.16em] text-gray-400">Campos customizados</h3><button onClick={addCustomField} className="rounded-lg border border-gray-200 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-gray-600 hover:bg-gray-50">+ Campo</button></div><div className="space-y-2">{form.customFields.length === 0 && <p className="rounded-lg border border-dashed border-gray-200 px-3 py-3 text-[11px] font-semibold text-gray-400">Nenhum campo customizado adicionado.</p>}{form.customFields.map((field, index) => (<div key={`${index}-${field.key}`} className="grid grid-cols-[1fr_1fr_auto] gap-2"><input value={field.key} onChange={(e) => upsertCustomField(index, { key: e.target.value })} placeholder="Chave" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /><input value={field.value} onChange={(e) => upsertCustomField(index, { value: e.target.value })} placeholder="Valor" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 outline-none focus:border-indigo-300" /><button onClick={() => removeCustomField(index)} className="rounded-lg border border-red-100 px-2 text-red-500 hover:bg-red-50"><XIcon className="h-4 w-4" /></button></div>))}</div></section>
+                        </div>
+                        <div className="flex shrink-0 items-center justify-between border-t border-gray-100 bg-white px-6 py-4">
+                            <p className="text-[10px] font-semibold text-gray-400">{editingAgentId ? 'Edicao de cadastro estrutural.' : 'Cadastro novo para escalar o ecossistema.'}</p>
+                            <div className="flex items-center gap-2">
+                                <button onClick={() => setIsFormOpen(false)} className="rounded-xl border border-gray-200 px-4 py-2 text-[10px] font-black uppercase tracking-wider text-gray-600 hover:bg-gray-50">Cancelar</button>
+                                <button onClick={handleSave} disabled={isSaving} className="rounded-xl bg-bitrix-nav px-5 py-2 text-[10px] font-black uppercase tracking-wider text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-50">{isSaving ? 'Salvando...' : 'Salvar cadastro'}</button>
+                            </div>
+                        </div>
+                    </aside>
+                )}
             </div>
         </div>
     );

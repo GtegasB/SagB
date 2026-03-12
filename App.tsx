@@ -14,10 +14,12 @@ import AudacusView from './components/AudacusView';
 import StartyBView from './components/StartyBView'; // NEW MODULE
 import ManagementView from './components/ManagementView';
 import GovernanceView from './components/GovernanceView';
+import QualitySensorView from './components/QualitySensorView';
+import IntelligenceFlowView from './components/IntelligenceFlowView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView';
 import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
-import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, Venture, BusinessUnit, BusinessBlueprint, Task, UserProfile, GovernanceCulture, ComplianceRule, VaultItem, KnowledgeNode, WorkspaceMember } from './types';
+import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, Venture, BusinessUnit, BusinessBlueprint, Task, UserProfile, GovernanceCulture, ComplianceRule, VaultItem, KnowledgeNode, WorkspaceMember, AgentQualityEvent } from './types';
 import {
   sendMessageStream,
   startMainSession,
@@ -175,6 +177,7 @@ const App: React.FC = () => {
   const [vaultItems, setVaultItems] = useState<VaultItem[]>([]);
   const [knowledgeNodes, setKnowledgeNodes] = useState<KnowledgeNode[]>([]);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
+  const [agentQualityEvents, setAgentQualityEvents] = useState<AgentQualityEvent[]>([]);
   const [input, setInput] = useState('');
 
   const filteredCultureEntries = useMemo(
@@ -586,6 +589,7 @@ if (userId) {
       setKnowledgeNodes([]);
       setAgentConfigsByAgentId({});
       setAgentMemoriesByAgentId({});
+      setAgentQualityEvents([]);
       return;
     }
 
@@ -603,6 +607,7 @@ if (userId) {
 
     const agentConfigsQuery = query(collection(db, 'agent_configs'), orderBy('updatedAt', 'desc'));
     const agentMemoriesQuery = query(collection(db, 'agent_memories'), orderBy('createdAt', 'desc'));
+    const qualityEventsQuery = query(collection(db, 'agent_quality_events'), orderBy('createdAt', 'desc'));
 
     const unsubscribeCulture = onSnapshot(cultureQuery, (snapshot) => {
       const rows = snapshot.docs.map(doc => doc.data() as GovernanceCulture);
@@ -669,6 +674,24 @@ if (userId) {
       console.error('Erro ao carregar agent_memories:', error);
     });
 
+    let unsubscribeQualityEvents: () => void = () => {};
+    let qualityEventsSubscriptionDisabled = false;
+    unsubscribeQualityEvents = onSnapshot(qualityEventsQuery, (snapshot) => {
+      if (qualityEventsSubscriptionDisabled) return;
+      const rows = scopeGovernanceRowsByWorkspace(snapshot.docs.map(doc => doc.data() as AgentQualityEvent));
+      setAgentQualityEvents(rows);
+    }, (error) => {
+      const rawMessage = String((error as any)?.details?.message || (error as any)?.message || error || '');
+      if (/Could not find the table 'public\.agent_quality_events'/i.test(rawMessage)) {
+        qualityEventsSubscriptionDisabled = true;
+        setAgentQualityEvents([]);
+        console.warn('Tabela public.agent_quality_events ainda nao existe no Supabase. Assinatura de qualidade desativada ate aplicar migration.');
+        unsubscribeQualityEvents();
+        return;
+      }
+      console.error('Erro ao carregar agent_quality_events:', error);
+    });
+
     return () => {
       unsubscribeCulture();
       unsubscribeCompliance();
@@ -676,6 +699,7 @@ if (userId) {
       unsubscribeKnowledge();
       unsubscribeAgentConfigs();
       unsubscribeAgentMemories();
+      unsubscribeQualityEvents();
     };
   }, [user, activeWorkspaceId, memberWorkspaceIds]);
 
@@ -1438,6 +1462,21 @@ if (userId) {
           onDeleteKnowledgeNode={handleDeleteKnowledgeNode}
         />
       );
+      case 'quality':
+        return (
+          <QualitySensorView
+            qualityEvents={agentQualityEvents}
+            workspaceId={activeWorkspaceId}
+            onBack={() => setActiveTab('ecosystem')}
+          />
+        );
+      case 'intelligence-flow':
+        return (
+          <IntelligenceFlowView
+            workspaceId={activeWorkspaceId}
+            onBack={() => setActiveTab('ecosystem')}
+          />
+        );
 
       case 'alignment': return <AlignmentView activeBU={activeBU} blueprint={currentBlueprint} onUpdateBlueprint={(bp) => setBlueprints(p => ({ ...p, [activeBU.id]: { ...p[activeBU.id], ...bp } }))} activeWorkspaceId={activeWorkspaceId} ownerUserId={ownerUserId} />;
 

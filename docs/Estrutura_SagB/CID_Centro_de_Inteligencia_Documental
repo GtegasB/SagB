@@ -1,0 +1,329 @@
+Claro, Rodrigues. Aqui vai o **prompt fechado para o Cássio**, já pronto para copiar e colar.
+
+---
+
+Cássio, tudo bem?
+
+Quero abrir uma nova frente dentro do SAGB e preciso que você trate isso como uma peça estratégica do sistema.
+
+## Nome da área
+
+**CID — Centro de Inteligência Documental**
+
+## Objetivo
+
+O CID não deve ser só uma tela de upload ou um cofre de arquivos.
+
+Ele deve ser a área oficial do SAGB para:
+
+* armazenar documentos, áudios e vídeos
+* transcrever
+* resumir
+* consolidar múltiplos materiais
+* organizar metadados
+* rastrear processamento
+* preparar conhecimento útil para o ecossistema
+
+A lógica é transformar arquivos em conhecimento processável.
+
+---
+
+# 1. O que eu quero que o CID faça
+
+## 1.1 Tipos de entrada
+
+Aceitar pelo menos:
+
+* PDF
+* DOC / DOCX
+* TXT
+* planilhas
+* imagem
+* áudio
+* vídeo
+* lote de arquivos
+
+## 1.2 Ações no upload
+
+Ao subir um item, o usuário deve conseguir escolher:
+
+* só armazenar
+* armazenar + transcrever
+* armazenar + resumir
+* armazenar + transcrever + resumir
+* armazenar + consolidar junto com outros arquivos
+
+O sistema não deve assumir sempre o mesmo comportamento.
+
+---
+
+# 2. Fragmentação automática
+
+Isso é obrigatório na arquitetura.
+
+Se o arquivo for grande demais para ser processado de uma vez, o sistema deve:
+
+* detectar o tamanho ou duração
+* fragmentar automaticamente
+* processar as partes separadamente
+* consolidar no final
+
+## Exemplos
+
+### Documento grande
+
+Dividir por:
+
+* páginas
+* capítulos
+* blocos
+* headings
+* limite máximo configurável
+
+### Áudio ou vídeo grande
+
+Dividir por:
+
+* tempo
+* tamanho
+* blocos de minutos
+* trechos
+
+A lógica interna precisa ser:
+
+**arquivo original -> job -> partes -> processamento -> consolidação**
+
+---
+
+# 3. Processamento e rastreabilidade
+
+Cada item do CID precisa ter rastreio completo do processo.
+
+## Status sugeridos
+
+* recebido
+* aguardando fila
+* fragmentando
+* processando
+* transcrevendo
+* resumindo
+* consolidando
+* concluído
+* concluído com aviso
+* erro
+* pausado
+* cancelado
+
+## Timestamps
+
+Cada item precisa mostrar:
+
+* criado em
+* processamento iniciado em
+* última atualização
+* concluído em
+* falhou em, se houver erro
+
+## Progresso
+
+Mostrar:
+
+* percentual
+* total de partes
+* partes concluídas
+* partes pendentes
+
+---
+
+# 4. Estrutura de saída
+
+Cada item do CID, quando aplicável, deve gerar:
+
+* arquivo original
+* metadados
+* texto extraído
+* transcrição
+* resumo curto
+* resumo longo
+* consolidação geral
+* palavras-chave
+* vínculo com venture, área, projeto ou tema
+
+---
+
+# 5. Metadados obrigatórios no upload
+
+Quero que o sistema permita classificar cada item com pelo menos:
+
+* título
+* tipo de material
+* venture
+* área
+* projeto
+* sensibilidade
+* tags
+* responsável
+* idioma
+* ação desejada
+
+Sem isso, o CID vira depósito burro.
+
+---
+
+# 6. Estrutura interna que eu quero
+
+Quero que você modele o CID com estas três camadas internas:
+
+## 6.1 Asset original
+
+O arquivo bruto.
+
+## 6.2 Processing job
+
+O trabalho de processamento daquele item.
+
+## 6.3 Chunks / partes
+
+As partes geradas para leitura, transcrição, resumo e consolidação.
+
+Isso precisa ser pensado desde o começo porque depois vai conversar com:
+
+* busca
+* RAG
+* memória
+* auditoria
+* retries
+* fila
+* agentes
+
+---
+
+# 7. Interface do CID
+
+Quero uma área com quatro abas principais:
+
+## Aba 1. Upload
+
+Para subir arquivos e escolher processamento.
+
+## Aba 2. Biblioteca
+
+Para visualizar o que já existe.
+
+## Aba 3. Processamento
+
+Para acompanhar fila, andamento, erros e conclusão.
+
+## Aba 4. Inteligência
+
+Para buscar, comparar, resumir, consolidar e gerar sínteses.
+
+---
+
+# 8. Regras de segurança e escopo
+
+Cada item do CID deve respeitar:
+
+* workspace
+* venture
+* área
+* projeto
+* sensibilidade
+* permissão de leitura
+* se pode ou não entrar em base consultável por agentes
+
+Isso não pode ser um upload solto.
+
+---
+
+# 9. Estrutura técnica sugerida
+
+Sem querer engessar sua implementação, mas a modelagem conceitual que eu quero é esta:
+
+## Tabelas principais
+
+* `cid_assets`
+* `cid_asset_files`
+* `cid_processing_jobs`
+* `cid_chunks`
+* `cid_outputs`
+* `cid_tags`
+* `cid_asset_tags`
+* `cid_links`
+* `cid_batches`
+* `cid_batch_items`
+
+## Regras
+
+* arquivo original fica em storage
+* metadados ficam no banco
+* jobs ficam no banco
+* partes ficam no banco
+* saídas ficam no banco
+* retry deve poder acontecer por job ou por chunk
+* um erro em uma parte não pode invalidar tudo automaticamente
+
+---
+
+# 10. V1 que eu quero agora
+
+Não precisa tentar resolver tudo de uma vez.
+
+Quero uma V1 forte com:
+
+* upload
+* armazenamento
+* fragmentação automática
+* fila de processamento
+* transcrição
+* resumo
+* status detalhado
+* visualização do original
+* visualização da transcrição
+* visualização do resumo
+
+A consolidação avançada, busca semântica e uso por agentes podem evoluir depois.
+
+---
+
+# 11. Regras de implementação
+
+* não tratar o CID como simples tela de upload
+* pensar como pipeline de conhecimento
+* preparar para arquivos grandes
+* preparar para lotes
+* preparar para retry
+* preparar para rastreabilidade
+* preparar para integração futura com agentes
+
+---
+
+# 12. Entregáveis que eu quero
+
+## Entregável 1
+
+Nova área do CID no SAGB com as quatro abas.
+
+## Entregável 2
+
+Estrutura de banco e storage para assets, jobs, chunks e outputs.
+
+## Entregável 3
+
+Fluxo de upload e processamento com status visível.
+
+## Entregável 4
+
+Relatório técnico curto explicando:
+
+* estrutura criada
+* tabelas
+* fluxo
+* limitações da V1
+* próximos passos sugeridos
+
+---
+
+# Resumo final
+
+Quero que o **CID, Centro de Inteligência Documental**, seja uma área oficial do SAGB para armazenar, fragmentar, transcrever, resumir e organizar materiais em formato útil, com pipeline rastreável, status claros e estrutura pronta para virar base de conhecimento do ecossistema.

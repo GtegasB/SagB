@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { Agent, Task, BusinessUnit } from '../types';
-import { db, collection, query, where, onSnapshot } from '../services/supabase';
+import { Agent, BusinessUnit, Task } from '../types';
+import { db, collection, onSnapshot, orderBy, query, where } from '../services/supabase';
 import { resolveWorkspaceId } from '../utils/supabaseChat';
 
 interface DashboardHomeProps {
@@ -14,8 +14,80 @@ interface DashboardHomeProps {
 
 const GERAC_SEAL = "https://static.wixstatic.com/media/64c3dc_6d0ef8c33da846cd9a3527cb01f6a1f7~mv2.png";
 
+type CommandFlow = {
+  id: string;
+  flowType: string;
+  status: string;
+  origin: string;
+  participants: string[];
+  finalAction: string;
+  createdAt: Date;
+};
+
+const toDate = (value: any): Date => {
+  if (value instanceof Date) return value;
+  const parsed = new Date(value || Date.now());
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
+const normalizeParticipants = (value: any): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (typeof item === 'string') return item.trim();
+      if (item && typeof item === 'object') return String(item.name || item.label || item.id || '').trim();
+      return '';
+    })
+    .filter(Boolean);
+};
+
+const formatFlowTypeLabel = (value: string) => {
+  const map: Record<string, string> = {
+    conversation: 'Conversa',
+    handoff: 'Handoff',
+    decision: 'Decisão',
+    task_generation: 'Geração de tarefa',
+    cid_processing: 'Processamento CID',
+    error: 'Erro'
+  };
+  return map[String(value || '').toLowerCase()] || 'Conversa';
+};
+
+const formatFlowStatusLabel = (value: string) => {
+  const map: Record<string, string> = {
+    pending: 'Pendente',
+    running: 'Executando',
+    ok: 'Ok',
+    warning: 'Atenção',
+    error: 'Erro',
+    cancelled: 'Cancelado'
+  };
+  return map[String(value || '').toLowerCase()] || 'Pendente';
+};
+
+const typeBadgeClass = (flowType: string) => {
+  const normalized = String(flowType || '').toLowerCase();
+  if (normalized === 'error') return 'bg-red-50 text-red-700 border-red-100';
+  if (normalized === 'handoff') return 'bg-indigo-50 text-indigo-700 border-indigo-100';
+  if (normalized === 'task_generation') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
+  if (normalized === 'decision') return 'bg-amber-50 text-amber-700 border-amber-100';
+  if (normalized === 'cid_processing') return 'bg-purple-50 text-purple-700 border-purple-100';
+  return 'bg-slate-50 text-slate-700 border-slate-100';
+};
+
+const statusBadgeClass = (status: string) => {
+  const normalized = String(status || '').toLowerCase();
+  if (normalized === 'error') return 'bg-red-100 text-red-700';
+  if (normalized === 'ok') return 'bg-green-100 text-green-700';
+  if (normalized === 'running') return 'bg-blue-100 text-blue-700';
+  if (normalized === 'warning') return 'bg-yellow-100 text-yellow-700';
+  return 'bg-gray-100 text-gray-600';
+};
+
 const DashboardHome: React.FC<DashboardHomeProps> = ({ agents, tasks, businessUnits, onNavigate, activeWorkspaceId }) => {
   const [dailyStats, setDailyStats] = useState({ conversations: 0, messages: 0 });
+  const [intelligenceFlowRows, setIntelligenceFlowRows] = useState<CommandFlow[]>([]);
+  const [flowTableMissing, setFlowTableMissing] = useState(false);
 
   // --- CÁLCULO DE VOLUMETRIA EM TEMPO REAL ---
   useEffect(() => {
@@ -72,6 +144,55 @@ const DashboardHome: React.FC<DashboardHomeProps> = ({ agents, tasks, businessUn
       unsubscribeMessages();
     };
   }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    const scopedWorkspaceId = resolveWorkspaceId(activeWorkspaceId);
+    let flowDisabled = false;
+
+    const intelligenceFlowQuery = query(
+      collection(db, "intelligence_flows"),
+      where("workspaceId", "==", scopedWorkspaceId),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsubscribeFlows = onSnapshot(intelligenceFlowQuery, (snapshot) => {
+      if (flowDisabled) return;
+      setFlowTableMissing(false);
+      const rows = snapshot.docs.map((row: any) => {
+        const raw = row.data() as any;
+        return {
+          id: String(raw.id || row.id),
+          flowType: String(raw.flowType || 'conversation'),
+          status: String(raw.status || 'pending'),
+          origin: String(raw.origin || 'Fluxo de Inteligência'),
+          participants: normalizeParticipants(raw.participants),
+          finalAction: String(raw.finalAction || 'Sem ação final'),
+          createdAt: toDate(raw.createdAt)
+        } as CommandFlow;
+      });
+      setIntelligenceFlowRows(rows);
+    }, (error: any) => {
+      const rawMessage = String(error?.details?.message || error?.message || '');
+      if (/Could not find the table 'public\.intelligence_flows'/i.test(rawMessage)) {
+        flowDisabled = true;
+        setFlowTableMissing(true);
+        setIntelligenceFlowRows([]);
+        return;
+      }
+      console.error('Erro ao carregar intelligence_flows no dashboard:', error);
+    });
+
+    return () => {
+      unsubscribeFlows();
+    };
+  }, [activeWorkspaceId]);
+
+  const latestIntelligenceFlows = useMemo(() => {
+    return intelligenceFlowRows
+      .slice()
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 3);
+  }, [intelligenceFlowRows]);
 
 
   // --- CÁLCULOS DO BI (ESTÁTICO) ---
@@ -133,6 +254,56 @@ const DashboardHome: React.FC<DashboardHomeProps> = ({ agents, tasks, businessUn
              </div>
         </div>
       </header>
+
+      {/* FLUXO DE INTELIGÊNCIA (CENTRO DE COMANDO) */}
+      <section className="mb-12">
+        <div className="flex items-center justify-between mb-4 gap-3">
+          <div className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full"></span>
+            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Fluxo de Inteligência</h3>
+          </div>
+          <button
+            onClick={() => onNavigate('intelligence-flow')}
+            className="px-3 py-1.5 rounded-full border border-gray-200 bg-white text-[9px] font-black text-gray-500 uppercase tracking-widest hover:border-gray-300 transition-colors"
+          >
+            Abrir visão completa
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {flowTableMissing && (
+            <div className="md:col-span-3 rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-xs text-yellow-800">
+              Tabela `public.intelligence_flows` não encontrada. Aplique a migration V2 do Fluxo de Inteligência.
+            </div>
+          )}
+
+          {latestIntelligenceFlows.length === 0 && (
+            <div className="md:col-span-3 rounded-2xl border border-dashed border-gray-200 bg-white p-6 text-sm text-gray-400">
+              Sem fluxos recentes ainda. Inicie conversas e operações para popular a trilha.
+            </div>
+          )}
+
+          {latestIntelligenceFlows.map((flow) => (
+            <article key={flow.id} className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className={`px-2 py-1 rounded-full border text-[9px] font-black uppercase tracking-widest ${typeBadgeClass(flow.flowType)}`}>
+                  {formatFlowTypeLabel(flow.flowType)}
+                </span>
+                <span className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${statusBadgeClass(flow.status)}`}>
+                  {formatFlowStatusLabel(flow.status)}
+                </span>
+              </div>
+              <h4 className="text-sm font-black text-gray-900 mb-2 truncate">{flow.origin}</h4>
+              <p className="text-xs text-gray-500 mb-2 line-clamp-2">
+                {flow.participants.join(' -> ') || 'Sem participantes'}
+              </p>
+              <p className="text-xs font-semibold text-gray-600">
+                Resultado: <span className="text-gray-800">{flow.finalAction}</span>
+              </p>
+            </article>
+          ))}
+        </div>
+      </section>
 
       {/* 1. STARTYB FLOW (FUNIL DE NEGÓCIOS) */}
       <section className="mb-12">

@@ -72,6 +72,16 @@ const Sidebar: React.FC<SidebarProps> = ({
       label: 'Governança',
       icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'
     },
+    {
+      id: 'intelligence-flow',
+      label: 'Fluxo de Inteligência',
+      icon: 'M4 7h6m4 0h6M4 12h4m6 0h6M4 17h8m2 0h6'
+    },
+    {
+      id: 'quality',
+      label: 'Sensor de Qualidade',
+      icon: 'M3 3v18h18M7 14l3-3 3 2 4-5'
+    },
   ];
 
   return (

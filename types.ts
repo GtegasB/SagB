@@ -12,7 +12,7 @@ export type AgentStatus = 'PLANNED' | 'STAGING' | 'ACTIVE' | 'MAINTENANCE' | 'BL
 export type ModelProvider = 'gemini' | 'deepseek' | 'llama_local' | 'openai' | 'claude' | 'qwen'; // Opções de Cérebro
 
 // V4.2 - Adicionado 'home' como Dashboard Inicial
-export type TabId = 'home' | 'ecosystem' | 'team' | 'conversations' | 'management' | 'redir' | 'vault' | 'fabrica-ca' | 'governance' | 'methodology' | 'hub' | 'alignment' | 'market' | 'sales' | 'expansion' | '3forb-home' | 'audacus-home' | 'startyb-home' | 'requests' | 'unit-room' | 'chat-room' | 'ventures';
+export type TabId = 'home' | 'ecosystem' | 'team' | 'conversations' | 'management' | 'redir' | 'vault' | 'fabrica-ca' | 'governance' | 'cid' | 'quality' | 'intelligence-flow' | 'methodology' | 'hub' | 'alignment' | 'market' | 'sales' | 'expansion' | '3forb-home' | 'audacus-home' | 'startyb-home' | 'requests' | 'unit-room' | 'chat-room' | 'ventures';
 
 export type BUType = 'CORE' | 'VENTURY' | 'PERSONAL' | 'METHODOLOGY';
 
@@ -192,6 +192,310 @@ export interface AgentMemory {
   payload?: Record<string, any>;
 }
 
+export type AgentQualityEventType =
+  | 'understanding_error'
+  | 'scope_error'
+  | 'hierarchy_error'
+  | 'handoff_error'
+  | 'context_error'
+  | 'governance_error'
+  | 'model_error'
+  | 'repetition_error'
+  | 'quality_error'
+  | 'execution_error'
+  | 'correct_handoff'
+  | 'correct_escalation'
+  | 'strong_response'
+  | 'approved_response'
+  | 'successful_resolution';
+
+export type AgentQualitySeverity = 'low' | 'medium' | 'high' | 'critical';
+export type AgentQualityDetectedBy = 'user' | 'rule' | 'system' | 'auditor';
+
+export interface AgentQualityEvent {
+  id: string;
+  eventId?: string;
+  workspaceId: string;
+  ventureId?: string | null;
+  conversationId?: string | null;
+  turnId?: number | null;
+  agentId?: string | null;
+  agentName?: string | null;
+  eventType: AgentQualityEventType | string;
+  eventSubtype?: string;
+  severity: AgentQualitySeverity | string;
+  detectedBy: AgentQualityDetectedBy | string;
+  messageRef?: string;
+  excerpt?: string;
+  correctionText?: string;
+  modelUsed?: string;
+  workflowVersion?: string;
+  dnaVersion?: string;
+  policyVersion?: string;
+  status: string;
+  createdAt: Date;
+  resolvedAt?: Date | null;
+  payload?: Record<string, any>;
+}
+
+export type IntelligenceFlowType =
+  | 'conversation'
+  | 'handoff'
+  | 'decision'
+  | 'task_generation'
+  | 'cid_processing';
+
+export type IntelligenceFlowSourceKind =
+  | 'conversation'
+  | 'operation'
+  | 'quality'
+  | 'governance'
+  | 'cid'
+  | 'n8n';
+
+export type IntelligenceFlowActorType = 'user' | 'agent' | 'system' | 'cid' | 'governance';
+export type IntelligenceFlowActionType =
+  | 'question'
+  | 'analysis'
+  | 'response'
+  | 'handoff'
+  | 'synthesis'
+  | 'task_created'
+  | 'agenda_created'
+  | 'decision_registered'
+  | 'knowledge_saved'
+  | 'error';
+export type IntelligenceFlowStatus = 'pending' | 'running' | 'ok' | 'warning' | 'error' | 'cancelled';
+
+export interface IntelligenceFlowStep {
+  id: string;
+  actorType: IntelligenceFlowActorType;
+  actorName: string;
+  actionType: IntelligenceFlowActionType;
+  status: IntelligenceFlowStatus;
+  timestamp: Date;
+  modelUsed?: string;
+  note?: string;
+}
+
+export interface IntelligenceFlow {
+  id: string;
+  workspaceId?: string;
+  ventureId?: string | null;
+  conversationId?: string | null;
+  turnId?: number | null;
+  executionRunId?: string | null;
+  flowType: IntelligenceFlowType;
+  origin: string;
+  participants: string[];
+  steps: IntelligenceFlowStep[];
+  finalAction: string;
+  status: IntelligenceFlowStatus;
+  timestamp: Date;
+  sourceKind: IntelligenceFlowSourceKind;
+  sourceId?: string;
+  payload?: Record<string, any>;
+}
+
+export interface IntelligenceFlowStepRow {
+  id: string;
+  flowId: string;
+  workspaceId: string;
+  conversationId?: string | null;
+  turnId?: number | null;
+  stepOrder: number;
+  actorType: IntelligenceFlowActorType;
+  actorId?: string | null;
+  actorName: string;
+  actionType: IntelligenceFlowActionType;
+  status: IntelligenceFlowStatus;
+  modelUsed?: string | null;
+  workflowVersion?: string | null;
+  policyVersion?: string | null;
+  dnaVersion?: string | null;
+  latencyMs?: number | null;
+  estimatedCost?: number | null;
+  tokensIn?: number | null;
+  tokensOut?: number | null;
+  note?: string | null;
+  eventTime: Date;
+  payload?: Record<string, any>;
+  createdAt?: Date;
+}
+
+export type CidMaterialType = 'Pdf' | 'Doc' | 'Docx' | 'Txt' | 'Spreadsheet' | 'Image' | 'Audio' | 'Video' | 'Other';
+export type CidDesiredAction = 'Store only' | 'Store + transcribe' | 'Store + summarize' | 'Store + transcribe + summarize' | 'Store + consolidate';
+export type CidStatus = 'Received' | 'Queued' | 'Fragmenting' | 'Processing' | 'Transcribing' | 'Summarizing' | 'Consolidating' | 'Completed' | 'Completed warning' | 'Error' | 'Paused' | 'Cancelled';
+export type CidOutputType = 'Extracted text' | 'Transcription' | 'Summary short' | 'Summary long' | 'Consolidation' | 'Keywords';
+
+export interface CidAsset {
+  id: string;
+  workspaceId: string;
+  ventureId?: string | null;
+  title: string;
+  materialType: CidMaterialType | string;
+  area?: string | null;
+  project?: string | null;
+  sensitivity?: string | null;
+  ownerUserId?: string | null;
+  ownerName?: string | null;
+  language?: string | null;
+  desiredAction?: CidDesiredAction | string | null;
+  sourceKind?: string | null;
+  sourceId?: string | null;
+  isConsultable?: boolean;
+  status: CidStatus | string;
+  progressPct?: number;
+  totalParts?: number;
+  completedParts?: number;
+  pendingParts?: number;
+  processingStartedAt?: Date | null;
+  completedAt?: Date | null;
+  failedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface CidAssetFile {
+  id: string;
+  assetId: string;
+  workspaceId: string;
+  bucket?: string;
+  path?: string;
+  filename: string;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  durationSec?: number | null;
+  checksum?: string | null;
+  status?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface CidProcessingJob {
+  id: string;
+  assetId: string;
+  workspaceId: string;
+  batchId?: string | null;
+  jobType: string;
+  actionPlan?: Record<string, any>;
+  queuePosition?: number | null;
+  status: CidStatus | string;
+  progressPct?: number;
+  totalParts?: number;
+  completedParts?: number;
+  pendingParts?: number;
+  retries?: number;
+  maxRetries?: number;
+  errorMessage?: string | null;
+  startedAt?: Date | null;
+  completedAt?: Date | null;
+  failedAt?: Date | null;
+  cancelledAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface CidChunk {
+  id: string;
+  assetId: string;
+  jobId?: string | null;
+  workspaceId: string;
+  chunkIndex: number;
+  chunkKind: string;
+  charStart?: number | null;
+  charEnd?: number | null;
+  byteStart?: number | null;
+  byteEnd?: number | null;
+  timeStartSec?: number | null;
+  timeEndSec?: number | null;
+  textContent?: string | null;
+  status: CidStatus | string;
+  retries?: number;
+  errorMessage?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface CidOutput {
+  id: string;
+  assetId: string;
+  jobId?: string | null;
+  workspaceId: string;
+  outputType: CidOutputType | string;
+  contentText?: string | null;
+  contentJson?: Record<string, any> | null;
+  language?: string | null;
+  version?: number;
+  status?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface CidTag {
+  id: string;
+  workspaceId: string;
+  name: string;
+  color?: string | null;
+  status?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface CidAssetTag {
+  id: string;
+  workspaceId: string;
+  assetId: string;
+  tagId: string;
+  createdAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface CidLink {
+  id: string;
+  workspaceId: string;
+  assetId: string;
+  linkType: string;
+  linkedId?: string | null;
+  linkedLabel?: string | null;
+  createdAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface CidBatch {
+  id: string;
+  workspaceId: string;
+  ventureId?: string | null;
+  title: string;
+  source?: string | null;
+  status: string;
+  totalItems?: number;
+  processedItems?: number;
+  failedItems?: number;
+  createdBy?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface CidBatchItem {
+  id: string;
+  workspaceId: string;
+  batchId: string;
+  assetId: string;
+  status: string;
+  note?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
 export interface WorkspaceMember {
   id: string;
   workspaceId: string;
@@ -232,6 +536,25 @@ export interface Agent {
   salary?: string;
   startDate?: string;
   docCount?: number;
+
+  // Cadastro Estrutural (Quadro de Elite v2)
+  entityType?: 'HUMANO' | 'AGENTE' | 'HIBRIDO';
+  shortDescription?: string;
+  origin?: string;
+  unitName?: string;
+  area?: string;
+  functionName?: string;
+  baseRoleUniversal?: string;
+  roleType?: 'LIDERANCA' | 'CONSULTORIA' | 'AUDITORIA' | 'EXECUCAO' | 'MENTORIA' | 'APOIO';
+  structuralStatus?: 'ESTRUTURAL' | 'EM_CONFIGURACAO' | 'HOMOLOGACAO' | 'ATIVO' | 'ARQUIVADO';
+  operationalActivation?: 'ATIVO_NASCIMENTO' | 'PREVISTO_GATILHO' | 'RESERVADO_FUTURO' | 'COMPARTILHADO';
+  dnaStatus?: 'SEM_DNA' | 'DNA_BASE' | 'DNA_PARCIAL' | 'DNA_COMPLETO' | 'REVISAR';
+  operationalClass?: 'ECONOMICA' | 'BALANCEADA' | 'PREMIUM' | 'CRITICA';
+  allowedStacks?: ModelProvider[];
+  preferredModel?: ModelProvider;
+  aiMentor?: string;
+  humanOwner?: string;
+  customFields?: Record<string, string>;
 
   // V2.0 - IDENTIDADE VISUAL OBRIGATÓRIA
   avatarUrl?: string; // Base64 Image Data (Face/Rosto)

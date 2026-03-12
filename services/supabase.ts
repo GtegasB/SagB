@@ -382,24 +382,61 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     const officialRolePayload = String(pick(payload, 'officialRole', 'official_role', 'description') ?? '').trim();
     const globalDocuments = pick(r, 'globalDocuments', 'global_documents') ?? pick(payload, 'globalDocuments', 'global_documents');
     const fallbackId = pick(r, 'id') ?? pick(payload, 'id') ?? '';
+    const entityType = String(
+      pick(r, 'entityType', 'entity_type', 'type') ??
+      pick(payload, 'entityType', 'entity_type', 'type') ??
+      ''
+    ).toUpperCase();
+    const structuralStatus = String(
+      pick(r, 'structuralStatus', 'structural_status') ??
+      pick(payload, 'structuralStatus', 'structural_status') ??
+      ''
+    ).toUpperCase();
+    const preferredModel =
+      pick(r, 'preferredModel', 'preferred_model') ??
+      pick(payload, 'preferredModel', 'preferred_model') ??
+      pick(r, 'modelProvider', 'model_provider') ??
+      pick(payload, 'modelProvider', 'model_provider');
+    const rawAllowedStacks =
+      pick(r, 'allowedStacks', 'allowed_stacks') ??
+      pick(payload, 'allowedStacks', 'allowed_stacks');
+    const allowedStacks = Array.isArray(rawAllowedStacks)
+      ? rawAllowedStacks
+      : typeof rawAllowedStacks === 'string'
+        ? rawAllowedStacks.split(',').map((value) => value.trim()).filter(Boolean)
+        : [];
 
     return {
       ...r,
       id: String(fallbackId),
       universalId: String(pick(r, 'universalId', 'universal_id') ?? pick(payload, 'universalId', 'universal_id') ?? fallbackId),
       name: name || 'Sem Nome',
+      entityType: (entityType || 'AGENTE'),
+      shortDescription: String(pick(r, 'shortDescription', 'short_description') ?? pick(payload, 'shortDescription', 'short_description') ?? ''),
+      origin: String(pick(r, 'origin') ?? pick(payload, 'origin') ?? ''),
       officialRole: officialRole || officialRolePayload || 'Sem Cargo',
       company: String(pick(r, 'company') ?? pick(payload, 'company') ?? 'GrupoB'),
       buId: pick(r, 'buId', 'bu_id') ?? pick(payload, 'buId', 'bu_id') ?? undefined,
       ventureId: pick(r, 'ventureId', 'venture_id') ?? pick(payload, 'ventureId', 'venture_id') ?? undefined,
+      unitName: String(pick(r, 'unitName', 'unit_name') ?? pick(payload, 'unitName', 'unit_name') ?? ''),
+      area: String(pick(r, 'area') ?? pick(payload, 'area') ?? ''),
+      functionName: String(pick(r, 'functionName', 'function_name') ?? pick(payload, 'functionName', 'function_name') ?? ''),
+      baseRoleUniversal: String(pick(r, 'baseRoleUniversal', 'base_role_universal') ?? pick(payload, 'baseRoleUniversal', 'base_role_universal') ?? ''),
       tier: pick(r, 'tier') ?? pick(payload, 'tier') ?? 'OPERACIONAL',
+      roleType: String(pick(r, 'roleType', 'role_type') ?? pick(payload, 'roleType', 'role_type') ?? ''),
       active: status !== 'PLANNED' && status !== 'BLOCKED',
       status,
+      structuralStatus: structuralStatus || undefined,
+      operationalActivation: String(pick(r, 'operationalActivation', 'operational_activation') ?? pick(payload, 'operationalActivation', 'operational_activation') ?? ''),
+      dnaStatus: String(pick(r, 'dnaStatus', 'dna_status') ?? pick(payload, 'dnaStatus', 'dna_status') ?? ''),
       version: String(pick(r, 'version') ?? pick(payload, 'version') ?? '1.0'),
       fullPrompt: String(pick(r, 'fullPrompt', 'full_prompt') ?? pick(payload, 'fullPrompt', 'full_prompt') ?? ''),
       sector: String(pick(r, 'sector') ?? pick(payload, 'sector') ?? officialRole ?? officialRolePayload ?? ''),
       division: pick(r, 'division') ?? pick(payload, 'division') ?? undefined,
       collaboratorType: pick(r, 'collaboratorType', 'collaborator_type') ?? pick(payload, 'collaboratorType', 'collaborator_type') ?? undefined,
+      operationalClass: String(pick(r, 'operationalClass', 'operational_class') ?? pick(payload, 'operationalClass', 'operational_class') ?? ''),
+      allowedStacks,
+      preferredModel: preferredModel ?? undefined,
       salary: pick(r, 'salary') ?? pick(payload, 'salary') ?? undefined,
       startDate: pick(r, 'startDate', 'start_date') ?? pick(payload, 'startDate', 'start_date') ?? undefined,
       docCount: Number(
@@ -407,9 +444,12 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
         pick(payload, 'docCount', 'doc_count') ??
         (Array.isArray(globalDocuments) ? globalDocuments.length : 0)
       ),
+      aiMentor: pick(r, 'aiMentor', 'ai_mentor') ?? pick(payload, 'aiMentor', 'ai_mentor') ?? undefined,
+      humanOwner: pick(r, 'humanOwner', 'human_owner') ?? pick(payload, 'humanOwner', 'human_owner') ?? undefined,
+      customFields: pick(r, 'customFields', 'custom_fields') ?? pick(payload, 'customFields', 'custom_fields') ?? undefined,
       avatarUrl: pick(r, 'avatarUrl', 'avatar_url') ?? pick(payload, 'avatarUrl', 'avatar_url') ?? undefined,
       ambientPhotoUrl: pick(r, 'ambientPhotoUrl', 'ambient_photo_url') ?? pick(payload, 'ambientPhotoUrl', 'ambient_photo_url') ?? undefined,
-      modelProvider: pick(r, 'modelProvider', 'model_provider') ?? pick(payload, 'modelProvider', 'model_provider') ?? 'gemini',
+      modelProvider: preferredModel ?? pick(r, 'modelProvider', 'model_provider') ?? pick(payload, 'modelProvider', 'model_provider') ?? 'gemini',
       globalDocuments: Array.isArray(globalDocuments) ? globalDocuments : []
     };
   }
@@ -519,6 +559,194 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     };
   }
 
+  if (table === 'cid_assets') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      ventureId: r.venture_id ?? undefined,
+      title: String(r.title ?? ''),
+      materialType: r.material_type ?? 'other',
+      area: r.area ?? undefined,
+      project: r.project ?? undefined,
+      sensitivity: r.sensitivity ?? 'internal',
+      ownerUserId: r.owner_user_id ?? undefined,
+      ownerName: r.owner_name ?? undefined,
+      language: r.language ?? undefined,
+      desiredAction: r.desired_action ?? 'store_only',
+      sourceKind: r.source_kind ?? 'upload',
+      sourceId: r.source_id ?? undefined,
+      isConsultable: Boolean(r.is_consultable),
+      status: r.status ?? 'received',
+      progressPct: Number(r.progress_pct ?? 0),
+      totalParts: Number(r.total_parts ?? 0),
+      completedParts: Number(r.completed_parts ?? 0),
+      pendingParts: Number(r.pending_parts ?? 0),
+      processingStartedAt: asJsDate(pick(r, 'processing_started_at', 'processingStartedAt')),
+      completedAt: asJsDate(pick(r, 'completed_at', 'completedAt')),
+      failedAt: asJsDate(pick(r, 'failed_at', 'failedAt')),
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'cid_asset_files') {
+    return {
+      id: String(r.id),
+      assetId: String(r.asset_id ?? ''),
+      workspaceId: r.workspace_id,
+      bucket: r.bucket ?? 'cid-assets',
+      path: r.path ?? '',
+      filename: r.filename ?? '',
+      mimeType: r.mime_type ?? undefined,
+      sizeBytes: r.size_bytes !== undefined && r.size_bytes !== null ? Number(r.size_bytes) : undefined,
+      durationSec: r.duration_sec !== undefined && r.duration_sec !== null ? Number(r.duration_sec) : undefined,
+      checksum: r.checksum ?? undefined,
+      status: r.status ?? 'stored',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'cid_batches') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      ventureId: r.venture_id ?? undefined,
+      title: String(r.title ?? ''),
+      source: r.source ?? undefined,
+      status: r.status ?? 'open',
+      totalItems: Number(r.total_items ?? 0),
+      processedItems: Number(r.processed_items ?? 0),
+      failedItems: Number(r.failed_items ?? 0),
+      createdBy: r.created_by ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'cid_batch_items') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      batchId: String(r.batch_id ?? ''),
+      assetId: String(r.asset_id ?? ''),
+      status: r.status ?? 'queued',
+      note: r.note ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'cid_processing_jobs') {
+    return {
+      id: String(r.id),
+      assetId: String(r.asset_id ?? ''),
+      workspaceId: r.workspace_id,
+      batchId: r.batch_id ?? undefined,
+      jobType: String(r.job_type ?? 'ingestion'),
+      actionPlan: r.action_plan ?? undefined,
+      queuePosition: r.queue_position ?? undefined,
+      status: r.status ?? 'queued',
+      progressPct: Number(r.progress_pct ?? 0),
+      totalParts: Number(r.total_parts ?? 0),
+      completedParts: Number(r.completed_parts ?? 0),
+      pendingParts: Number(r.pending_parts ?? 0),
+      retries: Number(r.retries ?? 0),
+      maxRetries: Number(r.max_retries ?? 3),
+      errorMessage: r.error_message ?? undefined,
+      startedAt: asJsDate(pick(r, 'started_at', 'startedAt')),
+      completedAt: asJsDate(pick(r, 'completed_at', 'completedAt')),
+      failedAt: asJsDate(pick(r, 'failed_at', 'failedAt')),
+      cancelledAt: asJsDate(pick(r, 'cancelled_at', 'cancelledAt')),
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'cid_chunks') {
+    return {
+      id: String(r.id),
+      assetId: String(r.asset_id ?? ''),
+      jobId: r.job_id ?? undefined,
+      workspaceId: r.workspace_id,
+      chunkIndex: Number(r.chunk_index ?? 0),
+      chunkKind: String(r.chunk_kind ?? 'text_block'),
+      charStart: r.char_start !== undefined && r.char_start !== null ? Number(r.char_start) : undefined,
+      charEnd: r.char_end !== undefined && r.char_end !== null ? Number(r.char_end) : undefined,
+      byteStart: r.byte_start !== undefined && r.byte_start !== null ? Number(r.byte_start) : undefined,
+      byteEnd: r.byte_end !== undefined && r.byte_end !== null ? Number(r.byte_end) : undefined,
+      timeStartSec: r.time_start_sec !== undefined && r.time_start_sec !== null ? Number(r.time_start_sec) : undefined,
+      timeEndSec: r.time_end_sec !== undefined && r.time_end_sec !== null ? Number(r.time_end_sec) : undefined,
+      textContent: r.text_content ?? undefined,
+      status: r.status ?? 'queued',
+      retries: Number(r.retries ?? 0),
+      errorMessage: r.error_message ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'cid_outputs') {
+    return {
+      id: String(r.id),
+      assetId: String(r.asset_id ?? ''),
+      jobId: r.job_id ?? undefined,
+      workspaceId: r.workspace_id,
+      outputType: String(r.output_type ?? 'summary_short'),
+      contentText: r.content_text ?? undefined,
+      contentJson: r.content_json ?? undefined,
+      language: r.language ?? undefined,
+      version: Number(r.version ?? 1),
+      status: String(r.status ?? 'ready'),
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'cid_tags') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      name: String(r.name ?? ''),
+      color: r.color ?? undefined,
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'cid_asset_tags') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      assetId: String(r.asset_id ?? ''),
+      tagId: String(r.tag_id ?? ''),
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'cid_links') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      assetId: String(r.asset_id ?? ''),
+      linkType: String(r.link_type ?? ''),
+      linkedId: r.linked_id ?? undefined,
+      linkedLabel: r.linked_label ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
   if (table === 'audit_events') {
     return {
       id: String(r.id),
@@ -586,6 +814,34 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     };
   }
 
+  if (table === 'agent_quality_events') {
+    return {
+      id: String(r.id),
+      eventId: String(pick(r, 'event_id', 'eventId') ?? r.id),
+      workspaceId: r.workspace_id,
+      ventureId: r.venture_id ?? undefined,
+      conversationId: r.conversation_id ?? undefined,
+      turnId: r.turn_id ?? undefined,
+      agentId: r.agent_id ?? undefined,
+      agentName: r.agent_name ?? undefined,
+      eventType: r.event_type ?? 'quality_error',
+      eventSubtype: r.event_subtype ?? undefined,
+      severity: r.severity ?? 'medium',
+      detectedBy: r.detected_by ?? 'system',
+      messageRef: r.message_ref ?? undefined,
+      excerpt: r.excerpt ?? undefined,
+      correctionText: r.correction_text ?? undefined,
+      modelUsed: r.model_used ?? undefined,
+      workflowVersion: r.workflow_version ?? undefined,
+      dnaVersion: r.dna_version ?? undefined,
+      policyVersion: r.policy_version ?? undefined,
+      status: r.status ?? 'open',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      resolvedAt: asJsDate(pick(r, 'resolved_at', 'resolvedAt')) ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
   if (table === 'chat_sessions') {
     return {
       id: String(r.id),
@@ -616,6 +872,55 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
       attachment: r.attachment ?? undefined,
       createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
       payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'intelligence_flows') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      ventureId: r.venture_id ?? undefined,
+      conversationId: r.conversation_id ?? undefined,
+      turnId: r.turn_id ?? undefined,
+      executionRunId: r.execution_run_id ?? undefined,
+      flowType: r.flow_type ?? 'conversation',
+      sourceKind: r.source_kind ?? 'conversation',
+      sourceId: r.source_id ?? undefined,
+      origin: String(r.origin ?? 'Fluxo'),
+      finalAction: String(r.final_action ?? 'Em processamento'),
+      status: r.status ?? 'pending',
+      participants: Array.isArray(r.participants) ? r.participants : [],
+      payload: r.payload ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date()
+    };
+  }
+
+  if (table === 'intelligence_flow_steps') {
+    return {
+      id: String(r.id),
+      flowId: String(r.flow_id ?? ''),
+      workspaceId: String(r.workspace_id ?? ''),
+      conversationId: r.conversation_id ?? undefined,
+      turnId: r.turn_id ?? undefined,
+      stepOrder: Number(r.step_order ?? 0),
+      actorType: r.actor_type ?? 'system',
+      actorId: r.actor_id ?? undefined,
+      actorName: String(r.actor_name ?? 'Sistema'),
+      actionType: r.action_type ?? 'analysis',
+      status: r.status ?? 'pending',
+      modelUsed: r.model_used ?? undefined,
+      workflowVersion: r.workflow_version ?? undefined,
+      policyVersion: r.policy_version ?? undefined,
+      dnaVersion: r.dna_version ?? undefined,
+      latencyMs: r.latency_ms !== undefined && r.latency_ms !== null ? Number(r.latency_ms) : undefined,
+      estimatedCost: r.estimated_cost !== undefined && r.estimated_cost !== null ? Number(r.estimated_cost) : undefined,
+      tokensIn: r.tokens_in !== undefined && r.tokens_in !== null ? Number(r.tokens_in) : undefined,
+      tokensOut: r.tokens_out !== undefined && r.tokens_out !== null ? Number(r.tokens_out) : undefined,
+      note: r.note ?? undefined,
+      eventTime: asJsDate(pick(r, 'event_time', 'eventTime')) ?? new Date(),
+      payload: r.payload ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date()
     };
   }
 
@@ -678,15 +983,48 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (table === 'agents') {
       [
         'name',
+        'entity_type',
+        'entityType',
+        'type',
+        'short_description',
+        'shortDescription',
+        'origin',
         'official_role',
         'officialRole',
         'company',
+        'unit_name',
+        'unitName',
+        'area',
+        'function_name',
+        'functionName',
+        'base_role_universal',
+        'baseRoleUniversal',
         'tier',
+        'role_type',
+        'roleType',
+        'structural_status',
+        'structuralStatus',
+        'operational_activation',
+        'operationalActivation',
+        'dna_status',
+        'dnaStatus',
+        'operational_class',
+        'operationalClass',
+        'allowed_stacks',
+        'allowedStacks',
+        'preferred_model',
+        'preferredModel',
         'division',
         'sector',
         'salary',
         'collaborator_type',
         'collaboratorType',
+        'ai_mentor',
+        'aiMentor',
+        'human_owner',
+        'humanOwner',
+        'custom_fields',
+        'customFields',
         'model_provider',
         'modelProvider',
         'avatar_url',
@@ -727,13 +1065,73 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
 
     // Em agents, preserva em payload para evitar erro de coluna inexistente (ex.: bu_id).
     if (table === 'agents') {
+      if (p.entityType !== undefined && p.entity_type === undefined) {
+        p.entity_type = p.entityType;
+        delete p.entityType;
+      }
+      if (p.shortDescription !== undefined && p.short_description === undefined) {
+        p.short_description = p.shortDescription;
+        delete p.shortDescription;
+      }
       if (p.officialRole !== undefined && p.official_role === undefined) {
         p.official_role = p.officialRole;
         delete p.officialRole;
       }
+      if (p.unitName !== undefined && p.unit_name === undefined) {
+        p.unit_name = p.unitName;
+        delete p.unitName;
+      }
+      if (p.functionName !== undefined && p.function_name === undefined) {
+        p.function_name = p.functionName;
+        delete p.functionName;
+      }
+      if (p.baseRoleUniversal !== undefined && p.base_role_universal === undefined) {
+        p.base_role_universal = p.baseRoleUniversal;
+        delete p.baseRoleUniversal;
+      }
+      if (p.roleType !== undefined && p.role_type === undefined) {
+        p.role_type = p.roleType;
+        delete p.roleType;
+      }
+      if (p.structuralStatus !== undefined && p.structural_status === undefined) {
+        p.structural_status = p.structuralStatus;
+        delete p.structuralStatus;
+      }
+      if (p.operationalActivation !== undefined && p.operational_activation === undefined) {
+        p.operational_activation = p.operationalActivation;
+        delete p.operationalActivation;
+      }
+      if (p.dnaStatus !== undefined && p.dna_status === undefined) {
+        p.dna_status = p.dnaStatus;
+        delete p.dnaStatus;
+      }
+      if (p.operationalClass !== undefined && p.operational_class === undefined) {
+        p.operational_class = p.operationalClass;
+        delete p.operationalClass;
+      }
+      if (p.allowedStacks !== undefined && p.allowed_stacks === undefined) {
+        p.allowed_stacks = p.allowedStacks;
+        delete p.allowedStacks;
+      }
+      if (p.preferredModel !== undefined && p.preferred_model === undefined) {
+        p.preferred_model = p.preferredModel;
+        delete p.preferredModel;
+      }
       if (p.collaboratorType !== undefined && p.collaborator_type === undefined) {
         p.collaborator_type = p.collaboratorType;
         delete p.collaboratorType;
+      }
+      if (p.aiMentor !== undefined && p.ai_mentor === undefined) {
+        p.ai_mentor = p.aiMentor;
+        delete p.aiMentor;
+      }
+      if (p.humanOwner !== undefined && p.human_owner === undefined) {
+        p.human_owner = p.humanOwner;
+        delete p.humanOwner;
+      }
+      if (p.customFields !== undefined && p.custom_fields === undefined) {
+        p.custom_fields = p.customFields;
+        delete p.customFields;
       }
       if (p.modelProvider !== undefined && p.model_provider === undefined) {
         p.model_provider = p.modelProvider;
@@ -878,6 +1276,146 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     delete p.updatedAt;
   }
 
+  if (table === 'cid_assets') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.ventureId !== undefined) { p.venture_id = p.ventureId; delete p.ventureId; }
+    if (p.materialType !== undefined) { p.material_type = p.materialType; delete p.materialType; }
+    if (p.ownerUserId !== undefined) { p.owner_user_id = p.ownerUserId; delete p.ownerUserId; }
+    if (p.ownerName !== undefined) { p.owner_name = p.ownerName; delete p.ownerName; }
+    if (p.desiredAction !== undefined) { p.desired_action = p.desiredAction; delete p.desiredAction; }
+    if (p.sourceKind !== undefined) { p.source_kind = p.sourceKind; delete p.sourceKind; }
+    if (p.sourceId !== undefined) { p.source_id = p.sourceId; delete p.sourceId; }
+    if (p.isConsultable !== undefined) { p.is_consultable = p.isConsultable; delete p.isConsultable; }
+    if (p.progressPct !== undefined) { p.progress_pct = p.progressPct; delete p.progressPct; }
+    if (p.totalParts !== undefined) { p.total_parts = p.totalParts; delete p.totalParts; }
+    if (p.completedParts !== undefined) { p.completed_parts = p.completedParts; delete p.completedParts; }
+    if (p.pendingParts !== undefined) { p.pending_parts = p.pendingParts; delete p.pendingParts; }
+    if (p.processingStartedAt !== undefined) { p.processing_started_at = p.processingStartedAt; delete p.processingStartedAt; }
+    if (p.completedAt !== undefined) { p.completed_at = p.completedAt; delete p.completedAt; }
+    if (p.failedAt !== undefined) { p.failed_at = p.failedAt; delete p.failedAt; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'cid_asset_files') {
+    if (p.assetId !== undefined) { p.asset_id = p.assetId; delete p.assetId; }
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.mimeType !== undefined) { p.mime_type = p.mimeType; delete p.mimeType; }
+    if (p.sizeBytes !== undefined) { p.size_bytes = p.sizeBytes; delete p.sizeBytes; }
+    if (p.durationSec !== undefined) { p.duration_sec = p.durationSec; delete p.durationSec; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'cid_batches') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.ventureId !== undefined) { p.venture_id = p.ventureId; delete p.ventureId; }
+    if (p.totalItems !== undefined) { p.total_items = p.totalItems; delete p.totalItems; }
+    if (p.processedItems !== undefined) { p.processed_items = p.processedItems; delete p.processedItems; }
+    if (p.failedItems !== undefined) { p.failed_items = p.failedItems; delete p.failedItems; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'cid_batch_items') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.batchId !== undefined) { p.batch_id = p.batchId; delete p.batchId; }
+    if (p.assetId !== undefined) { p.asset_id = p.assetId; delete p.assetId; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'cid_processing_jobs') {
+    if (p.assetId !== undefined) { p.asset_id = p.assetId; delete p.assetId; }
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.batchId !== undefined) { p.batch_id = p.batchId; delete p.batchId; }
+    if (p.jobType !== undefined) { p.job_type = p.jobType; delete p.jobType; }
+    if (p.actionPlan !== undefined) { p.action_plan = p.actionPlan; delete p.actionPlan; }
+    if (p.queuePosition !== undefined) { p.queue_position = p.queuePosition; delete p.queuePosition; }
+    if (p.progressPct !== undefined) { p.progress_pct = p.progressPct; delete p.progressPct; }
+    if (p.totalParts !== undefined) { p.total_parts = p.totalParts; delete p.totalParts; }
+    if (p.completedParts !== undefined) { p.completed_parts = p.completedParts; delete p.completedParts; }
+    if (p.pendingParts !== undefined) { p.pending_parts = p.pendingParts; delete p.pendingParts; }
+    if (p.maxRetries !== undefined) { p.max_retries = p.maxRetries; delete p.maxRetries; }
+    if (p.errorMessage !== undefined) { p.error_message = p.errorMessage; delete p.errorMessage; }
+    if (p.startedAt !== undefined) { p.started_at = p.startedAt; delete p.startedAt; }
+    if (p.completedAt !== undefined) { p.completed_at = p.completedAt; delete p.completedAt; }
+    if (p.failedAt !== undefined) { p.failed_at = p.failedAt; delete p.failedAt; }
+    if (p.cancelledAt !== undefined) { p.cancelled_at = p.cancelledAt; delete p.cancelledAt; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'cid_chunks') {
+    if (p.assetId !== undefined) { p.asset_id = p.assetId; delete p.assetId; }
+    if (p.jobId !== undefined) { p.job_id = p.jobId; delete p.jobId; }
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.chunkIndex !== undefined) { p.chunk_index = p.chunkIndex; delete p.chunkIndex; }
+    if (p.chunkKind !== undefined) { p.chunk_kind = p.chunkKind; delete p.chunkKind; }
+    if (p.charStart !== undefined) { p.char_start = p.charStart; delete p.charStart; }
+    if (p.charEnd !== undefined) { p.char_end = p.charEnd; delete p.charEnd; }
+    if (p.byteStart !== undefined) { p.byte_start = p.byteStart; delete p.byteStart; }
+    if (p.byteEnd !== undefined) { p.byte_end = p.byteEnd; delete p.byteEnd; }
+    if (p.timeStartSec !== undefined) { p.time_start_sec = p.timeStartSec; delete p.timeStartSec; }
+    if (p.timeEndSec !== undefined) { p.time_end_sec = p.timeEndSec; delete p.timeEndSec; }
+    if (p.textContent !== undefined) { p.text_content = p.textContent; delete p.textContent; }
+    if (p.errorMessage !== undefined) { p.error_message = p.errorMessage; delete p.errorMessage; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'cid_outputs') {
+    if (p.assetId !== undefined) { p.asset_id = p.assetId; delete p.assetId; }
+    if (p.jobId !== undefined) { p.job_id = p.jobId; delete p.jobId; }
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.outputType !== undefined) { p.output_type = p.outputType; delete p.outputType; }
+    if (p.contentText !== undefined) { p.content_text = p.contentText; delete p.contentText; }
+    if (p.contentJson !== undefined) { p.content_json = p.contentJson; delete p.contentJson; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'cid_tags') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'cid_asset_tags') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.assetId !== undefined) { p.asset_id = p.assetId; delete p.assetId; }
+    if (p.tagId !== undefined) { p.tag_id = p.tagId; delete p.tagId; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
+  if (table === 'cid_links') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.assetId !== undefined) { p.asset_id = p.assetId; delete p.assetId; }
+    if (p.linkType !== undefined) { p.link_type = p.linkType; delete p.linkType; }
+    if (p.linkedId !== undefined) { p.linked_id = p.linkedId; delete p.linkedId; }
+    if (p.linkedLabel !== undefined) { p.linked_label = p.linkedLabel; delete p.linkedLabel; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
   if (table === 'audit_events') {
     if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
     if (p.entityType !== undefined) { p.entity_type = p.entityType; delete p.entityType; }
@@ -931,6 +1469,28 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     delete p.updatedAt;
   }
 
+  if (table === 'agent_quality_events') {
+    if (p.eventId !== undefined) { p.event_id = p.eventId; delete p.eventId; }
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.ventureId !== undefined) { p.venture_id = p.ventureId; delete p.ventureId; }
+    if (p.conversationId !== undefined) { p.conversation_id = p.conversationId; delete p.conversationId; }
+    if (p.turnId !== undefined) { p.turn_id = p.turnId; delete p.turnId; }
+    if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
+    if (p.agentName !== undefined) { p.agent_name = p.agentName; delete p.agentName; }
+    if (p.eventType !== undefined) { p.event_type = p.eventType; delete p.eventType; }
+    if (p.eventSubtype !== undefined) { p.event_subtype = p.eventSubtype; delete p.eventSubtype; }
+    if (p.detectedBy !== undefined) { p.detected_by = p.detectedBy; delete p.detectedBy; }
+    if (p.messageRef !== undefined) { p.message_ref = p.messageRef; delete p.messageRef; }
+    if (p.correctionText !== undefined) { p.correction_text = p.correctionText; delete p.correctionText; }
+    if (p.modelUsed !== undefined) { p.model_used = p.modelUsed; delete p.modelUsed; }
+    if (p.workflowVersion !== undefined) { p.workflow_version = p.workflowVersion; delete p.workflowVersion; }
+    if (p.dnaVersion !== undefined) { p.dna_version = p.dnaVersion; delete p.dnaVersion; }
+    if (p.policyVersion !== undefined) { p.policy_version = p.policyVersion; delete p.policyVersion; }
+    if (p.resolvedAt !== undefined) { p.resolved_at = p.resolvedAt; delete p.resolvedAt; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
   if (table === 'chat_sessions') {
     if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
     if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
@@ -958,6 +1518,45 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
     delete p.createdAt;
     delete p.updatedAt;
+  }
+
+  if (table === 'intelligence_flows') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.ventureId !== undefined) { p.venture_id = p.ventureId; delete p.ventureId; }
+    if (p.conversationId !== undefined) { p.conversation_id = p.conversationId; delete p.conversationId; }
+    if (p.turnId !== undefined) { p.turn_id = p.turnId; delete p.turnId; }
+    if (p.executionRunId !== undefined) { p.execution_run_id = p.executionRunId; delete p.executionRunId; }
+    if (p.flowType !== undefined) { p.flow_type = p.flowType; delete p.flowType; }
+    if (p.sourceKind !== undefined) { p.source_kind = p.sourceKind; delete p.sourceKind; }
+    if (p.sourceId !== undefined) { p.source_id = p.sourceId; delete p.sourceId; }
+    if (p.finalAction !== undefined) { p.final_action = p.finalAction; delete p.finalAction; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'intelligence_flow_steps') {
+    if (p.flowId !== undefined) { p.flow_id = p.flowId; delete p.flowId; }
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.conversationId !== undefined) { p.conversation_id = p.conversationId; delete p.conversationId; }
+    if (p.turnId !== undefined) { p.turn_id = p.turnId; delete p.turnId; }
+    if (p.stepOrder !== undefined) { p.step_order = p.stepOrder; delete p.stepOrder; }
+    if (p.actorType !== undefined) { p.actor_type = p.actorType; delete p.actorType; }
+    if (p.actorId !== undefined) { p.actor_id = p.actorId; delete p.actorId; }
+    if (p.actorName !== undefined) { p.actor_name = p.actorName; delete p.actorName; }
+    if (p.actionType !== undefined) { p.action_type = p.actionType; delete p.actionType; }
+    if (p.modelUsed !== undefined) { p.model_used = p.modelUsed; delete p.modelUsed; }
+    if (p.workflowVersion !== undefined) { p.workflow_version = p.workflowVersion; delete p.workflowVersion; }
+    if (p.policyVersion !== undefined) { p.policy_version = p.policyVersion; delete p.policyVersion; }
+    if (p.dnaVersion !== undefined) { p.dna_version = p.dnaVersion; delete p.dnaVersion; }
+    if (p.latencyMs !== undefined) { p.latency_ms = p.latencyMs; delete p.latencyMs; }
+    if (p.estimatedCost !== undefined) { p.estimated_cost = p.estimatedCost; delete p.estimatedCost; }
+    if (p.tokensIn !== undefined) { p.tokens_in = p.tokensIn; delete p.tokensIn; }
+    if (p.tokensOut !== undefined) { p.tokens_out = p.tokensOut; delete p.tokensOut; }
+    if (p.eventTime !== undefined) { p.event_time = p.eventTime; delete p.eventTime; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
   }
 
   return p;
@@ -1044,22 +1643,33 @@ const parseNonUpdatableColumn = (error: any): string | null => {
 const insertWithSchemaFallback = async (table: string, initialBody: Record<string, any>) => {
   const body: Record<string, any> = { ...initialBody };
   const removed = new Set<string>();
+  let payloadColumnUnavailable = false;
+  const maxAttempts = Math.max(30, Object.keys(body).length + 15);
+  let lastErrorMessage = '';
 
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       return await restFetch(table, { method: 'POST', body });
     } catch (error: any) {
       if (error?.status !== 400) throw error;
+      lastErrorMessage = String(error?.details?.message || error?.message || '');
 
       const missingColumn = parseMissingColumn(error, table);
       if (!missingColumn || removed.has(missingColumn)) throw error;
+
+      if (missingColumn === 'payload') {
+        delete body.payload;
+        payloadColumnUnavailable = true;
+        removed.add(missingColumn);
+        continue;
+      }
 
       if (Object.prototype.hasOwnProperty.call(body, missingColumn)) {
         const value = body[missingColumn];
         delete body[missingColumn];
 
         // Tenta preservar o valor em payload quando possível.
-        if (missingColumn !== 'payload') {
+        if (!payloadColumnUnavailable) {
           body.payload = {
             ...(body.payload && typeof body.payload === 'object' ? body.payload : {}),
             [missingColumn]: value
@@ -1076,7 +1686,7 @@ const insertWithSchemaFallback = async (table: string, initialBody: Record<strin
 
   throw createShimError({
     code: 'supabase/http-400',
-    message: `Falha ao inserir em ${table} após tentativas de compatibilidade de schema.`
+    message: `Falha ao inserir em ${table} após tentativas de compatibilidade de schema.${lastErrorMessage ? ` Detalhe: ${lastErrorMessage}` : ''}`
   });
 };
 
@@ -1087,23 +1697,34 @@ const patchWithSchemaFallback = async (
 ) => {
   const body: Record<string, any> = { ...initialBody };
   const removed = new Set<string>();
+  let payloadColumnUnavailable = false;
+  const maxAttempts = Math.max(30, Object.keys(body).length + 15);
+  let lastErrorMessage = '';
 
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       return await restFetch(table, { method: 'PATCH', query, body });
     } catch (error: any) {
       if (error?.status !== 400) throw error;
+      lastErrorMessage = String(error?.details?.message || error?.message || '');
 
       const missingColumn = parseMissingColumn(error, table);
       const nonUpdatableColumn = parseNonUpdatableColumn(error);
       const targetColumn = missingColumn || nonUpdatableColumn;
       if (!targetColumn || removed.has(targetColumn)) throw error;
 
+      if (targetColumn === 'payload' && missingColumn) {
+        delete body.payload;
+        payloadColumnUnavailable = true;
+        removed.add(targetColumn);
+        continue;
+      }
+
       if (Object.prototype.hasOwnProperty.call(body, targetColumn)) {
         const value = body[targetColumn];
         delete body[targetColumn];
 
-        if (missingColumn && targetColumn !== 'payload') {
+        if (missingColumn && targetColumn !== 'payload' && !payloadColumnUnavailable) {
           body.payload = {
             ...(body.payload && typeof body.payload === 'object' ? body.payload : {}),
             [targetColumn]: value
@@ -1119,7 +1740,7 @@ const patchWithSchemaFallback = async (
 
   throw createShimError({
     code: 'supabase/http-400',
-    message: `Falha ao atualizar ${table} após tentativas de compatibilidade de schema.`
+    message: `Falha ao atualizar ${table} após tentativas de compatibilidade de schema.${lastErrorMessage ? ` Detalhe: ${lastErrorMessage}` : ''}`
   });
 };
 
@@ -1139,13 +1760,21 @@ const getBasePollingMs = (ref: AnyRef) => {
   const table = ref.table;
   if (table === 'chat_messages') return 2500;
   if (table === 'chat_sessions') return 4000;
-  if (table === 'agents' || table === 'workspace_members' || table === 'agent_configs' || table === 'agent_memories') return 15000;
+  if (table === 'agents' || table === 'workspace_members' || table === 'agent_configs' || table === 'agent_memories' || table === 'agent_quality_events') return 15000;
   if (
     table === 'governance_global_culture' ||
     table === 'governance_compliance_rules' ||
     table === 'vault_items' ||
     table === 'knowledge_nodes'
   ) return 20000;
+  if (
+    table === 'cid_assets' ||
+    table === 'cid_processing_jobs' ||
+    table === 'cid_outputs' ||
+    table === 'cid_chunks' ||
+    table === 'cid_batches' ||
+    table === 'cid_batch_items'
+  ) return 7000;
   if (table === 'topics' || table === 'tasks' || table === 'ventures') return 8000;
   return ref.kind === 'doc' ? 7000 : 10000;
 };

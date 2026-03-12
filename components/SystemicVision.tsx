@@ -6,6 +6,14 @@ import { startAgentSession, generateTitleOptions, transcribeAudio, generateTaskS
 import { streamDeepSeekResponse, DeepSeekMessage } from '../services/deepseek';
 import { streamLlamaLocalResponse, LlamaMessage } from '../services/llamaLocal';
 import { streamProxyProviderResponse, ProxyProviderMessage } from '../services/providerProxy';
+import { createMessageTelemetry, detectBotQualityEvents, detectUserQualityEvents, getTurnIdFromMessages, persistQualityEvent, persistQualityEventsBatch } from '../services/qualitySensor';
+import {
+    appendIntelligenceFlowStep,
+    createTaskGenerationFlow,
+    finalizeIntelligenceFlow,
+    inferFlowFinalAction,
+    startIntelligenceFlow
+} from '../services/intelligenceFlow';
 import { retrieveRelevantContext, retrieveLearnedMemory } from '../services/knowledge';
 import { db, collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from '../services/supabase';
 import { SendIcon, NewChatIcon, MicIcon, StopCircleIcon, BackIcon, FolderIcon, PlusIcon, FileTextIcon, CloudUploadIcon, PaperclipIcon, XIcon, BookIcon, BotIcon, PencilIcon, CheckIcon, TrashIcon } from './Icon';
@@ -129,6 +137,23 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const isLlamaLocalProvider = (provider?: ModelProvider | null) => resolveProvider(provider) === 'llama_local';
     const isGeminiProvider = (provider?: ModelProvider | null) => resolveProvider(provider) === 'gemini';
     const isProxyProvider = (provider?: ModelProvider | null) => ['openai', 'claude', 'qwen'].includes(resolveProvider(provider));
+    const statusFromText = (text: string): 'ok' | 'warning' | 'error' => {
+        const normalized = String(text || '').toLowerCase();
+        if (
+            normalized.includes('erro') ||
+            normalized.includes('timeout') ||
+            normalized.includes('falha') ||
+            normalized.includes('nao foi possivel') ||
+            normalized.includes('não foi possível')
+        ) return 'error';
+        if (
+            normalized.includes('atenção') ||
+            normalized.includes('atencao') ||
+            normalized.includes('verifique') ||
+            normalized.includes('revisar')
+        ) return 'warning';
+        return 'ok';
+    };
 
     const MODEL_PROVIDER_OPTIONS: Array<{ value: ModelProvider; label: string }> = [
         { value: 'llama_local', label: 'Llama' },
@@ -880,6 +905,21 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                 assignee: taskForm.assignee,
                 dueDate: taskForm.date
             });
+
+            void createTaskGenerationFlow({
+                workspaceId,
+                ventureId: selectedAgent?.ventureId || null,
+                conversationId: currentSessionId,
+                turnId: getTurnIdFromMessages(activeMessages),
+                sourceId: currentSessionId,
+                userName: CURRENT_USER.name,
+                agent: selectedAgent,
+                title: taskForm.title,
+                actionType: 'agenda_created',
+                note: `Responsável: ${taskForm.assignee || 'não definido'} | Data: ${taskForm.date || 'não definida'}`
+            }).catch((error) => {
+                console.warn("Falha ao registrar fluxo de geração operacional (modal):", error);
+            });
         }
         setIsTaskModalOpen(false);
         setTaskForm({ title: '', assignee: '', date: new Date().toISOString().split('T')[0] });
@@ -901,6 +941,22 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const handleSuggestionClick = (suggestion: string) => {
         if (onConvertToTopic) {
             onConvertToTopic({ title: suggestion, priority: 'Média', assignee: selectedAgent?.name });
+
+            void createTaskGenerationFlow({
+                workspaceId,
+                ventureId: selectedAgent?.ventureId || null,
+                conversationId: currentSessionId,
+                turnId: getTurnIdFromMessages(activeMessages),
+                sourceId: currentSessionId,
+                userName: CURRENT_USER.name,
+                agent: selectedAgent,
+                title: suggestion,
+                actionType: 'agenda_created',
+                note: 'Pauta criada a partir de sugestão do chat'
+            }).catch((error) => {
+                console.warn("Falha ao registrar fluxo de sugestão operacional:", error);
+            });
+
             setTaskSuggestions(null);
         } else {
             setInput(suggestion);
@@ -1066,6 +1122,13 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         }
     };
 
+    const extractTextFromAttachments = (items: Array<{ data: string, mimeType: string, preview: string }>) => {
+        return (items || [])
+            .map((item) => extractTextFromAttachment(item))
+            .filter(Boolean)
+            .join('\n\n');
+    };
+
     const handlePaste = (e: React.ClipboardEvent) => {
         const items = e.clipboardData.items;
         for (let i = 0; i < items.length; i++) {
@@ -1102,6 +1165,66 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         const currentAttachments = attachments;
         const canPersistChat = Boolean(workspaceId && currentSessionId);
         const now = new Date();
+        const providerForMessage = resolveProvider(selectedModelProvider);
+        const turnId = getTurnIdFromMessages(activeMessages);
+        const attachmentTextShared = extractTextFromAttachments(currentAttachments);
+        const userDisplayText = currentAttachments.length > 0
+            ? (userText ? `${userText} 📎 [${currentAttachments.length} arquivo(s) anexado(s)]` : `📎 [${currentAttachments.length} arquivo(s) enviado(s)]`)
+            : userText;
+        const flowParticipants = Array.from(new Set([
+            CURRENT_USER.name,
+            selectedAgent.name,
+            ...activeParticipants.map((participant) => participant.name)
+        ].filter(Boolean)));
+        let intelligenceFlowId: string | null = null;
+        let flowStepOrder = 1;
+        let flowPersistenceEnabled = canPersistChat;
+        let flowHasError = false;
+        let flowHasHandoff = activeParticipants.length > 0;
+        let flowReplyCount = 0;
+
+        const appendFlowStepSafe = async (input: Omit<Parameters<typeof appendIntelligenceFlowStep>[0], 'flowId' | 'workspaceId' | 'conversationId' | 'turnId'>) => {
+            if (!flowPersistenceEnabled || !intelligenceFlowId) return;
+            try {
+                await appendIntelligenceFlowStep({
+                    flowId: intelligenceFlowId,
+                    workspaceId,
+                    conversationId: currentSessionId,
+                    turnId,
+                    stepOrder: flowStepOrder++,
+                    ...input
+                });
+            } catch (error) {
+                flowPersistenceEnabled = false;
+                console.warn("Falha ao persistir intelligence_flow_step:", error);
+            }
+        };
+
+        if (flowPersistenceEnabled) {
+            try {
+                intelligenceFlowId = await startIntelligenceFlow({
+                    workspaceId,
+                    ventureId: selectedAgent.ventureId || null,
+                    conversationId: currentSessionId,
+                    turnId,
+                    flowType: activeParticipants.length > 0 ? 'handoff' : 'conversation',
+                    sourceKind: 'conversation',
+                    sourceId: currentSessionId,
+                    origin: `Chat: ${selectedAgent.name}`,
+                    participants: flowParticipants,
+                    finalAction: 'Em processamento',
+                    status: 'running',
+                    payload: {
+                        buId: activeBU.id,
+                        selectedModel: providerForMessage,
+                        participantAgentIds: activeParticipants.map((participant) => participant.id)
+                    }
+                });
+            } catch (error) {
+                flowPersistenceEnabled = false;
+                console.warn("Falha ao criar intelligence_flow:", error);
+            }
+        }
 
         setInput('');
         setAttachments([]);
@@ -1119,11 +1242,21 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     sessionId: currentSessionId,
                     agentId: selectedAgent.id,
                     sender: Sender.User,
-                    text: currentAttachments.length > 0 ? (userText ? `${userText} 📎 [${currentAttachments.length} arquivo(s) anexado(s)]` : `📎 [${currentAttachments.length} arquivo(s) enviado(s)]`) : userText,
+                    text: userDisplayText,
                     buId: activeBU.id,
                     hasAttachment: currentAttachments.length > 0,
                     attachment: currentAttachments.length > 0 ? currentAttachments : null,
-                    createdAt: now
+                    createdAt: now,
+                    payload: {
+                        turn_id: turnId,
+                        message_kind: 'user_input',
+                        ...createMessageTelemetry({
+                            provider: providerForMessage,
+                            promptText: [userText, attachmentTextShared].filter(Boolean).join('\n\n'),
+                            completionText: '',
+                            latencyMs: 0
+                        })
+                    }
                 });
                 userMsgId = savedUser.id;
             } catch (error) {
@@ -1133,7 +1266,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
         const userMsg: Message = {
             id: userMsgId,
-            text: currentAttachments.length > 0 ? (userText ? `${userText} 📎 [${currentAttachments.length} arquivo(s) anexado(s)]` : `📎 [${currentAttachments.length} arquivo(s) enviado(s)]`) : userText,
+            text: userDisplayText,
             sender: Sender.User,
             timestamp: now,
             buId: activeBU.id,
@@ -1144,17 +1277,69 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         setActiveMessages(prev => [...prev, userMsg]);
         setIsLoading(true);
 
+        await appendFlowStepSafe({
+            actorType: 'user',
+            actorId: ownerUserId,
+            actorName: CURRENT_USER.name,
+            actionType: 'question',
+            status: 'ok',
+            modelUsed: providerForMessage,
+            tokensIn: Math.ceil(([userText, attachmentTextShared].filter(Boolean).join('\n\n').length || 1) / 4),
+            tokensOut: 0,
+            latencyMs: 0,
+            estimatedCost: 0,
+            note: userText || `Mensagem com ${currentAttachments.length} anexo(s)`,
+            eventTime: now,
+            payload: {
+                attachmentsCount: currentAttachments.length
+            }
+        });
+
+        if (canPersistChat) {
+            const userEvents = detectUserQualityEvents(userText).map((eventDraft) => ({
+                ...eventDraft,
+                messageRef: userMsgId
+            }));
+
+            if (userEvents.length > 0) {
+                void persistQualityEventsBatch({
+                    workspaceId,
+                    ventureId: selectedAgent.ventureId || null,
+                    conversationId: currentSessionId,
+                    turnId,
+                    agent: selectedAgent,
+                    modelUsed: providerForMessage,
+                    workflowVersion: 'quality-sensor-v1',
+                    policyVersion: 'governance-v1'
+                }, userEvents);
+            }
+        }
+
         try {
             const participantsLabel = activeParticipants.length > 0
                 ? `[MESA: ${activeParticipants.map((participant) => participant.name).join(', ')}]`
                 : '';
-            const providerForMessage = resolveProvider(selectedModelProvider);
             const speakerQueue = [selectedAgent, ...activeParticipants];
             const generatedReplies: Message[] = [];
+            let previousSpeaker: Agent | null = null;
 
             for (const speaker of speakerQueue) {
                 let botMsgId = `${Date.now()}_${speaker.id}`;
                 let persistedBotId: string | null = null;
+                const speakerStartedAt = Date.now();
+                let completionTokensFromProvider: number | null = null;
+
+                if (previousSpeaker && previousSpeaker.id !== speaker.id) {
+                    flowHasHandoff = true;
+                    await appendFlowStepSafe({
+                        actorType: 'system',
+                        actorName: 'Sistema',
+                        actionType: 'handoff',
+                        status: 'ok',
+                        note: `${previousSpeaker.name} -> ${speaker.name}`,
+                        eventTime: new Date()
+                    });
+                }
 
                 if (canPersistChat) {
                     try {
@@ -1168,7 +1353,12 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                             buId: activeBU.id,
                             hasAttachment: false,
                             createdAt: new Date(),
-                            payload: { isStreaming: true }
+                            payload: {
+                                isStreaming: true,
+                                turn_id: turnId,
+                                model_used: providerForMessage,
+                                message_kind: 'assistant_output'
+                            }
                         });
                         botMsgId = savedBot.id;
                         persistedBotId = savedBot.id;
@@ -1199,10 +1389,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                 role: message.sender === Sender.User ? 'user' : 'assistant',
                                 content: message.text
                             })) as DeepSeekMessage[];
-                        const attachmentText = currentAttachments
-                            .map((item) => extractTextFromAttachment(item))
-                            .filter(Boolean)
-                            .join('\n\n');
+                        const attachmentText = attachmentTextShared;
                         if (attachmentText) {
                             deepSeekHistory.push({ role: 'user', content: attachmentText });
                         }
@@ -1216,7 +1403,11 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
                         const stream = streamDeepSeekResponse(deepSeekHistory, speaker.fullPrompt);
                         for await (const chunk of stream) {
-                            finalBotText += chunk.text;
+                            const text = (chunk as any)?.text || '';
+                            if (typeof (chunk as any)?.completionTokens === 'number') {
+                                completionTokensFromProvider = Number((chunk as any).completionTokens);
+                            }
+                            finalBotText += text;
                             setActiveMessages((prev) => prev.map((message) => (
                                 message.id === botMsgId ? { ...message, text: finalBotText } : message
                             )));
@@ -1230,10 +1421,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                 content: message.text
                             })) as LlamaMessage[];
 
-                        const attachmentText = currentAttachments
-                            .map((item) => extractTextFromAttachment(item))
-                            .filter(Boolean)
-                            .join('\n\n');
+                        const attachmentText = attachmentTextShared;
                         if (attachmentText) {
                             llamaHistory.push({ role: 'user', content: attachmentText });
                         }
@@ -1260,10 +1448,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                 content: message.text
                             })) as ProxyProviderMessage[];
 
-                        const attachmentText = currentAttachments
-                            .map((item) => extractTextFromAttachment(item))
-                            .filter(Boolean)
-                            .join('\n\n');
+                        const attachmentText = attachmentTextShared;
                         if (attachmentText) {
                             proxyHistory.push({ role: 'user', content: attachmentText });
                         }
@@ -1332,16 +1517,103 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     }
 
                     const summonMatch = finalBotText.match(/<<<CALL: (.*?)>>>/);
-                    if (summonMatch?.[1]) {
-                        const agentName = summonMatch[1];
+                    const summonedAgentName = summonMatch?.[1] ? String(summonMatch[1]).trim() : null;
+                    let summonedAgent: Agent | null = null;
+                    if (summonedAgentName) {
+                        const agentName = summonedAgentName;
                         const agentToCall = dynamicAgents.find((agent) => (
                             agent.name.includes(agentName) || agentName.includes(agent.name)
                         ));
+                        summonedAgent = agentToCall || null;
                         if (agentToCall && !activeParticipants.some((participant) => participant.id === agentToCall.id)) {
                             handleInviteAgent(agentToCall, false);
                         }
                     }
                     finalBotText = finalBotText.replace(/<<<CALL:\s*.*?>>>/g, '').trim();
+
+                    const promptForTelemetry = [userText, attachmentTextShared, ragContext || '', participantsLabel || '']
+                        .filter(Boolean)
+                        .join('\n\n');
+                    const latencyMs = Date.now() - speakerStartedAt;
+                    const messageTelemetry = createMessageTelemetry({
+                        provider: providerForMessage,
+                        promptText: promptForTelemetry,
+                        completionText: finalBotText,
+                        latencyMs,
+                        completionTokens: completionTokensFromProvider
+                    });
+                    flowReplyCount += 1;
+
+                    await appendFlowStepSafe({
+                        actorType: 'agent',
+                        actorId: speaker.id,
+                        actorName: speaker.name,
+                        actionType: 'analysis',
+                        status: 'ok',
+                        modelUsed: providerForMessage,
+                        workflowVersion: 'chat-v2',
+                        policyVersion: 'governance-v1',
+                        dnaVersion: speaker.version || null,
+                        latencyMs: Number(messageTelemetry.latency_ms || 0),
+                        tokensIn: Number(messageTelemetry.prompt_tokens_estimated || 0),
+                        tokensOut: Number(messageTelemetry.completion_tokens_estimated || 0),
+                        estimatedCost: Number(messageTelemetry.cost_estimated_usd || 0),
+                        note: 'Análise concluída',
+                        eventTime: new Date()
+                    });
+
+                    await appendFlowStepSafe({
+                        actorType: 'agent',
+                        actorId: speaker.id,
+                        actorName: speaker.name,
+                        actionType: 'response',
+                        status: statusFromText(finalBotText),
+                        modelUsed: providerForMessage,
+                        workflowVersion: 'chat-v2',
+                        policyVersion: 'governance-v1',
+                        dnaVersion: speaker.version || null,
+                        latencyMs: Number(messageTelemetry.latency_ms || 0),
+                        tokensIn: Number(messageTelemetry.prompt_tokens_estimated || 0),
+                        tokensOut: Number(messageTelemetry.completion_tokens_estimated || 0),
+                        estimatedCost: Number(messageTelemetry.cost_estimated_usd || 0),
+                        note: finalBotText.slice(0, 180),
+                        eventTime: new Date()
+                    });
+
+                    if (summonedAgentName) {
+                        flowHasHandoff = true;
+                        await appendFlowStepSafe({
+                            actorType: 'agent',
+                            actorId: speaker.id,
+                            actorName: speaker.name,
+                            actionType: 'handoff',
+                            status: summonedAgent ? 'ok' : 'warning',
+                            modelUsed: providerForMessage,
+                            note: summonedAgent
+                                ? `Handoff para ${summonedAgent.name}`
+                                : `Tentativa de handoff sem alvo válido: ${summonedAgentName}`,
+                            eventTime: new Date(),
+                            payload: {
+                                summonTargetName: summonedAgentName,
+                                summonTargetAgentId: summonedAgent?.id || null
+                            }
+                        });
+                    }
+
+                    const previousBotText = [...generatedReplies]
+                        .map((message) => message.text)
+                        .reverse()
+                        .find((text) => Boolean(String(text || '').trim()));
+                    const botEvents = detectBotQualityEvents({
+                        speaker,
+                        finalBotText,
+                        previousBotText,
+                        summonTargetName: summonedAgentName,
+                        summonTargetAgent: summonedAgent
+                    }).map((eventDraft) => ({
+                        ...eventDraft,
+                        messageRef: persistedBotId || botMsgId
+                    }));
 
                     setActiveMessages((prev) => prev.map((message) => (
                         message.id === botMsgId ? { ...message, text: finalBotText, isStreaming: false } : message
@@ -1351,8 +1623,26 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                         await updateDoc(doc(db, "chat_messages", persistedBotId), {
                             text: finalBotText,
                             participantName: speaker.name,
-                            payload: { isStreaming: false }
+                            payload: {
+                                isStreaming: false,
+                                turn_id: turnId,
+                                ...messageTelemetry,
+                                quality_events_logged: botEvents.length
+                            }
                         });
+                    }
+
+                    if (canPersistChat && botEvents.length > 0) {
+                        void persistQualityEventsBatch({
+                            workspaceId,
+                            ventureId: speaker.ventureId || selectedAgent.ventureId || null,
+                            conversationId: currentSessionId,
+                            turnId,
+                            agent: speaker,
+                            modelUsed: providerForMessage,
+                            workflowVersion: 'quality-sensor-v1',
+                            policyVersion: 'governance-v1'
+                        }, botEvents);
                     }
 
                     generatedReplies.push({
@@ -1364,6 +1654,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                         participantName: speaker.name
                     });
                 } catch (error: any) {
+                    flowHasError = true;
                     const technicalMsg = error?.message || "Conexão Instável";
                     const errorText = `Erro na conexão neural (${technicalMsg}).`;
                     console.error(`Erro ao gerar resposta de ${speaker.name}:`, error);
@@ -1374,10 +1665,53 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                         await updateDoc(doc(db, "chat_messages", persistedBotId), {
                             text: errorText,
                             participantName: speaker.name,
-                            payload: { isStreaming: false }
+                            payload: {
+                                isStreaming: false,
+                                turn_id: turnId,
+                                model_used: providerForMessage,
+                                error: technicalMsg
+                            }
                         }).catch(() => null);
                     }
+
+                    if (canPersistChat) {
+                        void persistQualityEvent({
+                            workspaceId,
+                            ventureId: speaker.ventureId || selectedAgent.ventureId || null,
+                            conversationId: currentSessionId,
+                            turnId,
+                            agent: speaker,
+                            modelUsed: providerForMessage,
+                            workflowVersion: 'quality-sensor-v1',
+                            policyVersion: 'governance-v1'
+                        }, {
+                            eventType: 'model_error',
+                            eventSubtype: 'provider_runtime_failure',
+                            severity: 'high',
+                            detectedBy: 'system',
+                            messageRef: persistedBotId || botMsgId,
+                            excerpt: errorText,
+                            payload: { technicalMessage: technicalMsg }
+                        });
+                    }
+
+                    await appendFlowStepSafe({
+                        actorType: 'agent',
+                        actorId: speaker.id,
+                        actorName: speaker.name,
+                        actionType: 'error',
+                        status: 'error',
+                        modelUsed: providerForMessage,
+                        workflowVersion: 'chat-v2',
+                        policyVersion: 'governance-v1',
+                        dnaVersion: speaker.version || null,
+                        note: errorText,
+                        eventTime: new Date(),
+                        payload: { technicalMessage: technicalMsg }
+                    });
                 }
+
+                previousSpeaker = speaker;
             }
 
             if (currentSessionId) {
@@ -1387,7 +1721,59 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
             const suggestionsContext = [userText, ...generatedReplies.map((message) => message.text)].join('\n\n');
             const suggestions = await generateTaskSuggestions(suggestionsContext);
             setTaskSuggestions(suggestions.length > 0 ? suggestions : null);
+
+            if (intelligenceFlowId && flowPersistenceEnabled) {
+                const finalAction = inferFlowFinalAction({
+                    userText,
+                    generatedReplies,
+                    suggestionsCount: suggestions.length
+                });
+                let finalFlowType: 'conversation' | 'handoff' | 'decision' | 'task_generation' | 'cid_processing' = flowHasHandoff ? 'handoff' : 'conversation';
+                if (/decis[aã]o registrada/i.test(finalAction)) finalFlowType = 'decision';
+                if (/pauta criada|tarefa criada/i.test(finalAction)) finalFlowType = 'task_generation';
+
+                await finalizeIntelligenceFlow({
+                    flowId: intelligenceFlowId,
+                    flowType: finalFlowType,
+                    finalAction,
+                    status: flowHasError ? 'error' : 'ok',
+                    participants: flowParticipants,
+                    payload: {
+                        suggestionsCount: suggestions.length,
+                        repliesCount: flowReplyCount,
+                        selectedModel: providerForMessage,
+                        hasError: flowHasError,
+                        hasHandoff: flowHasHandoff
+                    }
+                }).catch((error) => {
+                    console.warn("Falha ao finalizar intelligence_flow:", error);
+                });
+            }
         } catch (error) {
+            flowHasError = true;
+            if (intelligenceFlowId && flowPersistenceEnabled) {
+                await appendFlowStepSafe({
+                    actorType: 'system',
+                    actorName: 'Sistema',
+                    actionType: 'error',
+                    status: 'error',
+                    modelUsed: providerForMessage,
+                    note: `Falha geral de execução: ${String((error as any)?.message || 'erro desconhecido')}`,
+                    eventTime: new Date()
+                });
+
+                await finalizeIntelligenceFlow({
+                    flowId: intelligenceFlowId,
+                    flowType: flowHasHandoff ? 'handoff' : 'conversation',
+                    finalAction: 'Fluxo encerrado com erro',
+                    status: 'error',
+                    participants: flowParticipants,
+                    payload: {
+                        selectedModel: providerForMessage,
+                        hasError: true
+                    }
+                }).catch(() => null);
+            }
             console.error("Neural Connection Error Detail:", error);
         } finally {
             setIsLoading(false);

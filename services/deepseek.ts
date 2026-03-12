@@ -174,7 +174,12 @@ export async function* streamDeepSeekResponse(
       }
     }
 
-    yield { text: stripEndMarker(finalText) };
+    yield {
+      text: stripEndMarker(finalText),
+      finishReason: currentResponse.finishReason || null,
+      completionTokens: currentResponse.completionTokens || null,
+      requestedMaxTokens: currentResponse.requestedMaxTokens || null
+    };
   } catch (error) {
     const firstMessage = String((error as any)?.message || '');
 

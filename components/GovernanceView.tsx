@@ -674,6 +674,7 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
                   <p className="text-xs font-medium text-gray-400 leading-relaxed">Gestão de DNA e Permissões de Acesso (RAG) dos Agentes.</p>
               </button>
           </div>
+
       </div>
   );
 
