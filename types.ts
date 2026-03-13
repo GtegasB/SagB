@@ -12,7 +12,7 @@ export type AgentStatus = 'PLANNED' | 'STAGING' | 'ACTIVE' | 'MAINTENANCE' | 'BL
 export type ModelProvider = 'gemini' | 'deepseek' | 'llama_local' | 'openai' | 'claude' | 'qwen'; // Opções de Cérebro
 
 // V4.2 - Adicionado 'home' como Dashboard Inicial
-export type TabId = 'home' | 'ecosystem' | 'team' | 'conversations' | 'management' | 'redir' | 'vault' | 'fabrica-ca' | 'governance' | 'cid' | 'quality' | 'intelligence-flow' | 'methodology' | 'hub' | 'alignment' | 'market' | 'sales' | 'expansion' | '3forb-home' | 'audacus-home' | 'startyb-home' | 'requests' | 'unit-room' | 'chat-room' | 'ventures';
+export type TabId = 'home' | 'ecosystem' | 'team' | 'conversations' | 'management' | 'redir' | 'vault' | 'fabrica-ca' | 'governance' | 'cid' | 'quality' | 'intelligence-flow' | 'continuous-memory' | 'methodology' | 'hub' | 'alignment' | 'market' | 'sales' | 'expansion' | '3forb-home' | 'audacus-home' | 'startyb-home' | 'requests' | 'unit-room' | 'chat-room' | 'ventures';
 
 export type BUType = 'CORE' | 'VENTURY' | 'PERSONAL' | 'METHODOLOGY';
 
@@ -494,6 +494,211 @@ export interface CidBatchItem {
   createdAt: Date;
   updatedAt: Date;
   payload?: Record<string, any>;
+}
+
+export type ContinuousMemorySessionStatus =
+  | 'draft'
+  | 'live'
+  | 'paused'
+  | 'ended'
+  | 'processing'
+  | 'completed'
+  | 'error';
+
+export type ContinuousMemoryCaptureMode = 'microphone' | 'upload' | 'hybrid' | 'system';
+export type ContinuousMemoryChunkStatus =
+  | 'queued'
+  | 'capturing'
+  | 'captured'
+  | 'uploading'
+  | 'stored'
+  | 'transcribing'
+  | 'classified'
+  | 'completed'
+  | 'error'
+  | 'retrying';
+export type ContinuousMemoryTranscriptStatus = 'pending' | 'processing' | 'completed' | 'error' | 'retrying';
+export type ContinuousMemoryJobStatus = 'queued' | 'running' | 'completed' | 'completed_warning' | 'error' | 'cancelled' | 'retrying';
+export type ContinuousMemoryFileRole =
+  | 'session_audio_master'
+  | 'chunk_audio_original'
+  | 'chunk_audio_cleaned'
+  | 'chunk_waveform'
+  | 'chunk_transcript_attachment';
+export type ContinuousMemoryOutputType =
+  | 'transcript'
+  | 'summary_session'
+  | 'summary_period'
+  | 'classification'
+  | 'extraction'
+  | 'agent_brief'
+  | 'timeline_note';
+export type ContinuousMemorySourceType = 'system' | 'ai' | 'user' | 'rule';
+export type ContinuousMemoryItemType =
+  | 'idea'
+  | 'task'
+  | 'decision'
+  | 'insight'
+  | 'reminder'
+  | 'meeting'
+  | 'command'
+  | 'observation'
+  | 'personal'
+  | 'noise'
+  | 'objection'
+  | 'follow_up'
+  | 'question';
+
+export interface ContinuousMemorySession {
+  id: string;
+  workspaceId: string;
+  ventureId?: string | null;
+  projectId?: string | null;
+  areaId?: string | null;
+  sessionDate: Date;
+  title: string;
+  sourceDevice?: string | null;
+  captureMode: ContinuousMemoryCaptureMode | string;
+  status: ContinuousMemorySessionStatus | string;
+  sensitivityLevel?: string | null;
+  allowAgentReading: boolean;
+  startedAt?: Date | null;
+  endedAt?: Date | null;
+  totalChunks: number;
+  totalDurationSeconds: number;
+  createdBy?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface ContinuousMemoryChunk {
+  id: string;
+  sessionId: string;
+  workspaceId: string;
+  ventureId?: string | null;
+  projectId?: string | null;
+  chunkIndex: number;
+  startedAt?: Date | null;
+  endedAt?: Date | null;
+  durationSeconds: number;
+  status: ContinuousMemoryChunkStatus | string;
+  transcriptStatus: ContinuousMemoryTranscriptStatus | string;
+  transcriptText?: string | null;
+  transcriptConfidence?: number | null;
+  detectedLanguage?: string | null;
+  noiseScore?: number | null;
+  importanceFlag?: boolean;
+  anchorFlag?: boolean;
+  sourceContext?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  errorMessage?: string | null;
+  payload?: Record<string, any>;
+}
+
+export interface ContinuousMemoryFile {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  chunkId?: string | null;
+  fileRole: ContinuousMemoryFileRole | string;
+  storageBucket: string;
+  storagePath: string;
+  mimeType?: string | null;
+  fileSizeBytes?: number | null;
+  checksum?: string | null;
+  durationSeconds?: number | null;
+  createdAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface ContinuousMemoryJob {
+  id: string;
+  workspaceId: string;
+  sessionId?: string | null;
+  chunkId?: string | null;
+  jobType: string;
+  jobStatus: ContinuousMemoryJobStatus | string;
+  processorType?: string | null;
+  processorName?: string | null;
+  priority?: number | null;
+  attemptCount?: number;
+  startedAt?: Date | null;
+  finishedAt?: Date | null;
+  latencyMs?: number | null;
+  estimatedCost?: number | null;
+  tokensIn?: number | null;
+  tokensOut?: number | null;
+  workflowVersion?: string | null;
+  policyVersion?: string | null;
+  statusNote?: string | null;
+  errorMessage?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface ContinuousMemoryOutput {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  chunkId?: string | null;
+  outputType: ContinuousMemoryOutputType | string;
+  content: string;
+  version?: number;
+  generatedBy?: string | null;
+  createdAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface ContinuousMemoryLabel {
+  id: string;
+  workspaceId?: string | null;
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  createdAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface ContinuousMemoryChunkLabel {
+  id: string;
+  workspaceId: string;
+  chunkId: string;
+  labelId: string;
+  confidenceScore?: number | null;
+  sourceType: ContinuousMemorySourceType | string;
+  createdAt: Date;
+}
+
+export interface ContinuousMemoryExtractedItem {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  chunkId: string;
+  itemType: ContinuousMemoryItemType | string;
+  title: string;
+  content: string;
+  priority?: string | null;
+  status?: string | null;
+  suggestedVentureId?: string | null;
+  suggestedProjectId?: string | null;
+  suggestedAgentId?: string | null;
+  createdAt: Date;
+  reviewedAt?: Date | null;
+  payload?: Record<string, any>;
+}
+
+export interface ContinuousMemoryLink {
+  id: string;
+  workspaceId: string;
+  sessionId: string;
+  chunkId?: string | null;
+  extractedItemId?: string | null;
+  linkType: string;
+  linkedEntityId?: string | null;
+  createdAt: Date;
 }
 
 export interface WorkspaceMember {

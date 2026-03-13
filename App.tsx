@@ -17,6 +17,7 @@ import GovernanceView from './components/GovernanceView';
 import QualitySensorView from './components/QualitySensorView';
 import IntelligenceFlowView from './components/IntelligenceFlowView';
 import CIDView from './components/CIDView';
+import ContinuousMemoryView from './components/ContinuousMemoryView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView';
 import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
@@ -46,9 +47,11 @@ type AppUiPrefs = {
 };
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
+// O projeto usa IDs "uuid-like" sintéticos em alguns workspaces legados.
+// Aqui aceitamos o formato 8-4-4-4-12 sem exigir versão/variant RFC.
 const isUuid = (value: any) =>
   typeof value === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const normalizeStatus = (value: any) => String(value || '').trim().toLowerCase();
 
 // IMAGENS ESTÁVEIS (ATUALIZADAS V5.3 - CDN LINKS)
@@ -1481,6 +1484,16 @@ if (userId) {
       case 'cid':
         return (
           <CIDView
+            workspaceId={activeWorkspaceId}
+            ownerUserId={ownerUserId}
+            userProfile={userProfile}
+            ventures={ventures}
+            onBack={() => setActiveTab('ecosystem')}
+          />
+        );
+      case 'continuous-memory':
+        return (
+          <ContinuousMemoryView
             workspaceId={activeWorkspaceId}
             ownerUserId={ownerUserId}
             userProfile={userProfile}

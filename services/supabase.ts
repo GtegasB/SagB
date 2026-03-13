@@ -747,6 +747,177 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     };
   }
 
+  if (table === 'continuous_memory_sessions') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      ventureId: r.venture_id ?? undefined,
+      projectId: r.project_id ?? undefined,
+      areaId: r.area_id ?? undefined,
+      sessionDate: asJsDate(pick(r, 'session_date', 'sessionDate')) ?? new Date(),
+      title: String(r.title ?? ''),
+      sourceDevice: r.source_device ?? undefined,
+      captureMode: String(r.capture_mode ?? 'microphone'),
+      status: String(r.status ?? 'draft'),
+      sensitivityLevel: r.sensitivity_level ?? 'internal',
+      allowAgentReading: Boolean(r.allow_agent_reading),
+      startedAt: asJsDate(pick(r, 'started_at', 'startedAt')),
+      endedAt: asJsDate(pick(r, 'ended_at', 'endedAt')),
+      totalChunks: Number(r.total_chunks ?? 0),
+      totalDurationSeconds: Number(r.total_duration_seconds ?? 0),
+      createdBy: r.created_by ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'continuous_memory_chunks') {
+    return {
+      id: String(r.id),
+      sessionId: String(r.session_id ?? ''),
+      workspaceId: r.workspace_id,
+      ventureId: r.venture_id ?? undefined,
+      projectId: r.project_id ?? undefined,
+      chunkIndex: Number(r.chunk_index ?? 0),
+      startedAt: asJsDate(pick(r, 'started_at', 'startedAt')),
+      endedAt: asJsDate(pick(r, 'ended_at', 'endedAt')),
+      durationSeconds: Number(r.duration_seconds ?? 0),
+      status: String(r.status ?? 'queued'),
+      transcriptStatus: String(r.transcript_status ?? 'pending'),
+      transcriptText: r.transcript_text ?? undefined,
+      transcriptConfidence: r.transcript_confidence !== undefined && r.transcript_confidence !== null ? Number(r.transcript_confidence) : undefined,
+      detectedLanguage: r.detected_language ?? undefined,
+      noiseScore: r.noise_score !== undefined && r.noise_score !== null ? Number(r.noise_score) : undefined,
+      importanceFlag: Boolean(r.importance_flag),
+      anchorFlag: Boolean(r.anchor_flag),
+      sourceContext: r.source_context ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      errorMessage: r.error_message ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'continuous_memory_files') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      sessionId: String(r.session_id ?? ''),
+      chunkId: r.chunk_id ?? undefined,
+      fileRole: String(r.file_role ?? 'chunk_audio_original'),
+      storageBucket: String(r.storage_bucket ?? 'continuous-memory'),
+      storagePath: String(r.storage_path ?? ''),
+      mimeType: r.mime_type ?? undefined,
+      fileSizeBytes: r.file_size_bytes !== undefined && r.file_size_bytes !== null ? Number(r.file_size_bytes) : undefined,
+      checksum: r.checksum ?? undefined,
+      durationSeconds: r.duration_seconds !== undefined && r.duration_seconds !== null ? Number(r.duration_seconds) : undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'continuous_memory_jobs') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      sessionId: r.session_id ?? undefined,
+      chunkId: r.chunk_id ?? undefined,
+      jobType: String(r.job_type ?? 'transcribe_chunk'),
+      jobStatus: String(r.job_status ?? 'queued'),
+      processorType: r.processor_type ?? undefined,
+      processorName: r.processor_name ?? undefined,
+      priority: r.priority !== undefined && r.priority !== null ? Number(r.priority) : undefined,
+      attemptCount: Number(r.attempt_count ?? 0),
+      startedAt: asJsDate(pick(r, 'started_at', 'startedAt')),
+      finishedAt: asJsDate(pick(r, 'finished_at', 'finishedAt')),
+      latencyMs: r.latency_ms !== undefined && r.latency_ms !== null ? Number(r.latency_ms) : undefined,
+      estimatedCost: r.estimated_cost !== undefined && r.estimated_cost !== null ? Number(r.estimated_cost) : undefined,
+      tokensIn: r.tokens_in !== undefined && r.tokens_in !== null ? Number(r.tokens_in) : undefined,
+      tokensOut: r.tokens_out !== undefined && r.tokens_out !== null ? Number(r.tokens_out) : undefined,
+      workflowVersion: r.workflow_version ?? undefined,
+      policyVersion: r.policy_version ?? undefined,
+      statusNote: r.status_note ?? undefined,
+      errorMessage: r.error_message ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'continuous_memory_outputs') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      sessionId: String(r.session_id ?? ''),
+      chunkId: r.chunk_id ?? undefined,
+      outputType: String(r.output_type ?? 'transcript'),
+      content: String(r.content ?? ''),
+      version: Number(r.version ?? 1),
+      generatedBy: r.generated_by ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'continuous_memory_labels') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id ?? undefined,
+      name: String(r.name ?? ''),
+      description: r.description ?? undefined,
+      color: r.color ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'continuous_memory_chunk_labels') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      chunkId: String(r.chunk_id ?? ''),
+      labelId: String(r.label_id ?? ''),
+      confidenceScore: r.confidence_score !== undefined && r.confidence_score !== null ? Number(r.confidence_score) : undefined,
+      sourceType: String(r.source_type ?? 'system'),
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date()
+    };
+  }
+
+  if (table === 'continuous_memory_extracted_items') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      sessionId: String(r.session_id ?? ''),
+      chunkId: String(r.chunk_id ?? ''),
+      itemType: String(r.item_type ?? 'idea'),
+      title: String(r.title ?? ''),
+      content: String(r.content ?? ''),
+      priority: r.priority ?? undefined,
+      status: r.status ?? undefined,
+      suggestedVentureId: r.suggested_venture_id ?? undefined,
+      suggestedProjectId: r.suggested_project_id ?? undefined,
+      suggestedAgentId: r.suggested_agent_id ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      reviewedAt: asJsDate(pick(r, 'reviewed_at', 'reviewedAt')),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'continuous_memory_links') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      sessionId: String(r.session_id ?? ''),
+      chunkId: r.chunk_id ?? undefined,
+      extractedItemId: r.extracted_item_id ?? undefined,
+      linkType: String(r.link_type ?? ''),
+      linkedEntityId: r.linked_entity_id ?? undefined,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
   if (table === 'audit_events') {
     return {
       id: String(r.id),
@@ -1412,6 +1583,140 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (p.linkType !== undefined) { p.link_type = p.linkType; delete p.linkType; }
     if (p.linkedId !== undefined) { p.linked_id = p.linkedId; delete p.linkedId; }
     if (p.linkedLabel !== undefined) { p.linked_label = p.linkedLabel; delete p.linkedLabel; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
+  if (table === 'continuous_memory_sessions') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.ventureId !== undefined) { p.venture_id = p.ventureId; delete p.ventureId; }
+    if (p.projectId !== undefined) { p.project_id = p.projectId; delete p.projectId; }
+    if (p.areaId !== undefined) { p.area_id = p.areaId; delete p.areaId; }
+    if (p.sessionDate !== undefined) { p.session_date = p.sessionDate; delete p.sessionDate; }
+    if (p.sourceDevice !== undefined) { p.source_device = p.sourceDevice; delete p.sourceDevice; }
+    if (p.captureMode !== undefined) { p.capture_mode = p.captureMode; delete p.captureMode; }
+    if (p.sensitivityLevel !== undefined) { p.sensitivity_level = p.sensitivityLevel; delete p.sensitivityLevel; }
+    if (p.allowAgentReading !== undefined) { p.allow_agent_reading = p.allowAgentReading; delete p.allowAgentReading; }
+    if (p.startedAt !== undefined) { p.started_at = p.startedAt; delete p.startedAt; }
+    if (p.endedAt !== undefined) { p.ended_at = p.endedAt; delete p.endedAt; }
+    if (p.totalChunks !== undefined) { p.total_chunks = p.totalChunks; delete p.totalChunks; }
+    if (p.totalDurationSeconds !== undefined) { p.total_duration_seconds = p.totalDurationSeconds; delete p.totalDurationSeconds; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'continuous_memory_chunks') {
+    if (p.sessionId !== undefined) { p.session_id = p.sessionId; delete p.sessionId; }
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.ventureId !== undefined) { p.venture_id = p.ventureId; delete p.ventureId; }
+    if (p.projectId !== undefined) { p.project_id = p.projectId; delete p.projectId; }
+    if (p.chunkIndex !== undefined) { p.chunk_index = p.chunkIndex; delete p.chunkIndex; }
+    if (p.startedAt !== undefined) { p.started_at = p.startedAt; delete p.startedAt; }
+    if (p.endedAt !== undefined) { p.ended_at = p.endedAt; delete p.endedAt; }
+    if (p.durationSeconds !== undefined) { p.duration_seconds = p.durationSeconds; delete p.durationSeconds; }
+    if (p.transcriptStatus !== undefined) { p.transcript_status = p.transcriptStatus; delete p.transcriptStatus; }
+    if (p.transcriptText !== undefined) { p.transcript_text = p.transcriptText; delete p.transcriptText; }
+    if (p.transcriptConfidence !== undefined) { p.transcript_confidence = p.transcriptConfidence; delete p.transcriptConfidence; }
+    if (p.detectedLanguage !== undefined) { p.detected_language = p.detectedLanguage; delete p.detectedLanguage; }
+    if (p.noiseScore !== undefined) { p.noise_score = p.noiseScore; delete p.noiseScore; }
+    if (p.importanceFlag !== undefined) { p.importance_flag = p.importanceFlag; delete p.importanceFlag; }
+    if (p.anchorFlag !== undefined) { p.anchor_flag = p.anchorFlag; delete p.anchorFlag; }
+    if (p.sourceContext !== undefined) { p.source_context = p.sourceContext; delete p.sourceContext; }
+    if (p.errorMessage !== undefined) { p.error_message = p.errorMessage; delete p.errorMessage; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'continuous_memory_files') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.sessionId !== undefined) { p.session_id = p.sessionId; delete p.sessionId; }
+    if (p.chunkId !== undefined) { p.chunk_id = p.chunkId; delete p.chunkId; }
+    if (p.fileRole !== undefined) { p.file_role = p.fileRole; delete p.fileRole; }
+    if (p.storageBucket !== undefined) { p.storage_bucket = p.storageBucket; delete p.storageBucket; }
+    if (p.storagePath !== undefined) { p.storage_path = p.storagePath; delete p.storagePath; }
+    if (p.mimeType !== undefined) { p.mime_type = p.mimeType; delete p.mimeType; }
+    if (p.fileSizeBytes !== undefined) { p.file_size_bytes = p.fileSizeBytes; delete p.fileSizeBytes; }
+    if (p.durationSeconds !== undefined) { p.duration_seconds = p.durationSeconds; delete p.durationSeconds; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
+  if (table === 'continuous_memory_jobs') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.sessionId !== undefined) { p.session_id = p.sessionId; delete p.sessionId; }
+    if (p.chunkId !== undefined) { p.chunk_id = p.chunkId; delete p.chunkId; }
+    if (p.jobType !== undefined) { p.job_type = p.jobType; delete p.jobType; }
+    if (p.jobStatus !== undefined) { p.job_status = p.jobStatus; delete p.jobStatus; }
+    if (p.processorType !== undefined) { p.processor_type = p.processorType; delete p.processorType; }
+    if (p.processorName !== undefined) { p.processor_name = p.processorName; delete p.processorName; }
+    if (p.attemptCount !== undefined) { p.attempt_count = p.attemptCount; delete p.attemptCount; }
+    if (p.startedAt !== undefined) { p.started_at = p.startedAt; delete p.startedAt; }
+    if (p.finishedAt !== undefined) { p.finished_at = p.finishedAt; delete p.finishedAt; }
+    if (p.latencyMs !== undefined) { p.latency_ms = p.latencyMs; delete p.latencyMs; }
+    if (p.estimatedCost !== undefined) { p.estimated_cost = p.estimatedCost; delete p.estimatedCost; }
+    if (p.tokensIn !== undefined) { p.tokens_in = p.tokensIn; delete p.tokensIn; }
+    if (p.tokensOut !== undefined) { p.tokens_out = p.tokensOut; delete p.tokensOut; }
+    if (p.workflowVersion !== undefined) { p.workflow_version = p.workflowVersion; delete p.workflowVersion; }
+    if (p.policyVersion !== undefined) { p.policy_version = p.policyVersion; delete p.policyVersion; }
+    if (p.statusNote !== undefined) { p.status_note = p.statusNote; delete p.statusNote; }
+    if (p.errorMessage !== undefined) { p.error_message = p.errorMessage; delete p.errorMessage; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'continuous_memory_outputs') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.sessionId !== undefined) { p.session_id = p.sessionId; delete p.sessionId; }
+    if (p.chunkId !== undefined) { p.chunk_id = p.chunkId; delete p.chunkId; }
+    if (p.outputType !== undefined) { p.output_type = p.outputType; delete p.outputType; }
+    if (p.generatedBy !== undefined) { p.generated_by = p.generatedBy; delete p.generatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
+  if (table === 'continuous_memory_labels') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
+  if (table === 'continuous_memory_chunk_labels') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.chunkId !== undefined) { p.chunk_id = p.chunkId; delete p.chunkId; }
+    if (p.labelId !== undefined) { p.label_id = p.labelId; delete p.labelId; }
+    if (p.confidenceScore !== undefined) { p.confidence_score = p.confidenceScore; delete p.confidenceScore; }
+    if (p.sourceType !== undefined) { p.source_type = p.sourceType; delete p.sourceType; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
+  if (table === 'continuous_memory_extracted_items') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.sessionId !== undefined) { p.session_id = p.sessionId; delete p.sessionId; }
+    if (p.chunkId !== undefined) { p.chunk_id = p.chunkId; delete p.chunkId; }
+    if (p.itemType !== undefined) { p.item_type = p.itemType; delete p.itemType; }
+    if (p.suggestedVentureId !== undefined) { p.suggested_venture_id = p.suggestedVentureId; delete p.suggestedVentureId; }
+    if (p.suggestedProjectId !== undefined) { p.suggested_project_id = p.suggestedProjectId; delete p.suggestedProjectId; }
+    if (p.suggestedAgentId !== undefined) { p.suggested_agent_id = p.suggestedAgentId; delete p.suggestedAgentId; }
+    if (p.reviewedAt !== undefined) { p.reviewed_at = p.reviewedAt; delete p.reviewedAt; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
+  if (table === 'continuous_memory_links') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.sessionId !== undefined) { p.session_id = p.sessionId; delete p.sessionId; }
+    if (p.chunkId !== undefined) { p.chunk_id = p.chunkId; delete p.chunkId; }
+    if (p.extractedItemId !== undefined) { p.extracted_item_id = p.extractedItemId; delete p.extractedItemId; }
+    if (p.linkType !== undefined) { p.link_type = p.linkType; delete p.linkType; }
+    if (p.linkedEntityId !== undefined) { p.linked_entity_id = p.linkedEntityId; delete p.linkedEntityId; }
     if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
     delete p.createdAt;
   }

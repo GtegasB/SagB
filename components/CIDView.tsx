@@ -34,6 +34,13 @@ interface CIDViewProps {
 
 const DEFAULT_WORKSPACE_ID = '00000000-0000-0000-0000-000000000000';
 const SESSION_STORAGE_KEY = 'sagb_supabase_session_v1';
+const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CID_CHUNK_MAX_CHARS = 12000;
+const MAX_EXTRACTED_OUTPUT_CHARS = 120000;
+const EXTRACTED_OUTPUT_PREVIEW_CHARS = 12000;
+const MAX_INTELLIGENCE_CHUNK_ROWS = 240;
+const MAX_INTELLIGENCE_OUTPUT_ROWS = 120;
+const MAX_INTELLIGENCE_ROW_CHARS = 2200;
 
 const toDate = (value: any): Date => {
   if (value instanceof Date) return value;
@@ -42,8 +49,34 @@ const toDate = (value: any): Date => {
 };
 
 const fmt = (value: any) => toDate(value).toLocaleString('pt-BR');
+const CID_LABELS: Record<string, string> = {
+  assets: 'Ativos',
+  jobs: 'Processos',
+  chunks: 'Partes',
+  outputs: 'Saidas',
+  completed: 'Concluido',
+  completed_warning: 'Concluido com aviso',
+  ready: 'Pronto',
+  error: 'Erro',
+  processing: 'Processando',
+  fragmenting: 'Fragmentando',
+  transcribing: 'Transcrevendo',
+  summarizing: 'Resumindo',
+  consolidating: 'Consolidando',
+  queued: 'Na fila',
+  received: 'Recebido',
+  paused: 'Pausado',
+  cancelled: 'Cancelado',
+  extracted_text: 'Texto extraido',
+  transcription: 'Transcricao',
+  summary_short: 'Resumo curto',
+  summary_long: 'Resumo longo',
+  consolidation: 'Consolidacao',
+  keywords: 'Palavras-chave'
+};
 const toLabel = (value: any) => {
   const raw = String(value || '').replace(/[_-]+/g, ' ').trim().toLowerCase();
+  if (CID_LABELS[raw]) return CID_LABELS[raw];
   return raw ? raw[0].toUpperCase() + raw.slice(1) : '-';
 };
 
@@ -70,13 +103,95 @@ const detectMaterial = (file: File): Material => {
   return 'other';
 };
 
-const splitChunks = (text: string, maxChars = 3500) => {
-  const raw = String(text || '').trim();
+const sanitizeUtf16Text = (value: string) => {
+  const raw = String(value || '');
+  if (!raw) return '';
+
+  let out = '';
+  for (let i = 0; i < raw.length; i += 1) {
+    const code = raw.charCodeAt(i);
+    const next = i + 1 < raw.length ? raw.charCodeAt(i + 1) : null;
+
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      if (next !== null && next >= 0xDC00 && next <= 0xDFFF) {
+        out += raw[i] + raw[i + 1];
+        i += 1;
+      } else {
+        out += '\uFFFD';
+      }
+      continue;
+    }
+
+    if (code >= 0xDC00 && code <= 0xDFFF) {
+      out += '\uFFFD';
+      continue;
+    }
+
+    out += raw[i];
+  }
+
+  return out;
+};
+
+const previewText = (value: string, maxChars: number) => {
+  const sanitized = sanitizeUtf16Text(String(value || '')).trim();
+  if (sanitized.length <= maxChars) return sanitized;
+  return `${sliceUtf16Safe(sanitized, 0, maxChars).trimEnd()}...`;
+};
+
+const sliceUtf16Safe = (value: string, start: number, end: number) => {
+  let safeStart = Math.max(0, start);
+  let safeEnd = Math.max(safeStart, end);
+
+  if (safeStart > 0) {
+    const current = value.charCodeAt(safeStart);
+    const previous = value.charCodeAt(safeStart - 1);
+    if (current >= 0xDC00 && current <= 0xDFFF && previous >= 0xD800 && previous <= 0xDBFF) {
+      safeStart += 1;
+    }
+  }
+
+  if (safeEnd < value.length) {
+    const previous = value.charCodeAt(safeEnd - 1);
+    const current = value.charCodeAt(safeEnd);
+    if (previous >= 0xD800 && previous <= 0xDBFF && current >= 0xDC00 && current <= 0xDFFF) {
+      safeEnd -= 1;
+    }
+  }
+
+  return value.slice(safeStart, safeEnd);
+};
+
+const splitChunks = (text: string, maxChars = CID_CHUNK_MAX_CHARS) => {
+  const raw = sanitizeUtf16Text(String(text || '')).trim();
   if (!raw) return [];
   const blocks = raw.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean);
   const out: string[] = [];
   let current = '';
+
+  const pushSliced = (value: string) => {
+    const content = sanitizeUtf16Text(String(value || '')).trim();
+    if (!content) return;
+    if (content.length <= maxChars) {
+      out.push(content);
+      return;
+    }
+
+    for (let i = 0; i < content.length; i += maxChars) {
+      out.push(sliceUtf16Safe(content, i, i + maxChars));
+    }
+  };
+
   blocks.forEach((block) => {
+    if (block.length > maxChars) {
+      if (current) {
+        out.push(current);
+        current = '';
+      }
+      pushSliced(block);
+      return;
+    }
+
     if (!current) current = block;
     else if ((current.length + block.length + 2) <= maxChars) current += `\n\n${block}`;
     else {
@@ -84,11 +199,11 @@ const splitChunks = (text: string, maxChars = 3500) => {
       current = block;
     }
   });
-  if (current) out.push(current);
+  if (current) pushSliced(current);
   if (out.length) return out;
   const sliced: string[] = [];
   for (let i = 0; i < raw.length; i += maxChars) {
-    sliced.push(raw.slice(i, i + maxChars));
+    sliced.push(sliceUtf16Safe(raw, i, i + maxChars));
   }
   return sliced;
 };
@@ -123,6 +238,7 @@ const readAsDataUrl = (file: File): Promise<string> => new Promise((resolve, rej
 });
 
 const dataUrlBase64 = (dataUrl: string) => String(dataUrl || '').split(',')[1] || '';
+const isUuidLike = (value: any) => typeof value === 'string' && UUID_LIKE_RE.test(value.trim());
 
 const isTextLike = (file: File, materialType: Material) => {
   if (materialType === 'txt' || materialType === 'spreadsheet') return true;
@@ -148,7 +264,7 @@ const initialForm = (userProfile?: UserProfile | null): UploadFormState => ({
 });
 
 const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile, ventures = [], onBack }) => {
-  const scopedWorkspaceId = workspaceId?.trim() ? workspaceId : DEFAULT_WORKSPACE_ID;
+  const scopedWorkspaceId = workspaceId?.trim() || userProfile?.workspaceId?.trim() || '';
 
   const [activeTab, setActiveTab] = useState<CidTab>('upload');
   const [form, setForm] = useState<UploadFormState>(() => initialForm(userProfile));
@@ -232,6 +348,14 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
     }
   }, [assets, selectedAssetId]);
 
+  useEffect(() => {
+    if (activeTab !== 'processing') return;
+    const activeRow = processingRows.find((row) => ['queued', 'fragmenting', 'processing', 'transcribing', 'summarizing', 'consolidating'].includes(String(row.job.status || '').toLowerCase()));
+    if (activeRow?.asset?.id && activeRow.asset.id !== selectedAssetId) {
+      setSelectedAssetId(activeRow.asset.id);
+    }
+  }, [activeTab, processingRows, selectedAssetId]);
+
   const selectedAsset = useMemo(() => assets.find((a) => a.id === selectedAssetId) || null, [assets, selectedAssetId]);
   const selectedAssetFiles = useMemo(() => assetFiles.filter((x) => x.assetId === selectedAssetId), [assetFiles, selectedAssetId]);
   const selectedChunks = useMemo(
@@ -254,25 +378,46 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
       .sort((a, b) => toDate(b.job.createdAt).getTime() - toDate(a.job.createdAt).getTime());
   }, [jobs, assets]);
 
+  const totalPartsCount = useMemo(() => {
+    return jobs.reduce((sum, job) => {
+      const total = Math.max(
+        Number(job.totalParts || 0),
+        Number(job.completedParts || 0) + Number(job.pendingParts || 0),
+        Number(job.completedParts || 0)
+      );
+      return sum + total;
+    }, 0);
+  }, [jobs]);
+
+  const selectedProcessingRow = useMemo(
+    () => processingRows.find((row) => (row.asset?.id || row.job.assetId) === selectedAssetId) || null,
+    [processingRows, selectedAssetId]
+  );
+
+  const selectedTotalParts = Math.max(
+    Number(selectedProcessingRow?.job.totalParts || 0),
+    Number(selectedAsset?.totalParts || 0),
+    selectedChunks.length
+  );
+
   const intelligenceRows = useMemo(() => {
     const q = searchText.trim().toLowerCase();
-    const rows = assets.flatMap((asset) => {
-      const assetOutputs = outputs.filter((o) => o.assetId === asset.id).map((o) => ({
-        assetId: asset.id,
-        assetTitle: asset.title,
-        source: `output:${o.outputType}`,
-        createdAt: o.createdAt,
-        text: String(o.contentText || '')
-      }));
-      const assetChunks = chunks.filter((c) => c.assetId === asset.id).map((c) => ({
-        assetId: asset.id,
-        assetTitle: asset.title,
-        source: `chunk:${c.chunkIndex}`,
-        createdAt: c.createdAt,
-        text: String(c.textContent || '')
-      }));
-      return [...assetOutputs, ...assetChunks];
-    });
+    const assetTitleMap = new Map(assets.map((asset) => [asset.id, asset.title]));
+    const candidateOutputs = outputs.slice(0, MAX_INTELLIGENCE_OUTPUT_ROWS).map((output) => ({
+      assetId: output.assetId,
+      assetTitle: assetTitleMap.get(output.assetId) || 'Sem titulo',
+      source: `saida:${toLabel(output.outputType)}`,
+      createdAt: output.createdAt,
+      text: previewText(String(output.contentText || ''), MAX_INTELLIGENCE_ROW_CHARS)
+    }));
+    const candidateChunks = chunks.slice(0, MAX_INTELLIGENCE_CHUNK_ROWS).map((chunk) => ({
+      assetId: chunk.assetId,
+      assetTitle: assetTitleMap.get(chunk.assetId) || 'Sem titulo',
+      source: `parte:${chunk.chunkIndex}`,
+      createdAt: chunk.createdAt,
+      text: previewText(String(chunk.textContent || ''), MAX_INTELLIGENCE_ROW_CHARS)
+    }));
+    const rows = [...candidateOutputs, ...candidateChunks];
 
     const filtered = q
       ? rows.filter((row) => row.assetTitle.toLowerCase().includes(q) || row.source.toLowerCase().includes(q) || row.text.toLowerCase().includes(q))
@@ -356,11 +501,14 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
     const createdAt = new Date();
     const title = selectedFiles.length === 1 ? (form.title.trim() || file.name) : file.name;
     const ownerId = resolveOwnerUserId();
-    const dataUrl = await readAsDataUrl(file);
+    const safeVentureId = isUuidLike(form.ventureId) ? form.ventureId : null;
+    const needsInlinePreview = file.size <= 2_000_000;
+    const needsDataUrl = needsInlinePreview || materialType === 'audio' || materialType === 'video';
+    const dataUrl = needsDataUrl ? await readAsDataUrl(file) : '';
 
     const assetRef = await addDoc(collection(db, 'cid_assets'), {
       workspaceId: scopedWorkspaceId,
-      ventureId: form.ventureId || null,
+      ventureId: safeVentureId,
       title,
       materialType,
       area: form.area.trim(),
@@ -400,8 +548,8 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
       createdAt,
       updatedAt: createdAt,
       payload: {
-        inlinePreviewDataUrl: file.size <= 2_000_000 ? dataUrl : null,
-        storageMode: file.size <= 2_000_000 ? 'inline_preview' : 'metadata_only'
+        inlinePreviewDataUrl: needsInlinePreview ? dataUrl : null,
+        storageMode: needsInlinePreview ? 'inline_preview' : 'metadata_only'
       }
     });
 
@@ -449,16 +597,16 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
       await safeUpdate('cid_processing_jobs', jobId, { status: 'fragmenting', startedAt: new Date(), updatedAt: new Date() });
       await safeUpdate('cid_assets', assetId, { status: 'fragmenting', processingStartedAt: new Date(), updatedAt: new Date() });
 
-      const extractedText = await readExtractedText(file, materialType);
+      const extractedText = sanitizeUtf16Text(await readExtractedText(file, materialType));
       let transcription = '';
 
       if (canTranscribe(desiredAction) && (materialType === 'audio' || materialType === 'video')) {
         await safeUpdate('cid_processing_jobs', jobId, { status: 'transcribing', updatedAt: new Date() });
         await safeUpdate('cid_assets', assetId, { status: 'transcribing', updatedAt: new Date() });
-        transcription = await transcribeAudio(dataUrlBase64(dataUrl), file.type || 'audio/webm');
+        transcription = sanitizeUtf16Text(await transcribeAudio(dataUrlBase64(dataUrl), file.type || 'audio/webm'));
       }
 
-      const sourceText = String(transcription || extractedText || '').trim();
+      const sourceText = sanitizeUtf16Text(String(transcription || extractedText || '').trim());
       const fallbackText = sourceText || `Arquivo sem extração textual automática nesta V1: ${file.name}`;
       const chunkTexts = splitChunks(fallbackText);
       const totalParts = chunkTexts.length || 1;
@@ -485,7 +633,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
           workspaceId: scopedWorkspaceId,
           chunkIndex: i + 1,
           chunkKind: materialType === 'audio' || materialType === 'video' ? 'time_block' : 'text_block',
-          textContent: chunkTexts[i],
+          textContent: sanitizeUtf16Text(chunkTexts[i]),
           status: 'completed',
           retries: 0,
           createdAt: new Date(),
@@ -495,21 +643,31 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
         const completedParts = i + 1;
         const pendingParts = Math.max(totalParts - completedParts, 0);
         const progressPct = Math.min(80, Math.round((completedParts / totalParts) * 80));
-        await safeUpdate('cid_processing_jobs', jobId, { completedParts, pendingParts, progressPct, updatedAt: new Date() });
-        await safeUpdate('cid_assets', assetId, { completedParts, pendingParts, progressPct, updatedAt: new Date() });
+        const shouldReportProgress = completedParts === totalParts || completedParts === 1 || completedParts % 25 === 0;
+        if (shouldReportProgress) {
+          await safeUpdate('cid_processing_jobs', jobId, { completedParts, pendingParts, progressPct, updatedAt: new Date() });
+          await safeUpdate('cid_assets', assetId, { completedParts, pendingParts, progressPct, updatedAt: new Date() });
+        }
       }
 
       if (extractedText) {
+        const previewOnly = extractedText.length > MAX_EXTRACTED_OUTPUT_CHARS;
         await addDoc(collection(db, 'cid_outputs'), {
           assetId,
           jobId,
           workspaceId: scopedWorkspaceId,
           outputType: 'extracted_text',
-          contentText: extractedText,
+          contentText: previewOnly ? previewText(extractedText, EXTRACTED_OUTPUT_PREVIEW_CHARS) : sanitizeUtf16Text(extractedText),
           language: form.language.trim(),
           status: 'ready',
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
+          payload: {
+            fullTextStoredInChunks: true,
+            isPreviewOnly: previewOnly,
+            originalCharCount: extractedText.length,
+            storedCharCount: previewOnly ? EXTRACTED_OUTPUT_PREVIEW_CHARS : extractedText.length
+          }
         });
       }
 
@@ -519,7 +677,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
           jobId,
           workspaceId: scopedWorkspaceId,
           outputType: 'transcription',
-          contentText: transcription,
+          contentText: sanitizeUtf16Text(transcription),
           language: form.language.trim(),
           status: 'ready',
           createdAt: new Date(),
@@ -551,7 +709,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
           jobId,
           workspaceId: scopedWorkspaceId,
           outputType: 'summary_short',
-          contentText: shortSummary,
+          contentText: sanitizeUtf16Text(shortSummary),
           language: form.language.trim(),
           status: 'ready',
           createdAt: new Date(),
@@ -565,7 +723,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
           jobId,
           workspaceId: scopedWorkspaceId,
           outputType: 'summary_long',
-          contentText: longSummary,
+          contentText: sanitizeUtf16Text(longSummary),
           language: form.language.trim(),
           status: 'ready',
           createdAt: new Date(),
@@ -579,7 +737,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
           jobId,
           workspaceId: scopedWorkspaceId,
           outputType: 'consolidation',
-          contentText: consolidation,
+          contentText: sanitizeUtf16Text(consolidation),
           language: form.language.trim(),
           status: 'ready',
           createdAt: new Date(),
@@ -621,6 +779,11 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
     e.preventDefault();
     if (isSubmitting) return;
 
+    if (!isUuidLike(scopedWorkspaceId)) {
+      setFeedback('Workspace do usuario nao foi resolvido corretamente. Recarregue o app e tente de novo.');
+      return;
+    }
+
     if (!selectedFiles.length) {
       setFeedback('Selecione ao menos um arquivo.');
       return;
@@ -650,7 +813,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
       if (selectedFiles.length > 1) {
         const batchRef = await addDoc(collection(db, 'cid_batches'), {
           workspaceId: scopedWorkspaceId,
-          ventureId: form.ventureId || null,
+          ventureId: isUuidLike(form.ventureId) ? form.ventureId : null,
           title: `Lote CID • ${new Date().toLocaleString('pt-BR')}`,
           source: 'upload',
           status: 'open',
@@ -862,7 +1025,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
               </div>
 
               <div className="pt-2 flex items-center justify-between gap-3">
-                <p className="text-xs text-gray-500">ET 01: upload, fragmentação, transcrição, resumo e status rastreável.</p>
+                <p className="text-xs text-gray-500">ET 01: upload, fragmentação em partes de ate {CID_CHUNK_MAX_CHARS.toLocaleString('pt-BR')} caracteres, transcrição, resumo e status rastreável.</p>
                 <button type="submit" disabled={isSubmitting} className="px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-bold hover:bg-gray-800 disabled:opacity-60">
                   {isSubmitting ? 'Processando...' : 'Enviar para CID'}
                 </button>
@@ -873,10 +1036,10 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
             <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm space-y-3">
               <h3 className="text-sm font-black uppercase tracking-wider text-gray-800">Resumo Rápido</h3>
               <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl border border-gray-100 p-3"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-black">Assets</p><p className="text-xl font-bold text-gray-900">{assets.length}</p></div>
-                <div className="rounded-xl border border-gray-100 p-3"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-black">Jobs</p><p className="text-xl font-bold text-gray-900">{jobs.length}</p></div>
-                <div className="rounded-xl border border-gray-100 p-3"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-black">Chunks</p><p className="text-xl font-bold text-gray-900">{chunks.length}</p></div>
-                <div className="rounded-xl border border-gray-100 p-3"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-black">Outputs</p><p className="text-xl font-bold text-gray-900">{outputs.length}</p></div>
+                <div className="rounded-xl border border-gray-100 p-3"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-black">Ativos</p><p className="text-xl font-bold text-gray-900">{assets.length}</p></div>
+                <div className="rounded-xl border border-gray-100 p-3"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-black">Processos</p><p className="text-xl font-bold text-gray-900">{jobs.length}</p></div>
+                <div className="rounded-xl border border-gray-100 p-3"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-black">Partes</p><p className="text-xl font-bold text-gray-900">{Math.max(totalPartsCount, chunks.length)}</p></div>
+                <div className="rounded-xl border border-gray-100 p-3"><p className="text-[10px] uppercase tracking-wider text-gray-400 font-black">Saidas</p><p className="text-xl font-bold text-gray-900">{outputs.length}</p></div>
               </div>
             </div>
           </div>
@@ -966,7 +1129,11 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
                 </thead>
                 <tbody>
                   {processingRows.map(({ job, asset }) => (
-                    <tr key={job.id} className="border-t border-gray-100">
+                    <tr
+                      key={job.id}
+                      onClick={() => setSelectedAssetId(asset?.id || job.assetId)}
+                      className={`border-t border-gray-100 cursor-pointer ${selectedAssetId === (asset?.id || job.assetId) ? 'bg-gray-50' : 'hover:bg-gray-50/70'}`}
+                    >
                       <td className="py-2 pr-3 font-semibold text-gray-800">{asset?.title || job.assetId}</td>
                       <td className="py-2 pr-3"><span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${statusBadge(job.status)}`}>{toLabel(job.status)}</span></td>
                       <td className="py-2 pr-3 w-[190px]"><div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden"><div className="h-full bg-gray-800" style={{ width: `${Math.max(0, Math.min(100, job.progressPct || 0))}%` }} /></div><span className="text-[10px] text-gray-500">{job.progressPct || 0}%</span></td>
@@ -985,9 +1152,12 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
             {!!selectedAsset && (
               <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-3">
                 <div className="rounded-xl border border-gray-100 p-3">
-                  <p className="text-[11px] uppercase tracking-widest font-black text-gray-500 mb-2">Chunks ({selectedChunks.length})</p>
+                  <p className="text-[11px] uppercase tracking-widest font-black text-gray-500 mb-2">Partes carregadas ({selectedChunks.length} de {selectedTotalParts})</p>
+                  {selectedChunks.length < selectedTotalParts && (
+                    <p className="text-[11px] text-gray-400 mb-2">A lista mostra apenas as partes carregadas na interface. A contagem oficial vem do job.</p>
+                  )}
                   <div className="max-h-52 overflow-auto space-y-2">
-                    {selectedChunks.map((chunk) => (
+                    {selectedChunks.slice(0, 80).map((chunk) => (
                       <div key={chunk.id} className="rounded-lg border border-gray-100 p-2">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-[10px] font-bold text-gray-500">Parte {chunk.chunkIndex}</span>
@@ -996,11 +1166,11 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
                         <p className="text-xs text-gray-600 whitespace-pre-wrap">{String(chunk.textContent || '').slice(0, 240) || '-'}</p>
                       </div>
                     ))}
-                    {!selectedChunks.length && <p className="text-xs text-gray-500">Sem chunks para o asset selecionado.</p>}
+                    {!selectedChunks.length && <p className="text-xs text-gray-500">Sem partes carregadas para o ativo selecionado.</p>}
                   </div>
                 </div>
                 <div className="rounded-xl border border-gray-100 p-3">
-                  <p className="text-[11px] uppercase tracking-widest font-black text-gray-500 mb-2">Outputs ({selectedOutputs.length})</p>
+                  <p className="text-[11px] uppercase tracking-widest font-black text-gray-500 mb-2">Saidas ({selectedOutputs.length})</p>
                   <div className="max-h-52 overflow-auto space-y-2">
                     {selectedOutputs.map((out) => (
                       <div key={out.id} className="rounded-lg border border-gray-100 p-2">
@@ -1008,10 +1178,15 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
                           <span className="text-[10px] font-bold text-gray-500">{toLabel(out.outputType)}</span>
                           <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${statusBadge(out.status || 'ready')}`}>{toLabel(out.status || 'ready')}</span>
                         </div>
+                        {!!out.payload?.isPreviewOnly && (
+                          <p className="text-[11px] text-amber-600 mb-1">
+                            Prévia salva para evitar duplicação do texto completo no banco.
+                          </p>
+                        )}
                         <p className="text-xs text-gray-600 whitespace-pre-wrap">{String(out.contentText || '').slice(0, 240) || '-'}</p>
                       </div>
                     ))}
-                    {!selectedOutputs.length && <p className="text-xs text-gray-500">Sem outputs para o asset selecionado.</p>}
+                    {!selectedOutputs.length && <p className="text-xs text-gray-500">Sem saidas para o ativo selecionado.</p>}
                   </div>
                 </div>
               </div>
@@ -1032,6 +1207,11 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
                   </div>
                 ))}
                 {!intelligenceRows.length && <div className="text-xs text-gray-500 rounded-xl bg-gray-50 border border-gray-100 p-3">Sem resultados para a busca atual.</div>}
+                {!!intelligenceRows.length && (
+                  <div className="text-[11px] text-gray-500 rounded-xl bg-gray-50 border border-gray-100 p-3">
+                    A aba de Inteligência usa somente as partes e saídas mais recentes para manter estabilidade em arquivos grandes.
+                  </div>
+                )}
               </div>
             </div>
             <div className="bg-white rounded-2xl border border-gray-100 p-4 md:p-5 shadow-sm space-y-3">

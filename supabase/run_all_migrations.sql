@@ -824,4 +824,9 @@ update public.users
 set payload = '{}'::jsonb
 where payload is null;
 
+-- IMPORTANTE:
+-- A frente oficial de Memoria Continua foi adicionada em:
+-- supabase/migrations/20260313_continuous_memory.sql
+-- Execute essa migration junto do pacote principal ao subir o modulo.
+
 select 'All governance tables created successfully!' as result;
