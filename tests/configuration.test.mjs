@@ -41,3 +41,45 @@ test('netlify AI function exists and exposes action handlers', () => {
   assert.ok(content.includes('gemini_chat: handleGeminiChat'));
   assert.ok(content.includes('deepseek_chat: handleDeepSeekChat'));
 });
+
+test('programmers room module is wired into the SagB shell', () => {
+  const app = readFile('App.tsx');
+  const sidebar = readFile('components/Sidebar.tsx');
+  const view = readFile('components/ProgrammersRoomView.tsx');
+
+  assert.ok(app.includes("case 'programmers-room'"));
+  assert.ok(sidebar.includes("id: 'programmers-room'"));
+  assert.ok(view.includes('Sala dos Programadores'));
+  assert.ok(view.includes('Definition of Done'));
+});
+
+test('radar de conexoes module is wired into the SagB shell', () => {
+  const app = readFile('App.tsx');
+  const sidebar = readFile('components/Sidebar.tsx');
+  const nagi = readFile('components/NAGIView.tsx');
+  const view = readFile('components/RadarConnectionsView.tsx');
+  const doc = readFile('docs/Estrutura_SagB/Radar_de_Conexoes');
+
+  assert.ok(app.includes("case 'radar-connections'"));
+  assert.ok(sidebar.includes("id: 'radar-connections'"));
+  assert.ok(nagi.includes("routeTab: 'radar-connections'"));
+  assert.ok(view.includes('Radar de Conexoes'));
+  assert.ok(doc.includes('Especificacao Canonica do Projeto'));
+});
+
+test('sagb bridge database foundation migration exists', () => {
+  const content = readFile('supabase/migrations/20260313_sagb_bridge_core.sql');
+  assert.ok(content.includes('create table if not exists public.dev_projects'));
+  assert.ok(content.includes('create table if not exists public.dev_tasks'));
+  assert.ok(content.includes('create table if not exists public.dev_task_runs'));
+  assert.ok(content.includes('create table if not exists public.dev_task_launches'));
+});
+
+test('nagi radar database foundation migration exists', () => {
+  const content = readFile('supabase/migrations/20260313_nagi_radar_core.sql');
+  assert.ok(content.includes('create table if not exists public.nagi_ecosystem_entities'));
+  assert.ok(content.includes('create table if not exists public.nagi_entity_relations'));
+  assert.ok(content.includes('create table if not exists public.nagi_external_signals'));
+  assert.ok(content.includes('create table if not exists public.nagi_insight_distributions'));
+  assert.ok(content.includes('create table if not exists public.nagi_ecosystem_decisions'));
+});

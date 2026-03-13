@@ -116,7 +116,8 @@ const GovernanceView: React.FC<GovernanceViewProps> = ({
 }) => {
 
 
-  const [isUnlocked, setIsUnlocked] = useState(false);
+  // Gate de senha temporariamente desativado para liberar o acesso ao modulo.
+  const [isUnlocked, setIsUnlocked] = useState(true);
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [currentView, setCurrentView] = useState<GovernanceViewMode>('dashboard');

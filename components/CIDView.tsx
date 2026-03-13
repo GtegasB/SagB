@@ -348,14 +348,6 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
     }
   }, [assets, selectedAssetId]);
 
-  useEffect(() => {
-    if (activeTab !== 'processing') return;
-    const activeRow = processingRows.find((row) => ['queued', 'fragmenting', 'processing', 'transcribing', 'summarizing', 'consolidating'].includes(String(row.job.status || '').toLowerCase()));
-    if (activeRow?.asset?.id && activeRow.asset.id !== selectedAssetId) {
-      setSelectedAssetId(activeRow.asset.id);
-    }
-  }, [activeTab, processingRows, selectedAssetId]);
-
   const selectedAsset = useMemo(() => assets.find((a) => a.id === selectedAssetId) || null, [assets, selectedAssetId]);
   const selectedAssetFiles = useMemo(() => assetFiles.filter((x) => x.assetId === selectedAssetId), [assetFiles, selectedAssetId]);
   const selectedChunks = useMemo(
@@ -393,6 +385,16 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
     () => processingRows.find((row) => (row.asset?.id || row.job.assetId) === selectedAssetId) || null,
     [processingRows, selectedAssetId]
   );
+
+  useEffect(() => {
+    if (activeTab !== 'processing') return;
+    const activeRow = processingRows.find((row) =>
+      ['queued', 'fragmenting', 'processing', 'transcribing', 'summarizing', 'consolidating'].includes(String(row.job.status || '').toLowerCase())
+    );
+    if (activeRow?.asset?.id && activeRow.asset.id !== selectedAssetId) {
+      setSelectedAssetId(activeRow.asset.id);
+    }
+  }, [activeTab, processingRows, selectedAssetId]);
 
   const selectedTotalParts = Math.max(
     Number(selectedProcessingRow?.job.totalParts || 0),

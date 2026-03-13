@@ -1,0 +1,753 @@
+Radar de Conexoes
+Especificacao Canonica do Projeto
+Versao: 2.0
+Status: Documento padrao de referencia
+Data: 2026-03-13
+
+0. Como usar este documento
+
+Este documento substitui a conversa original como referencia oficial do projeto Radar de Conexoes.
+
+Ele foi reestruturado para cumprir quatro papeis:
+
+- registrar a tese central do projeto
+- separar o que ja estava no material original do que foi ampliado por inferencia estrategica
+- servir como base para implementacao dentro do NAGI e do SagB
+- permitir que outro agente continue o projeto sem depender de contexto oral
+
+Regra de leitura:
+
+- tudo identificado como "ja presente no documento-base" vem da leitura integral do material original
+- tudo identificado como "nova ideia por inferencia estrategica" e expansao coerente a partir do documento-base
+- se houver conflito entre conversa solta e este arquivo, prevalece este arquivo
+
+
+1. Leitura total do documento
+
+O documento original parte de duas intuicoes centrais:
+
+- o NAGI precisa entender melhor como os projetos do ecossistema se conectam entre si
+- o sistema precisa observar o mundo de fora para dentro e transformar sinais externos em insumos internos
+
+A tese principal do projeto e esta:
+
+o NAGI nao deve ser apenas um hub de cards ou um quadro de ideias; ele deve se tornar um nucleo de inteligencia estrategica capaz de:
+
+- entender o que existe dentro do ecossistema
+- entender o que existe entre os elementos do ecossistema
+- entender o que vem de fora e pode impactar o ecossistema
+
+A espinha dorsal do projeto e formada por tres movimentos:
+
+1. leitura do portifolio interno
+2. leitura das conexoes internas
+3. leitura dos sinais externos
+
+Quando essas tres leituras se encontram, o NAGI deixa de ser apenas uma camada de organizacao e passa a operar como:
+
+- mapa do que ja foi criado
+- detector de conexoes e reaproveitamentos
+- observatorio de sinais externos
+- gerador de oportunidades, subprodutos e novas linhas
+- distribuidor de inteligencia util para as marcas e frentes do ecossistema
+
+O documento-base usa dois nomes centrais:
+
+- Radar de Conexoes
+- Radar Externo
+
+Ao longo da evolucao do texto, surge uma terceira camada implicita e depois nomeada:
+
+- Central de Distribuicao de Insights
+
+A logica profunda do projeto e esta:
+
+o mundo emite sinais
+o sistema captura esses sinais
+o sistema cruza esses sinais com o que ja existe internamente
+o sistema descobre conexoes, derivacoes, riscos e oportunidades
+o sistema redistribui isso para as frentes certas
+
+Essa e a estrutura mestra do projeto.
+
+
+2. O que ja esta definido no documento
+
+Ja presente no documento-base:
+
+2.1. Duas frentes centrais
+
+- Radar de Conexoes
+- Radar Externo
+
+2.2. Funcao do Radar de Conexoes
+
+- mapear relacoes entre projetos
+- detectar sinergias
+- sugerir subprodutos
+- identificar compartilhamento de base tecnica
+- detectar oportunidades de cruzamento entre marcas, frentes e linhas
+- apontar possiveis redundancias
+- sugerir quando varias iniciativas formam algo maior
+
+2.3. Funcao do Radar Externo
+
+- varrer a internet por temas definidos
+- organizar atualizacoes relevantes
+- resumir, classificar e priorizar novidades
+- transformar noticia e tendencia em inteligencia aplicavel
+- redistribuir sinais para marketing, conteudo, produto, juridico e outras frentes
+
+2.4. Tipos de coisa que o Radar de Conexoes deve observar
+
+- projeto pai
+- subproduto
+- projeto irmao
+- projeto complementar
+- tecnologia compartilhada
+- ativo reutilizavel
+- dependencia
+- conexao por tema
+- conexao por mercado
+- conexao por mecanismo tecnico
+
+2.5. Tipos de relacao sugeridos no documento-base
+
+- deriva de
+- usa a mesma base
+- compartilha modulo
+- compartilha insumo
+- compartilha saida
+- alimenta
+- depende de
+- pode virar subproduto
+- pode virar spin-off
+- pode ser unificado com
+- parece redundante com
+- fortalece
+- serve como infraestrutura para
+- gera insumo para
+- e etapa anterior de
+- e versao comercial de
+- e versao interna de
+
+2.6. Camadas ja sugeridas para o Radar de Conexoes
+
+- Camada 1: Estrutural
+- Camada 2: Semantica
+- Camada 3: Estrategica
+- Camada 4: Emergente
+
+2.7. Tipos de coisa que o Radar Externo deve rastrear
+
+- noticias
+- jurisprudencia
+- IA e tecnologia
+- mercado
+- conteudo estrategico
+- sinais fracos
+
+2.8. Niveis do Radar Externo
+
+- coleta
+- triagem
+- classificacao
+- interpretacao
+- distribuicao
+- conexao interna
+
+2.9. Tipos de saida do Radar Externo
+
+- feed bruto
+- feed executivo
+- alertas
+- resumos tematicos
+- sinais estrategicos
+- distribuicao automatica
+
+2.10. Cadeiras ou celulas de agentes ja sugeridas
+
+- coleta
+- curadoria
+- sintese
+- conexao
+- distribuicao
+
+2.11. Tese de metaprojeto ja sugerida
+
+O documento-base ja aponta que varias iniciativas da linha NAGI podem, na verdade, formar um metaprojeto maior.
+
+Exemplo citado:
+
+- Memoria Continua
+- Transcricao de Reunioes
+- Gravacoes de Treinamento
+- Inteligencia Comercial
+- Cameras IP com Nuvem Inteligente
+- Leitura de Movimento e Presenca
+
+Linha-mae sugerida no documento-base:
+
+- Inteligencia Capturada
+
+2.12. Campos que os projetos passariam a precisar
+
+- tese principal
+- trilha estrategica
+- materia-prima base
+- pipeline tecnico
+- publico-alvo
+- saidas principais
+- marcas impactadas
+- possiveis subprodutos
+- dependencias
+- projetos relacionados
+- palavras-chave
+- oportunidade comercial
+- nivel de maturidade
+- potencial de integracao
+
+2.13. Estrategia de implantacao em camadas ja sugerida
+
+- V1 do Radar de Conexoes
+- V1 do Radar Externo
+- V1 da Central de Distribuicao
+
+
+3. O que o documento sugere, mas ainda nao aprofundou
+
+Ja sugerido, mas nao fechado no documento-base:
+
+3.1. Ontologia do ecossistema
+
+O texto sugere fortemente que existem tipos diferentes de coisa, mas nao formaliza:
+
+- ideia
+- projeto
+- modulo
+- ativo reutilizavel
+- linha estrategica
+- metaprojeto
+- insight
+- oportunidade
+
+3.2. Modelo de dados relacional
+
+O documento fala em conexoes com significado, mas nao transforma isso em estrutura de dados.
+
+3.3. Motor de priorizacao
+
+Existe classificacao de relevancia e impacto, mas nao existe criterio formal de score.
+
+3.4. Fluxo de conversao
+
+O documento mostra que sinais externos podem virar acao, conteudo, produto ou projeto, mas nao fecha o fluxo operacional que faz essa conversao.
+
+3.5. Memoria historica
+
+Nao ha ainda uma camada clara que registre:
+
+- o que foi detectado
+- o que foi aprovado
+- o que foi descartado
+- o que foi repetido
+- o que ja virou acao
+
+3.6. Governanca da distribuicao
+
+O texto fala em mandar para marketing, conteudo, juridico e produto, mas nao define:
+
+- quem recebe
+- com qual prioridade
+- com qual criterio
+- com qual rastreabilidade
+
+3.7. Produto e monetizacao
+
+O texto sugere potencial comercial forte, mas ainda nao transforma isso em linhas de produto ou ofertas.
+
+
+4. Novas ideias e expansoes estrategicas
+
+Nova ideia por inferencia estrategica:
+
+4.1. Camada de ontologia do ecossistema
+
+O projeto precisa nascer com uma ontologia clara. Sem isso, tudo vira card. Com isso, o sistema passa a distinguir:
+
+- ideia
+- iniciativa
+- projeto
+- modulo
+- ativo reutilizavel
+- linha estrategica
+- metaprojeto
+- insight
+- oportunidade
+- ameaca
+- decisao
+
+4.2. Motor de tese e oportunidade
+
+O radar nao deve apenas mostrar conexoes. Ele deve conseguir formular teses do tipo:
+
+"esses sinais externos + essa base tecnica + essa marca = nova frente potencial"
+
+4.3. Registro de ativos reutilizaveis
+
+O projeto precisa separar o que e produto do que e componente reutilizavel. Isso fortalece a logica de plataforma.
+
+4.4. Score estrategico de conexao
+
+Cada conexao precisa poder receber score por:
+
+- proximidade tecnica
+- materia-prima compartilhada
+- saida compartilhada
+- publico compartilhado
+- marcas afetadas
+- timing
+- potencial comercial
+- maturidade
+
+4.5. Radar de ameacas e deriva
+
+O sistema nao deve ver apenas oportunidades. Deve ver:
+
+- risco regulatorio
+- saturacao
+- concorrencia
+- dependencia excessiva de tecnologia
+- modismo sem sustentacao
+- deriva de escopo
+
+4.6. Mesa de decisao do ecossistema
+
+Insights e oportunidades precisam poder seguir para uma camada decisoria:
+
+- observado
+- em analise
+- incubado
+- aprovado
+- descartado
+- convertido em projeto
+
+4.7. Memoria estrategica
+
+O sistema precisa registrar:
+
+- o que ja foi visto
+- o que ja foi distribuido
+- o que gerou acao
+- o que foi falso positivo
+- o que se repetiu ao longo do tempo
+
+4.8. Templates de spin-off
+
+Quando o radar detectar uma nova frente, o sistema pode propor:
+
+- estrutura minima do projeto
+- marcas candidatas
+- modelo de entrega
+- ativos ja disponiveis
+- risco e maturidade
+
+4.9. Economia interna de insumos
+
+Noticia, insight, resumo, tese, sinal e descoberta devem ser tratados como ativos redistribuiveis do ecossistema.
+
+4.10. Simulacao de portifolio
+
+O sistema pode evoluir para responder:
+
+- se esta linha crescer, qual marca absorve?
+- qual modulo reaproveita?
+- qual time executa?
+- qual linha monetiza?
+
+
+5. Ideias incorporadas ao projeto
+
+Projeto ampliado com as novas ideias embutidas:
+
+5.1. Radar de Conexoes
+
+Deixa de ser apenas um detector de relacoes e passa a ser um motor de modelagem estrutural do ecossistema.
+
+5.2. Radar Externo
+
+Deixa de ser apenas um agregador tematico e passa a ser um sistema de vigilancia estrategica por tema, impacto, ameaca e oportunidade.
+
+5.3. Central de Distribuicao de Insights
+
+Evolui para um sistema de roteamento operacional com destino, prioridade, dono e rastreabilidade.
+
+5.4. Mesa de Decisao
+
+Nova camada incorporada ao projeto para transformar descoberta em movimento real.
+
+5.5. Base de Ativos Reutilizaveis
+
+Nova camada incorporada ao projeto para separar infraestrutura, pipelines e componentes transversais.
+
+5.6. Memoria Estrategica
+
+Nova camada incorporada ao projeto para registrar historico de sinais, decisoes e aproveitamentos.
+
+5.7. Painel de Metaprojetos
+
+Nova camada incorporada ao projeto para consolidar grupos de iniciativas que formam linhas estrategicas maiores.
+
+
+6. Estrutura ideal do projeto apos a ampliacao
+
+6.1. Modulos principais
+
+- NAGI Core
+- Radar de Conexoes
+- Radar Externo
+- Central de Distribuicao de Insights
+- Mesa de Decisao
+- Base de Ativos Reutilizaveis
+- Memoria Estrategica
+- Painel de Metaprojetos
+
+6.2. Submodulos do Radar de Conexoes
+
+- ontologia
+- grafo relacional
+- genealogia de projetos
+- score de sinergia
+- redundancia
+- subprodutos
+- spin-offs
+- linhas-mae
+
+6.3. Submodulos do Radar Externo
+
+- fontes
+- coleta
+- triagem
+- classificacao
+- interpretacao
+- sinais fracos
+- impacto por marca
+- impacto por linha
+
+6.4. Submodulos da Central de Distribuicao
+
+- roteamento
+- prioridade
+- destino
+- fila por area
+- confirmacao de uso
+- historico de distribuicao
+
+6.5. Submodulos da Mesa de Decisao
+
+- analise
+- incubacao
+- aprovacao
+- descarte
+- promocao para projeto
+- promocao para metaprojeto
+
+6.6. Entidades centrais
+
+- ideia
+- iniciativa
+- projeto
+- modulo
+- ativo reutilizavel
+- linha estrategica
+- metaprojeto
+- insight
+- sinal externo
+- oportunidade
+- ameaca
+- decisao
+- distribuicao
+- tese
+- relacao
+- marca ou frente
+
+6.7. Camadas do sistema
+
+- estrutural
+- semantica
+- estrategica
+- operacional
+- historica
+- emergente
+
+
+7. Visao de implantacao
+
+7.1. O que implementar primeiro
+
+- ontologia minima do ecossistema
+- novos campos estruturais dos projetos
+- relacoes manuais com significado
+- Radar de Conexoes V1
+- Radar Externo V1
+- distribuicao manual assistida
+
+7.2. O que pode entrar como segunda camada
+
+- score de conexao
+- score de relevancia externa
+- deteccao de redundancia
+- deteccao de subproduto e spin-off
+- fila de decisao
+- memoria de decisoes
+
+7.3. O que pode ficar preparado para depois
+
+- sinais fracos sofisticados
+- simulacao de portifolio
+- roteamento automatico
+- produto externo
+- monetizacao por vertical
+
+7.4. O que deve nascer como base estrutural desde ja
+
+- tipos de entidade
+- tipos de relacao
+- taxonomia de temas
+- taxonomia de marcas e frentes
+- separacao entre projeto e ativo
+- historico de distribuicao
+- historico de decisao
+
+7.5. O que e essencial para nao gerar retrabalho
+
+- nao modelar tudo como card
+- nao misturar insight com projeto
+- nao misturar modulo tecnico com linha de negocio
+- nao tratar relacao apenas como tag
+- nao criar radar externo sem destino operacional
+
+
+8. Arquitetura de produto e sistema
+
+8.1. Produto
+
+O projeto deve ser pensado como plataforma de inteligencia de portifolio.
+
+8.2. Experiencia
+
+O usuario precisa enxergar:
+
+- o que existe
+- o que conecta
+- o que emerge
+- o que vem do mundo
+- para onde cada sinal vai
+
+8.3. Sistema
+
+Arquitetura recomendada:
+
+- grafo relacional
+- classificacao por entidades e relacoes
+- pipeline de sinais externos
+- camada de roteamento
+- memoria historica
+
+8.4. Dados
+
+O sistema deve armazenar:
+
+- dados internos do ecossistema
+- sinais externos
+- relacoes semanticas
+- historico de distribuicao
+- historico de decisao
+- ativos reutilizaveis
+- teses emergentes
+
+8.5. Fluxo macro
+
+captar -> classificar -> conectar -> priorizar -> distribuir -> decidir -> aprender
+
+8.6. Escalabilidade
+
+O projeto escala se nascer com:
+
+- ontologia clara
+- entidades separadas
+- relacoes com semantica
+- rastreabilidade de decisao
+
+8.7. Reaproveitamento
+
+O nucleo pode ser reaproveitado por:
+
+- NAGI
+- SagB
+- marketing
+- conteudo
+- juridico
+- venture building
+- produtos futuros
+
+
+9. Potenciais produtos, spin-offs e linhas derivadas
+
+Nova ideia por inferencia estrategica:
+
+9.1. Produto proprio
+
+- plataforma de inteligencia de portifolio para grupos empresariais
+
+9.2. Subprodutos
+
+- radar juridico setorial
+- radar de IA e tecnologia
+- motor de distribuicao de insights
+- sistema de genealogia de projetos
+
+9.3. Linha de negocio
+
+- inteligencia externa como servico
+- curadoria executiva por tema
+- observatorio de oportunidades
+- plataforma de tese e expansao de portifolio
+
+9.4. Modulos independentes
+
+- grafo de conexoes
+- observatorio externo
+- memoria estrategica
+- mesa de decisao
+- base de ativos reutilizaveis
+
+9.5. Oferta comercial
+
+- sistema operacional estrategico para empresas com varias iniciativas
+- observatorio regulatorio e de mercado
+- plataforma de inteligencia distribuida para inovacao, marketing e produto
+
+
+10. Riscos, cuidados e decisoes criticas
+
+10.1. Riscos de arquitetura
+
+- tudo virar card
+- conexoes virarem apenas tags
+- mistura de entidades
+- falta de historico de decisao
+
+10.2. Riscos de produto
+
+- virar feed sem acao
+- excesso de ideias sem priorizacao
+- prometer mais automacao do que a base suporta
+
+10.3. Riscos de dispersao
+
+- abrir temas demais cedo
+- vigiar o mundo inteiro sem foco
+- transformar qualquer conexao em linha estrategica
+
+10.4. Riscos tecnicos
+
+- deduplicacao ruim
+- score mal calibrado
+- baixa rastreabilidade
+- automacao sem supervisao
+
+10.5. Riscos de posicionamento
+
+- ficar interno demais e perder potencial de produto
+- ficar generico demais e perder profundidade
+
+10.6. Decisoes que precisam ser tomadas cedo
+
+- ontologia oficial
+- tipos de relacao
+- definicao entre projeto, modulo, insight, oportunidade e metaprojeto
+- criterio de score
+- criterio de distribuicao
+- criterio de aprovacao e descarte
+
+
+11. Blueprint executivo final
+
+Versao consolidada do projeto:
+
+O Radar de Conexoes, ampliado, deixa de ser apenas uma visualizacao de projetos relacionados.
+
+Ele passa a ser uma camada de inteligencia estrutural que ajuda o ecossistema a:
+
+- reconhecer o que ja construiu
+- entender como as partes se combinam
+- descobrir linhas maiores do que os projetos individuais
+- detectar ativos reutilizaveis
+- promover ideias a metaprojetos
+
+O Radar Externo, ampliado, deixa de ser apenas um leitor tematico de novidades.
+
+Ele passa a ser um sistema de vigilancia estrategica capaz de:
+
+- capturar sinais fortes e fracos
+- classificar impacto
+- ligar externo ao interno
+- transformar noticia em combustivel
+- alimentar varias frentes do ecossistema
+
+A Central de Distribuicao deixa de ser um passo conceitual e passa a ser uma camada operacional.
+
+Ela garante que informacao nao pare em leitura. Ela vira:
+
+- pauta
+- acao
+- projeto
+- conteudo
+- decisao
+
+Com as ampliacoes propostas, o NAGI passa a ser:
+
+- mapa do que ja foi criado
+- detector do que pode nascer disso
+- observatorio do mundo
+- roteador de sinais e oportunidades
+- organizador da tese de portifolio do ecossistema
+
+Em termos de ambicao, o projeto deixa de ser "um modulo a mais do NAGI" e passa a ser:
+
+um sistema de inteligencia estrategica de ecossistema
+
+
+12. Checklist pratico de implantacao
+
+- definir ontologia oficial do ecossistema
+- definir entidades centrais
+- definir tipos de relacao com semantica
+- adicionar campos ricos nos projetos do NAGI
+- criar Radar de Conexoes V1
+- criar Radar Externo V1
+- criar Central de Distribuicao de Insights
+- criar fila de decisao
+- criar memoria de decisoes e sinais
+- criar base de ativos reutilizaveis
+- criar painel de metaprojetos
+- criar score de relevancia e score de sinergia
+- definir destinos de distribuicao por area
+- definir metricas de uso e conversao
+- separar V1 manual, V1 semiassistida e V2 automatizada
+
+
+13. Formula final de decisao
+
+Este projeto deve ser tratado como base de uma arquitetura seria, escalavel e potencialmente transformavel em produto.
+
+A formula final correta do Radar de Conexoes ampliado e:
+
+- entender o que existe
+- entender o que conecta
+- entender o que emerge
+- entender o que o mundo sinaliza
+- transformar isso em movimento util
+
+Este arquivo define o padrao oficial do projeto Radar de Conexoes dentro do SagB.

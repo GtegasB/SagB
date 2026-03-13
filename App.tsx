@@ -13,11 +13,14 @@ import ThreeForBView from './components/ThreeForBView';
 import AudacusView from './components/AudacusView';
 import StartyBView from './components/StartyBView'; // NEW MODULE
 import ManagementView from './components/ManagementView';
+import ProgrammersRoomView from './components/ProgrammersRoomView';
 import GovernanceView from './components/GovernanceView';
 import QualitySensorView from './components/QualitySensorView';
 import IntelligenceFlowView from './components/IntelligenceFlowView';
 import CIDView from './components/CIDView';
 import ContinuousMemoryView from './components/ContinuousMemoryView';
+import NAGIView from './components/NAGIView';
+import RadarConnectionsView from './components/RadarConnectionsView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView';
 import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
@@ -1438,6 +1441,8 @@ if (userId) {
       case 'hub': return <HubView businessUnits={businessUnits} activeBU={activeBU} onSelectBU={handleSelectBU} onNavigate={setActiveTab} agents={activatedAgents} onSelectAgent={handleAgentInteraction} />;
 
       case 'management': return <ManagementView tasks={tasks} onAddTask={handleAddTask} onUpdateTaskStatus={handleUpdateTaskStatus} activeWorkspaceId={activeWorkspaceId} ownerUserId={ownerUserId} />;
+      case 'programmers-room':
+        return <ProgrammersRoomView onBack={() => setActiveTab('ecosystem')} />;
       case 'unit-room': return <UnitView activeBU={activeBU} agents={activatedAgents} onBack={handleBackNavigation} activeWorkspaceId={activeWorkspaceId} ownerUserId={ownerUserId} />;
 
       // NOVA ROTA: CONVERSAS (HISTÓRICO)
@@ -1481,6 +1486,15 @@ if (userId) {
             onBack={() => setActiveTab('ecosystem')}
           />
         );
+      case 'nagi':
+        return (
+          <NAGIView
+            onBack={() => setActiveTab('ecosystem')}
+            onOpenTab={(tab) => setActiveTab(tab)}
+          />
+        );
+      case 'radar-connections':
+        return <RadarConnectionsView onBack={() => setActiveTab('nagi')} />;
       case 'cid':
         return (
           <CIDView

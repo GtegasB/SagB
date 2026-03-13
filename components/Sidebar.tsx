@@ -26,7 +26,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const DEFAULT_LOGO = "https://static.wixstatic.com/media/64c3dc_866011d493924761b15d6162e82c4948~mv2.png";
   const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&q=80&w=200&h=200";
 
-  const menuItems: { id: TabId; label: string; icon: string }[] = [
+  const menuItems: { id: TabId; label: string; subtitle?: string; icon: string }[] = [
     {
       id: 'home',
       label: 'Início',
@@ -58,6 +58,12 @@ const Sidebar: React.FC<SidebarProps> = ({
       icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01'
     },
     {
+      id: 'programmers-room',
+      label: 'Sala Dev',
+      subtitle: 'SagB Bridge',
+      icon: 'M8 7V5a4 4 0 118 0v2m-8 0h8M6 9h12a2 2 0 012 2v7a2 2 0 01-2 2H6a2 2 0 01-2-2v-7a2 2 0 012-2zm4 4l2 2 4-4'
+    },
+    {
       id: 'vault',
       label: 'Sessão de Pautas',
       icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 00 2 2zm10-10V7a4 4 0 00-8 0v4h8z'
@@ -76,6 +82,18 @@ const Sidebar: React.FC<SidebarProps> = ({
       id: 'intelligence-flow',
       label: 'Fluxo de Inteligência',
       icon: 'M4 7h6m4 0h6M4 12h4m6 0h6M4 17h8m2 0h6'
+    },
+    {
+      id: 'nagi',
+      label: 'NAGI',
+      subtitle: 'Núcleo Avançado de Gestão de Inteligência',
+      icon: 'M4 5h16M4 12h16M4 19h10M17 16l3 3-3 3'
+    },
+    {
+      id: 'radar-connections',
+      label: 'Radar de Conexões',
+      subtitle: 'NAGI / Ecossistema',
+      icon: 'M4 12h5m6 0h5M12 4v5m0 6v5M7.05 7.05l3.54 3.54m2.82 2.82l3.54 3.54m0-9.9l-3.54 3.54m-2.82 2.82l-3.54 3.54'
     },
     {
       id: 'cid',
@@ -140,8 +158,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <path d={item.icon} strokeLinecap="round" strokeLinejoin="round" />
               </svg>
 
-              <span className={`text-sm tracking-tight ${isActive ? 'font-semibold' : 'font-medium'}`}>
-                {item.label}
+              <span className="min-w-0 flex-1 text-left">
+                <span className={`block text-sm tracking-tight ${isActive ? 'font-semibold' : 'font-medium'}`}>
+                  {item.label}
+                </span>
+                {item.subtitle && (
+                  <span className={`block text-[9px] uppercase tracking-[0.22em] ${isActive ? 'text-gray-500' : 'text-gray-300 group-hover:text-gray-400'}`}>
+                    {item.subtitle}
+                  </span>
+                )}
               </span>
 
               {isActive && (

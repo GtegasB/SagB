@@ -1,0 +1,1950 @@
+SagB Bridge
+Especificacao Canonica do Projeto
+Versao: 2.0
+Status: Documento padrao de referencia
+Data: 2026-03-13
+
+0. Como usar este documento
+
+Este documento e a referencia oficial do projeto SagB Bridge.
+
+Ele foi escrito para cumprir 4 papeis ao mesmo tempo:
+
+- alinhar produto
+- alinhar arquitetura
+- servir de contrato entre SagB e extensao VS Code
+- permitir que outro agente, time ou chat implemente o projeto sem depender de contexto oral
+
+Regra de uso:
+
+- se houver conflito entre conversa solta e este documento, prevalece este documento
+- se uma decisao nao estiver explicita aqui, deve ser proposta como extensao do documento e nao como desvio informal
+- este documento deve ser suficiente para iniciar backend, frontend do SagB e extensao VS Code
+
+Objetivo final:
+
+qualquer agente ou pessoa que receba apenas este arquivo deve conseguir compreender:
+
+- o problema de negocio
+- o desenho do produto
+- a arquitetura
+- os contratos
+- os fluxos
+- as bordas e riscos
+- a ordem de implementacao
+
+
+1. Definicao do problema
+
+O SagB e o sistema oficial macro do Grupo B.
+
+Hoje, o fluxo tecnico tipico tende a ser fragmentado:
+
+- a demanda nasce em um sistema
+- o desenvolvedor precisa localizar a tarefa manualmente
+- abrir repositorio e pasta correta
+- descobrir arquivos de entrada
+- montar contexto para execucao
+- acionar o ambiente certo
+- lembrar de devolver status, resumo e historico depois
+
+Isso gera:
+
+- retrabalho operacional
+- perda de contexto
+- baixa padronizacao
+- dificuldade de auditoria
+- status desatualizado em relacao ao trabalho real
+
+O SagB Bridge existe para eliminar essa friccao.
+
+
+2. Formula do produto
+
+Esta e a formula oficial do projeto:
+
+- SagB = sala de comando
+- VS Code = base operacional
+- SagB Bridge = ponte oficial entre os dois
+- Codex = operador assistido dentro do VS Code
+
+Em linguagem direta:
+
+- o SagB organiza e acompanha
+- o VS Code executa
+- o Bridge conecta
+- o Codex ajuda a produzir dentro do ambiente real de desenvolvimento
+
+
+3. Resumo executivo
+
+O SagB Bridge sera uma extensao de VS Code que:
+
+- autentica o usuario contra o SagB
+- recebe pedidos de abertura de tarefa vindos do SagB
+- abre a tarefa pelo contexto correto
+- resolve a pasta local do projeto
+- abre arquivos iniciais
+- mostra painel da tarefa
+- permite copiar prompt-base
+- sincroniza status, bloqueios e resumo
+- registra historico tecnico da execucao
+
+O SagB, por sua vez, tera um modulo chamado Sala dos Programadores, responsavel por:
+
+- listar projetos tecnicos
+- listar tarefas tecnicas
+- mostrar status e historico
+- acionar abertura no VS Code
+- consolidar runs e devolutivas
+
+Na V1, o sistema nao tenta embutir o VS Code inteiro no SagB.
+
+Na V1, o sistema nao tenta controlar visualmente o Codex.
+
+Na V1:
+
+- SagB organiza
+- Bridge prepara
+- Codex executa
+- SagB registra
+
+
+4. Objetivos do projeto
+
+4.1. Objetivo principal
+
+Permitir que uma tarefa criada ou gerida no SagB seja aberta no VS Code com o contexto tecnico correto e com retorno de status para o SagB.
+
+4.2. Objetivos secundarios
+
+- reduzir tempo de inicio de tarefa
+- padronizar abertura de contexto tecnico
+- melhorar historico de execucao
+- aproximar status do sistema ao trabalho real
+- criar base robusta para evolucao futura com agentes
+
+4.3. Objetivo executivo da primeira entrega
+
+A primeira entrega real e esta:
+
+clicar em Abrir no VS Code no SagB e fazer o VS Code abrir o projeto certo, a tarefa certa, os arquivos certos e o contexto certo.
+
+
+5. Decisoes arquiteturais imutaveis
+
+5.1. Nao embutir o VS Code completo no SagB
+
+Decisao: proibido na V1.
+
+Motivos:
+
+- complexidade desnecessaria
+- pior integracao com ambiente local
+- manutencao mais cara
+- desvia do ganho principal de curto prazo
+
+5.2. Integracao oficial
+
+Decisao: usar API HTTP do SagB + extensao oficial do VS Code.
+
+5.3. Editor no navegador
+
+Se no futuro houver necessidade de edicao leve dentro do SagB, o componente indicado e Monaco Editor.
+
+Isso nao substitui o fluxo principal via extensao desktop.
+
+5.4. Papel do Codex
+
+O Codex continua dentro do VS Code.
+
+O SagB nao controla diretamente o chat, a UI nem a sessao visual do Codex na V1.
+
+5.5. Contrato de projeto local
+
+O backend nao deve depender de caminho absoluto por maquina.
+
+O projeto e identificado por `projectSlug`.
+
+A extensao resolve a pasta local por binding.
+
+5.6. Deep link
+
+O SagB nao deve enviar payload sensivel nem token de autenticacao por URI.
+
+O SagB deve enviar apenas `launchToken` temporario.
+
+5.7. Persistencia antes de openFolder
+
+Qualquer fluxo que troque de workspace deve persistir estado pendente antes de chamar `vscode.openFolder`.
+
+5.8. Segredo
+
+Token de acesso do SagB deve ser salvo apenas em `SecretStorage`.
+
+5.9. Sem automacao shell arbitraria
+
+A extensao nao deve executar shell vindo da API.
+
+5.10. V1 enxuta, robusta e demonstravel
+
+Tudo o que nao for necessario para provar a ponte operacional deve ficar fora do escopo da V1.
+
+
+6. O que o projeto entrega
+
+6.1. Entregas obrigatorias da V1
+
+- autenticacao da extensao contra o SagB
+- abertura manual de tarefa por ID
+- abertura de tarefa a partir do SagB por deep link
+- resolucao de pasta local por binding
+- abertura de arquivos iniciais
+- painel de tarefa no VS Code
+- copia de prompt-base
+- criacao de task run
+- sincronizacao de status
+- envio de resumo final
+- registro de sessao tecnica basica
+
+6.2. O que nao entra na V1
+
+- VS Code inteiro dentro do SagB
+- automacao visual do Codex
+- sincronizacao do chat do Codex
+- clone automatico de repositorio
+- branch automation agressiva
+- orquestracao via n8n
+- telemetria analitica pesada
+- suporte total a todos os ambientes remotos como obrigacao de entrega
+
+6.3. O que fica para evolucao
+
+- autodeteccao de repositorio por Git
+- leitura de README, AGENTS e arquivos de contexto
+- captura automatica de arquivos alterados
+- integracao mais profunda com ambientes remotos
+- metricas por tarefa
+- dashboards de produtividade
+
+
+7. Principios de implementacao
+
+7.1. Separacao de responsabilidades
+
+- SagB organiza demanda
+- API entrega contratos
+- extensao orquestra execucao local
+- VS Code hospeda a operacao
+- Codex apoia a execucao
+
+7.2. Contratos simples e estaveis
+
+As interfaces entre sistemas devem ser pequenas, versionaveis e auditaveis.
+
+7.3. Falha legivel
+
+Toda falha deve dizer:
+
+- o que falhou
+- em que etapa falhou
+- o que o usuario pode fazer
+
+7.4. Seguranca antes de conveniencia
+
+Nao expor segredos nem automatizar acoes destrutivas sem confirmacao.
+
+7.5. Evolucao incremental
+
+Primeiro a ponte funciona.
+Depois ela fica sofisticada.
+
+7.6. Compatibilidade com trabalho real
+
+O desenho precisa lidar com:
+
+- repositorio sujo
+- monorepo
+- multiplos entrypoints
+- tarefa retomada
+- ambiente remoto
+- usuario clicando duas vezes
+- run ja em andamento
+
+
+8. Glossario
+
+SagB:
+Sistema oficial macro do Grupo B.
+
+Sala dos Programadores:
+Modulo do SagB onde a operacao tecnica e iniciada, acompanhada e auditada.
+
+SagB Bridge:
+Extensao de VS Code que conecta o SagB ao ambiente local de desenvolvimento.
+
+Task:
+Demanda tecnica rastreavel dentro do SagB.
+
+Task Run:
+Instancia de execucao de uma task por um usuario em um contexto de trabalho.
+
+Developer Session:
+Sessao ativa ou recente de uso do VS Code associada ao SagB Bridge.
+
+Launch Token:
+Token temporario e de uso controlado usado para abrir tarefa via deep link do SagB para o VS Code.
+
+Project Binding:
+Vinculo local entre `projectSlug` e a raiz do projeto na maquina ou ambiente do usuario.
+
+Contexto tecnico:
+Conjunto de informacoes e arquivos que ajudam a iniciar a execucao da tarefa.
+
+
+9. Atores
+
+9.1. Operador tecnico
+
+Pessoa que usa o SagB para selecionar tarefas e executar trabalho no VS Code.
+
+9.2. Lider tecnico
+
+Pessoa que acompanha estado, bloqueios e historico tecnico.
+
+9.3. Backend SagB
+
+Servico que expoe tarefas, launches, runs e historico.
+
+9.4. Extensao SagB Bridge
+
+Cliente operacional que roda no VS Code.
+
+9.5. Codex
+
+Assistente dentro do VS Code que atua sobre o contexto local.
+
+
+10. Visao de produto: Sala dos Programadores
+
+10.1. Objetivo
+
+Ser o ponto unico de comando tecnico do SagB.
+
+10.2. O que deve existir na tela
+
+- fila de tarefas
+- projetos
+- status de execucao
+- ultimo run ou sessao atual
+- responsavel
+- prioridade
+- modulo
+- etapa
+- botao Abrir no VS Code
+- botao Copiar prompt
+- historico tecnico
+- bloqueios
+
+10.3. Blocos recomendados da interface
+
+Bloco 1: Visao geral
+
+- projetos ativos
+- tarefas em andamento
+- tarefas bloqueadas
+- tarefas concluidas recentes
+
+Bloco 2: Lista de tarefas
+
+- titulo
+- projeto
+- modulo
+- etapa
+- prioridade
+- status
+- responsavel
+- ultimo update
+- indicador de bloqueio
+- indicador de ultimo run
+
+Bloco 3: Acoes por tarefa
+
+- Abrir no VS Code
+- Copiar prompt
+- Ver detalhes
+- Ver historico
+- Reabrir tarefa
+- Marcar bloqueio
+
+Bloco 4: Historico tecnico
+
+- runs anteriores
+- resumos enviados
+- arquivos alterados
+- observacoes
+- data e hora
+
+10.4. Jornada esperada
+
+1. usuario entra na Sala dos Programadores
+2. filtra por projeto, modulo, etapa ou status
+3. abre os detalhes da tarefa
+4. revisa descricao, criterio de aceite e contexto
+5. clica em Abrir no VS Code
+6. trabalha no VS Code
+7. devolve status e resumo
+8. acompanha historico no SagB
+
+10.5. Acao relacionada ao Codex
+
+Se houver botao relacionado a Codex na V1, ele deve significar:
+
+- preparar contexto no VS Code
+- copiar prompt-base
+- orientar inicio de execucao
+
+Ele nao deve prometer controle direto da interface do Codex.
+
+
+11. Arquitetura macro
+
+11.1. Componentes
+
+1. SagB Web
+
+- expoe a Sala dos Programadores
+- gera launches
+- mostra historico
+
+2. SagB API
+
+- valida token
+- lista projetos e tasks
+- cria e consome launch tokens
+- cria e atualiza task runs
+- recebe report final
+- registra developer sessions
+
+3. SagB Bridge Extension
+
+- commands
+- URI handler
+- servicos de API e estado
+- binding resolver
+- painel da tarefa
+
+4. Ambiente local
+
+- repositorio
+- VS Code
+- Git
+- extensao Codex
+
+11.2. Fluxo conceitual
+
+SagB Web
+  -> cria launch token
+  -> dispara URI do VS Code
+
+VS Code Extension
+  -> recebe launch token
+  -> consome launch na API
+  -> resolve projeto local
+  -> persiste pending launch
+  -> abre workspace
+  -> reidrata
+  -> cria ou retoma run
+  -> abre arquivos
+  -> mostra painel
+
+Usuario
+  -> trabalha com ou sem Codex
+  -> sincroniza status
+  -> envia resumo
+
+SagB API
+  -> grava historico e auditoria
+
+
+12. Requisitos funcionais
+
+FR-001
+O SagB deve permitir abrir uma tarefa no VS Code.
+
+FR-002
+A extensao deve permitir conectar um usuario ao SagB usando token manual na V1.
+
+FR-003
+A extensao deve validar se o token ainda e valido antes de consumir launches.
+
+FR-004
+A extensao deve permitir abrir tarefa manualmente por ID.
+
+FR-005
+A extensao deve receber deep links do SagB por URI handler.
+
+FR-006
+A extensao deve resolver o projeto local a partir de `projectSlug` e binding local.
+
+FR-007
+Se nao existir binding local, a extensao deve pedir que o usuario configure a pasta.
+
+FR-008
+A extensao deve persistir estado pendente antes de trocar de workspace.
+
+FR-009
+A extensao deve retomar o fluxo apos reload do workspace.
+
+FR-010
+A extensao deve abrir arquivos iniciais informados pela tarefa.
+
+FR-011
+A extensao deve exibir painel da tarefa no VS Code.
+
+FR-012
+O painel deve mostrar descricao, criterios de aceite, status, caminhos e arquivos iniciais.
+
+FR-013
+A extensao deve permitir copiar o prompt-base.
+
+FR-014
+A extensao deve criar uma `task_run` ao iniciar trabalho.
+
+FR-015
+A extensao deve permitir atualizar status da run.
+
+FR-016
+A extensao deve permitir enviar resumo final da run.
+
+FR-017
+O SagB deve exibir historico tecnico da task com base nas runs.
+
+FR-018
+Se existir run ativa do mesmo usuario para a mesma task, a extensao deve retomar a run por padrao.
+
+FR-019
+A extensao deve avisar quando o repositorio estiver ausente, sujo ou em branch divergente do esperado.
+
+FR-020
+O sistema deve suportar tarefas com multiplos arquivos iniciais.
+
+FR-021
+O sistema deve suportar tasks com checklist de criterios de aceite.
+
+FR-022
+O sistema deve suportar tarefas com anexos ou links de contexto.
+
+FR-023
+O sistema deve suportar bloqueio tecnico com motivo textual.
+
+FR-024
+O SagB deve registrar qual usuario abriu a tarefa e quando.
+
+FR-025
+O SagB deve registrar ultima atividade conhecida da extensao por sessao.
+
+FR-026
+O sistema deve funcionar mesmo que o usuario nao use Codex.
+
+FR-027
+O sistema deve permitir reabrir uma tarefa ja concluida, criando nova run.
+
+FR-028
+O sistema deve lidar com clique duplo ou repetido em Abrir no VS Code sem gerar caos operacional.
+
+FR-029
+O sistema deve suportar tasks em monorepo por meio de `relativeTargetPath`.
+
+FR-030
+O sistema deve suportar vinculo de projeto por perfil de ambiente local.
+
+
+13. Requisitos nao funcionais
+
+NFR-001
+Segredos devem ser armazenados em SecretStorage.
+
+NFR-002
+API de producao deve operar sob HTTPS.
+
+NFR-003
+O sistema deve gerar logs tecnicos legiveis.
+
+NFR-004
+O sistema deve ser resiliente a reload de workspace.
+
+NFR-005
+O contrato entre SagB e extensao deve ser versionavel.
+
+NFR-006
+A UX deve ser compreensivel para primeiro uso.
+
+NFR-007
+A webview deve aplicar CSP e escape seguro.
+
+NFR-008
+O sistema deve falhar sem corromper run, binding ou credencial.
+
+NFR-009
+A V1 deve ter suporte oficial a Windows desktop local.
+
+NFR-010
+A modelagem local deve permitir evolucao para WSL, Dev Container e Remote SSH.
+
+NFR-011
+A extensao nao deve executar acoes destrutivas em Git sem confirmacao do usuario.
+
+NFR-012
+As mensagens de erro devem sugerir correcao sempre que possivel.
+
+
+14. Escopo de ambientes locais
+
+14.1. Suporte oficial da V1
+
+- Windows desktop local
+
+14.2. Modelagem obrigatoria da V1 para futura expansao
+
+Mesmo que nem todos sejam implementados operacionalmente na V1, o design deve prever:
+
+- desktop
+- wsl
+- devcontainer
+- remote-ssh
+
+14.3. Regra de projeto
+
+Project Binding deve ter `profileType`, para evitar que a arquitetura fique presa a caminho local simples.
+
+Exemplo de perfis:
+
+- desktop
+- wsl
+- devcontainer
+- remote-ssh
+
+
+15. Modelo de dominio
+
+15.1. Project
+
+- id
+- name
+- slug
+- repository_url
+- default_branch
+- description
+- active
+- created_at
+- updated_at
+
+15.2. Task
+
+- id
+- project_id
+- title
+- module_code
+- stage_code
+- description
+- acceptance_criteria_json
+- prompt_base
+- relative_target_path
+- initial_files_json
+- context_links_json
+- attachments_json
+- expected_branch
+- status
+- priority
+- assignee_user_id
+- created_at
+- updated_at
+
+15.3. TaskRun
+
+- id
+- task_id
+- user_id
+- source
+- status
+- blocked_reason
+- started_at
+- last_activity_at
+- finished_at
+- vscode_session_id
+- extension_version
+- workspace_profile_type
+- workspace_root
+- git_branch
+- git_dirty
+- summary
+- notes
+- changed_files_json
+- next_steps_json
+- created_at
+- updated_at
+
+15.4. DeveloperSession
+
+- id
+- user_id
+- vscode_session_id
+- extension_version
+- os_platform
+- os_release
+- hostname
+- profile_type
+- active_task_run_id opcional
+- created_at
+- last_seen_at
+
+15.5. TaskLaunch
+
+- id
+- task_id
+- user_id
+- launch_token
+- status
+- expires_at
+- consumed_at
+- consumed_by_session_id opcional
+- created_at
+
+15.6. ProjectBinding
+
+No backend, opcional.
+Na extensao, obrigatorio.
+
+Campos minimos:
+
+- project_slug
+- profile_type
+- local_root
+- context_label opcional
+- created_at
+- updated_at
+
+15.7. TaskStatus
+
+Status da task no SagB:
+
+- backlog
+- todo
+- in_progress
+- blocked
+- done
+- cancelled
+
+15.8. TaskRunStatus
+
+Status da run:
+
+- in_progress
+- blocked
+- done
+- cancelled
+
+
+16. Maquinas de estado
+
+16.1. Estado da task
+
+backlog -> todo -> in_progress -> blocked -> in_progress -> done
+
+Tambem permitido:
+
+- todo -> cancelled
+- in_progress -> cancelled
+- blocked -> cancelled
+- done -> todo, quando houver reabertura formal
+
+16.2. Estado da task run
+
+in_progress -> blocked -> in_progress -> done
+
+Tambem permitido:
+
+- in_progress -> cancelled
+- blocked -> cancelled
+
+16.3. Regra de relacionamento entre task e run
+
+- a task pode ter varias runs
+- apenas uma run ativa por usuario para a mesma task deve ser retomada por padrao
+- runs finalizadas nunca devem ser reabertas; reabertura cria nova run
+
+
+17. Contratos de API
+
+17.1. Convencoes gerais
+
+- base path: /api/dev
+- autenticacao: Authorization Bearer
+- resposta padrao:
+
+{
+  "success": true,
+  "data": {}
+}
+
+- erros devem retornar codigo HTTP adequado e mensagem clara
+- contratos devem ser versionaveis
+
+17.2. POST /api/dev/auth/validate
+
+Uso:
+
+- validar token da extensao
+
+Request:
+
+{}
+
+Response:
+
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "u-1",
+      "name": "Cassio"
+    }
+  }
+}
+
+17.3. GET /api/dev/projects
+
+Uso:
+
+- listar projetos disponiveis ao usuario
+
+17.4. GET /api/dev/tasks
+
+Uso:
+
+- listar tasks com filtros para a Sala dos Programadores
+
+Filtros recomendados:
+
+- project
+- status
+- assignee
+- priority
+- module
+- stage
+
+17.5. GET /api/dev/tasks/{taskId}
+
+Uso:
+
+- abrir task por ID
+
+Resposta recomendada:
+
+{
+  "success": true,
+  "data": {
+    "id": "cid-et-01",
+    "title": "SagB | CID | ET-01 | implementar estrutura inicial",
+    "project": {
+      "id": "p-1",
+      "name": "SagB",
+      "slug": "sagb",
+      "repositoryUrl": "git@repo/sagb.git",
+      "defaultBranch": "main"
+    },
+    "module": "CID",
+    "stage": "ET-01",
+    "description": "Criar a base da extensao SagB Bridge.",
+    "acceptanceCriteria": [
+      "conectar ao SagB",
+      "abrir tarefa",
+      "abrir arquivos iniciais"
+    ],
+    "promptBase": "Titulo desta tarefa: ...",
+    "relativeTargetPath": ".",
+    "initialFiles": [
+      "README.md",
+      "src/extension.ts"
+    ],
+    "contextLinks": [
+      {
+        "label": "README do projeto",
+        "url": "https://..."
+      }
+    ],
+    "attachments": [],
+    "expectedBranch": "feature/sagb-bridge-et-01",
+    "status": "todo"
+  }
+}
+
+17.6. POST /api/dev/task-launches
+
+Uso:
+
+- gerar deep link a partir do SagB
+
+Request:
+
+{
+  "taskId": "cid-et-01",
+  "origin": "sala-programadores"
+}
+
+Response:
+
+{
+  "success": true,
+  "data": {
+    "launchToken": "abc123xyz",
+    "expiresAt": "2026-03-13T03:20:00Z",
+    "deepLink": "vscode://grupob.sagb-bridge/open?launchToken=abc123xyz"
+  }
+}
+
+17.7. POST /api/dev/task-launches/consume
+
+Uso:
+
+- consumir launch token e receber payload da task
+
+Request:
+
+{
+  "launchToken": "abc123xyz",
+  "vscodeSessionId": "vs-123"
+}
+
+Regras:
+
+- launch token deve expirar rapidamente, por exemplo 2 minutos
+- launch token nao deve carregar segredo de usuario
+- launch token deve ter uso controlado
+
+Comportamento recomendado:
+
+- primeiro consumo valido retorna payload
+- repeticao imediata na mesma sessao pode ser tratada como idempotente
+- consumo por outra sessao apos uso deve falhar
+
+17.8. POST /api/dev/task-runs
+
+Uso:
+
+- criar ou retomar run
+
+Request:
+
+{
+  "taskId": "cid-et-01",
+  "source": "vscode-extension",
+  "vscodeSessionId": "vs-123",
+  "extensionVersion": "0.1.0",
+  "workspaceProfileType": "desktop",
+  "workspaceRoot": "D:\\DATHEX_STACK\\20_GPB_GRUPOB\\SagB",
+  "gitBranch": "feature/sagb-bridge-et-01",
+  "gitDirty": false,
+  "resumeIfExists": true
+}
+
+Response:
+
+{
+  "success": true,
+  "data": {
+    "runId": "run-777",
+    "resumed": true,
+    "status": "in_progress",
+    "startedAt": "2026-03-13T03:15:00Z"
+  }
+}
+
+17.9. PATCH /api/dev/task-runs/{runId}/status
+
+Request:
+
+{
+  "status": "blocked",
+  "blockedReason": "Dependencia de endpoint do backend."
+}
+
+17.10. POST /api/dev/task-runs/{runId}/report
+
+Request:
+
+{
+  "summary": "Extensao base criada.",
+  "notes": "Falta estilizar a webview.",
+  "changedFiles": [
+    "src/extension.ts",
+    "src/uri/uriHandler.ts"
+  ],
+  "nextSteps": [
+    "Adicionar webview completa",
+    "Implementar bindings"
+  ]
+}
+
+17.11. POST /api/dev/developer-sessions
+
+Uso:
+
+- registrar sessao
+
+17.12. POST /api/dev/developer-sessions/{sessionId}/heartbeat
+
+Uso:
+
+- atualizar `last_seen_at`
+
+Observacao:
+
+se for pesado para a V1, pode entrar como V1.1, mas a modelagem deve existir.
+
+
+18. Contratos de payload internos da extensao
+
+18.1. TaskPayload
+
+- id
+- title
+- project.id
+- project.name
+- project.slug
+- project.repositoryUrl
+- project.defaultBranch
+- module
+- stage
+- description
+- acceptanceCriteria[]
+- promptBase
+- relativeTargetPath
+- initialFiles[]
+- contextLinks[]
+- attachments[]
+- expectedBranch
+- status
+
+18.2. PendingLaunch
+
+- source
+- taskId
+- projectSlug
+- profileType
+- workspaceRoot
+- relativeTargetPath
+- initialFiles[]
+- createdAt
+
+18.3. ProjectBindingPayload
+
+- projectSlug
+- profileType
+- localRoot
+- contextLabel opcional
+
+
+19. Deep link e launch token
+
+19.1. URI oficial
+
+Padrao:
+
+vscode://grupob.sagb-bridge/open?launchToken=abc123xyz
+
+Onde:
+
+- `grupob.sagb-bridge` e o identificador oficial da extensao
+- o payload sensivel nao vai na URI
+
+19.2. Regras do launch token
+
+- curto
+- temporario
+- nao reutilizavel indiscriminadamente
+- sem segredo persistente
+
+19.3. Regras de UX
+
+Se o token expirar:
+
+- a extensao mostra mensagem clara
+- a mensagem orienta gerar novo link no SagB
+
+Se o usuario clicar duas vezes:
+
+- a extensao nao deve criar varias runs sem criterio
+- deve retomar a mesma run quando possivel
+
+
+20. Arquitetura da extensao VS Code
+
+20.1. Estrutura recomendada
+
+sagb-bridge/
+  package.json
+  tsconfig.json
+  .vscodeignore
+  README.md
+  src/
+    extension.ts
+    commands/
+      connectSagB.ts
+      disconnectSagB.ts
+      openTaskById.ts
+      copyPrompt.ts
+      updateRunStatus.ts
+      submitRunReport.ts
+      configureProjectBinding.ts
+      openTaskDetails.ts
+    services/
+      sagbApi.ts
+      authService.ts
+      bindingService.ts
+      workspaceResolver.ts
+      pendingLaunchService.ts
+      runService.ts
+      sessionService.ts
+      gitService.ts
+      taskContextService.ts
+    uri/
+      uriHandler.ts
+    panels/
+      taskPanel.ts
+    state/
+      stateStore.ts
+    types/
+      api.ts
+      task.ts
+      project.ts
+      run.ts
+      session.ts
+      binding.ts
+    utils/
+      errors.ts
+      html.ts
+      paths.ts
+
+20.2. Camadas
+
+commands
+
+- interface de acoes do usuario
+
+services
+
+- logica de negocio local
+- chamadas HTTP
+- persistencia local
+- Git
+- sessao
+
+uri
+
+- parse e delegacao do deep link
+
+panels
+
+- renderizacao segura da webview
+
+state
+
+- acesso a `globalState`, `workspaceState` e `secretStorage`
+
+utils
+
+- sanitizacao
+- tratamento de erro
+- helpers de caminho
+
+20.3. Comandos recomendados
+
+- SagB: Conectar
+- SagB: Desconectar
+- SagB: Abrir tarefa por ID
+- SagB: Copiar prompt da tarefa
+- SagB: Atualizar status
+- SagB: Enviar resumo
+- SagB: Configurar pasta do projeto
+- SagB: Reabrir painel da tarefa atual
+
+20.4. Regras de implementacao da extensao
+
+- nao salvar token no settings.json
+- nao depender de variavel em memoria para fluxo de openFolder
+- nao usar HTML inseguro na webview
+- nao assumir que a task sempre tera todos os arquivos iniciais
+- nao assumir que a pasta local sempre existe
+
+
+21. Persistencia local da extensao
+
+21.1. SecretStorage
+
+Guardar:
+
+- access token do SagB
+
+21.2. GlobalState
+
+Guardar:
+
+- vscodeSessionId
+- projectBindings
+- pendingLaunch
+- ultima task aberta
+
+21.3. WorkspaceState
+
+Guardar:
+
+- currentTask
+- currentRunId
+- ultimo status sincronizado
+
+21.4. Settings nao sensiveis
+
+Podem existir:
+
+- sagb.apiBaseUrl
+- sagb.debug
+- sagb.defaultProfileType
+
+
+22. Resolucao de projeto local
+
+22.1. Regra principal
+
+O backend descreve o projeto.
+A extensao resolve a maquina local.
+
+22.2. Ordem de resolucao
+
+1. localizar binding por `projectSlug` e `profileType`
+2. aplicar `relativeTargetPath`
+3. validar existencia da pasta
+4. se faltar binding, pedir selecao de pasta
+5. salvar binding
+
+22.3. Monorepo
+
+Se `relativeTargetPath` existir, ele aponta para o subdiretorio funcional do projeto dentro do repositorio.
+
+Exemplo:
+
+- root do projeto: D:\Repos\SagB
+- relativeTargetPath: apps\bridge
+
+Resultado:
+
+- workspaceRoot efetivo: D:\Repos\SagB\apps\bridge
+
+22.4. Perfis de ambiente
+
+Os bindings devem suportar ao menos:
+
+- desktop
+- wsl
+- devcontainer
+- remote-ssh
+
+22.5. Bootstrap quando a pasta nao existe
+
+Na V1, a extensao deve:
+
+- avisar que o projeto nao esta presente localmente
+- oferecer configurar pasta existente
+
+Na V2, pode oferecer:
+
+- clonar repositorio
+
+
+23. Git e estado do workspace
+
+23.1. Regras de leitura
+
+A extensao deve tentar detectar:
+
+- branch atual
+- dirty state
+- se a pasta e repositorio Git
+
+23.2. Campo esperado da task
+
+A task pode informar:
+
+- `expectedBranch`
+- `repositoryUrl`
+- `defaultBranch`
+
+23.3. Comportamento da V1
+
+- se a branch atual divergir da esperada, mostrar aviso
+- se o repositorio estiver sujo, mostrar aviso
+- se nao for repositorio Git, informar no painel
+- nao trocar branch automaticamente sem confirmacao
+
+23.4. O que ainda nao e obrigatorio na V1
+
+- checkout automatico
+- stash automatico
+- pull automatico
+- clone automatico
+
+
+24. Fluxo de reidratacao apos troca de workspace
+
+24.1. Problema
+
+`vscode.openFolder` pode reiniciar o host da extensao.
+
+24.2. Regra obrigatoria
+
+Antes de chamar `openFolder`, a extensao deve salvar `pendingLaunch`.
+
+24.3. Passos obrigatorios
+
+1. consumir payload da task
+2. resolver projeto local
+3. salvar `pendingLaunch`
+4. chamar `openFolder`
+5. no novo activate, ler `pendingLaunch`
+6. validar o workspace atual
+7. criar ou retomar run
+8. abrir arquivos
+9. mostrar painel
+10. limpar `pendingLaunch`
+
+24.4. Consequencia
+
+Nenhum fluxo critico pode depender apenas de memoria em runtime.
+
+
+25. Fluxos oficiais do sistema
+
+25.1. Fluxo A - Primeiro uso da extensao
+
+1. usuario instala a extensao
+2. usuario executa SagB: Conectar
+3. extensao pede token
+4. extensao valida o token
+5. extensao cria `vscodeSessionId`
+6. extensao registra developer session
+7. extensao exibe mensagem de pronto
+
+25.2. Fluxo B - Abrir task pelo SagB
+
+1. usuario abre a Sala dos Programadores
+2. usuario clica em Abrir no VS Code
+3. SagB cria launch token
+4. navegador chama URI do VS Code
+5. extensao recebe URI
+6. extensao consome launch token
+7. extensao resolve projeto local
+8. extensao persiste pendingLaunch
+9. extensao troca workspace se necessario
+10. extensao reidrata
+11. extensao cria ou retoma task run
+12. extensao abre arquivos iniciais
+13. extensao mostra painel
+
+25.3. Fluxo C - Abrir task por ID
+
+1. usuario executa SagB: Abrir tarefa por ID
+2. informa o ID
+3. extensao busca a task
+4. segue o mesmo fluxo de resolucao e reidratacao
+
+25.4. Fluxo D - Retomar task ja iniciada
+
+1. usuario abre a mesma task novamente
+2. backend identifica run ativa do mesmo usuario
+3. por padrao, a mesma run e retomada
+4. a extensao mostra no painel que a run foi retomada
+
+25.5. Fluxo E - Task bloqueada
+
+1. usuario atualiza status para blocked
+2. informa motivo
+3. backend grava bloqueio
+4. SagB mostra motivo do bloqueio
+
+25.6. Fluxo F - Conclusao da run
+
+1. usuario executa Enviar resumo
+2. informa resumo, observacoes e proximos passos
+3. extensao coleta diff de arquivos alterados se possivel
+4. backend grava report
+5. run vai para done
+6. task pode ser movida para done ou aguardar criterio do SagB
+
+25.7. Fluxo G - Reabertura da task
+
+1. task estava done
+2. usuario ou lider reabre a task no SagB
+3. nova abertura no VS Code cria nova run
+
+25.8. Fluxo H - Projeto nao mapeado
+
+1. extensao nao encontra binding
+2. pede pasta local
+3. salva binding
+4. continua fluxo
+
+25.9. Fluxo I - Link expirado
+
+1. extensao tenta consumir launch token expirado
+2. backend rejeita
+3. extensao mostra mensagem de expiracao
+4. usuario gera novo link no SagB
+
+25.10. Fluxo J - Clique duplo em Abrir no VS Code
+
+1. usuario aciona o botao duas vezes
+2. mesmo launch ou launches proximos chegam
+3. extensao evita multiplicacao de runs
+4. run ativa e retomada
+
+25.11. Fluxo K - Ambiente remoto ou perfil alternativo
+
+1. usuario escolhe perfil WSL, Dev Container ou Remote SSH
+2. extensao usa binding compativel com o perfil
+3. se a V1 nao suportar operacionalmente o perfil, a UX deve informar isso claramente
+
+
+26. Concorrencia e ownership
+
+26.1. Duas pessoas abrindo a mesma task
+
+O sistema deve suportar isso sem corromper historico.
+
+26.2. Politica recomendada da V1
+
+- a task pode ser aberta por mais de um usuario
+- cada usuario pode ter sua propria run
+- o SagB deve deixar visivel quem esta atuando na mesma task
+
+26.3. Ownership
+
+Se a task tiver `assignee`, a UI deve deixar isso visivel.
+
+Na V1, abrir a task nao precisa reatribuir ownership automaticamente.
+
+Na V2, pode haver politica de claim.
+
+26.4. Run ativa duplicada do mesmo usuario
+
+Regra:
+
+- retomar por padrao
+- nao criar run paralela sem intencao explicita
+
+
+27. Onboarding e experiencia de primeiro uso
+
+27.1. Objetivo
+
+Evitar que a primeira experiencia da extensao seja confusa.
+
+27.2. O que a extensao deve orientar
+
+- conectar o token
+- validar acesso
+- configurar binding do projeto
+- abrir primeira task
+
+27.3. Mensagens basicas necessarias
+
+- token invalido
+- projeto nao mapeado
+- pasta nao existe
+- link expirado
+- task aberta com sucesso
+- run retomada
+
+
+28. Webview da tarefa
+
+28.1. Conteudo minimo
+
+- titulo
+- projeto
+- modulo
+- etapa
+- descricao
+- criterios de aceite
+- status atual
+- run atual
+- branch atual
+- indicador de dirty workspace
+- caminho resolvido
+- arquivos iniciais
+- links de contexto
+- botoes:
+  - Copiar prompt
+  - Atualizar status
+  - Enviar resumo
+  - Configurar pasta do projeto
+
+28.2. Requisitos de seguranca
+
+- CSP obrigatoria
+- escape de HTML
+- sem interpolar texto cru em HTML sem sanitizacao
+
+28.3. Requisitos de UX
+
+- loading state
+- empty state
+- error state
+- confirmacao visual de acoes
+
+
+29. Modelo de report final
+
+29.1. Campos obrigatorios
+
+- summary
+
+29.2. Campos recomendados
+
+- notes
+- changedFiles
+- nextSteps
+
+29.3. Regras
+
+- nao gravar segredo nem dado sensivel sem necessidade
+- changedFiles pode ser parcial se Git nao estiver disponivel
+
+
+30. Seguranca
+
+30.1. Obrigatorio
+
+- HTTPS em producao
+- SecretStorage para token
+- launch token temporario
+- launch token sem segredo persistente
+- logs sem token
+- permissoes do usuario respeitadas
+
+30.2. Proibido
+
+- token em query string
+- token em settings.json
+- shell arbitrario vindo da API
+- automacao Git destrutiva sem confirmacao
+
+30.3. Webview
+
+- CSP
+- sanitizacao
+- menor superficie possivel
+
+30.4. Dados sensiveis
+
+Prompt-base, notas e anexos nao devem ser tratados como automaticamente publicos fora do contexto autorizado do SagB.
+
+
+31. Observabilidade e auditoria
+
+31.1. Output Channel
+
+Criar canal `SagB Bridge` no VS Code.
+
+31.2. Eventos relevantes
+
+- connect
+- token validado
+- token invalido
+- URI recebida
+- launch consumido
+- projeto resolvido
+- binding criado
+- run criada
+- run retomada
+- status enviado
+- report enviado
+- erro de API
+
+31.3. Auditoria no backend
+
+Registrar:
+
+- quem abriu a task
+- quando abriu
+- qual sessao
+- qual run foi criada ou retomada
+- quais status foram enviados
+- quando a run foi concluida
+
+
+32. Tratamento de erros
+
+32.1. Erros previstos
+
+- token ausente
+- token invalido
+- launch expirado
+- launch ja consumido
+- projeto nao mapeado
+- pasta inexistente
+- task inexistente
+- API indisponivel
+- repositorio sujo
+- branch divergente
+- Git indisponivel
+- perfil remoto nao suportado na versao atual
+
+32.2. Regra de UX
+
+Toda falha precisa vir com orientacao.
+
+Exemplos:
+
+- "Voce ainda nao conectou o SagB. Execute SagB: Conectar."
+- "Este projeto ainda nao foi vinculado a uma pasta local."
+- "O link de abertura expirou. Gere um novo link no SagB."
+- "A task foi aberta, mas a branch atual difere da branch esperada."
+
+
+33. Compatibilidade e versionamento
+
+33.1. Versao da extensao
+
+A extensao deve expor `extensionVersion` em chamadas relevantes.
+
+33.2. Versao do contrato
+
+Recomendado incluir cabecalho ou campo como:
+
+- X-SagB-Bridge-Version
+- X-SagB-Contract-Version
+
+33.3. Regra de compatibilidade
+
+Mudanca quebradora de payload deve exigir nova versao de contrato.
+
+33.4. Politica de falha
+
+Se a extensao detectar contrato incompativel, deve avisar de forma clara e parar o fluxo de forma segura.
+
+
+34. Metricas de valor
+
+Ainda que nao sejam obrigatorias na V1, o sistema deve ser desenhado para medir futuramente:
+
+- tempo entre abrir task e iniciar execucao
+- quantidade de tasks iniciadas pelo Bridge
+- quantidade de runs concluidas
+- quantidade de tasks bloqueadas
+- diferenca entre status manual e status vindo da execucao
+
+
+35. Testes
+
+35.1. Testes do backend
+
+- validar token
+- criar launch
+- consumir launch
+- expirar launch
+- criar run
+- retomar run
+- atualizar status
+- enviar report
+
+35.2. Testes da extensao
+
+- conectar com token valido
+- rejeitar token invalido
+- abrir task por ID
+- abrir task por deep link
+- reidratar apos openFolder
+- criar binding
+- retomar run
+- bloquear run
+- enviar report
+- lidar com launch expirado
+- lidar com pasta ausente
+
+35.3. Testes de UX
+
+- primeiro uso
+- clique duplo em Abrir no VS Code
+- task com varios arquivos
+- task com anexos
+- task em monorepo
+
+35.4. Testes manuais obrigatorios da V1
+
+1. abrir task pelo SagB
+2. abrir task por ID
+3. configurar binding inexistente
+4. simular launch expirado
+5. retomar run ativa
+6. bloquear e desbloquear run
+7. concluir com resumo
+
+
+36. Roadmap
+
+36.1. V1
+
+- autenticacao
+- task launch
+- binding local
+- pendingLaunch
+- abertura de workspace
+- abertura de arquivos iniciais
+- painel basico
+- task run
+- status
+- report final
+
+36.2. V2
+
+- autodeteccao de repositorio
+- leitura de README, AGENTS e contexto local
+- captura automatica de changed files
+- melhor suporte a monorepo
+- clone opcional
+- suporte melhor a ambientes remotos
+- bloqueios mais ricos
+
+36.3. V3
+
+- metricas
+- dashboards
+- templates de prompt
+- integracao mais rica com agentes
+- conhecimento tecnico consolidado
+
+
+37. Ordem de implementacao recomendada
+
+Sprint 1
+
+- contratos de API
+- autenticacao
+- abertura por ID
+- binding local
+- estrutura base da extensao
+
+Sprint 2
+
+- launch token
+- deep link
+- pendingLaunch
+- reidratacao
+- task run
+
+Sprint 3
+
+- painel da task
+- copy prompt
+- update status
+- report final
+- avisos de Git
+
+Sprint 4
+
+- Sala dos Programadores no SagB
+- lista de tasks
+- detalhes da task
+- botao Abrir no VS Code
+- historico tecnico
+
+Sprint 5
+
+- endurecimento
+- logs
+- testes integrados
+- correcoes de borda
+
+
+38. Pacote de entrega para o Cassio
+
+38.1. Regra
+
+Este projeto nao deve ser cadastrado no SagB como conversa bruta.
+
+Deve ser cadastrado como:
+
+- 1 briefing mestre
+- 4 cards de execucao principais
+
+38.2. Briefing mestre
+
+Deve conter:
+
+- problema
+- visao do produto
+- formula operacional
+- arquitetura
+- decisoes imutaveis
+- contratos
+- criterios de pronto
+
+38.3. Card 1 - Arquitetura e contratos
+
+Titulo:
+
+SagB Bridge | ET-01 | definir arquitetura e contratos da ponte SagB x VS Code
+
+Entregaveis:
+
+- documento aprovado
+- contratos de API
+- launch token definido
+- binding definido
+- regras de run definidas
+
+38.4. Card 2 - Extensao base
+
+Titulo:
+
+SagB Bridge | ET-02 | criar extensao VS Code base
+
+Entregaveis:
+
+- bootstrap
+- SecretStorage
+- comandos
+- abertura por ID
+- binding local
+- estrutura de painel
+
+38.5. Card 3 - Deep link e operacao
+
+Titulo:
+
+SagB Bridge | ET-03 | implementar deep link, pending launch e operacao de runs
+
+Entregaveis:
+
+- URI handler
+- consume launch
+- pendingLaunch
+- create or resume run
+- update status
+- submit report
+
+38.6. Card 4 - Backend e Sala dos Programadores
+
+Titulo:
+
+SagB Bridge | ET-04 | criar backend minimo e Sala dos Programadores
+
+Entregaveis:
+
+- projects
+- tasks
+- launches
+- task runs
+- details page
+- open in VS Code
+- historico tecnico
+
+
+39. Definition of Done da V1
+
+A V1 so pode ser considerada pronta quando:
+
+- a extensao autentica com o SagB
+- o SagB abre task no VS Code por deep link
+- a extensao abre task por ID
+- a extensao resolve projeto local por binding
+- a troca de workspace nao quebra o fluxo
+- a extensao cria ou retoma run corretamente
+- os arquivos iniciais abrem
+- o painel exibe informacoes basicas da task
+- o prompt-base pode ser copiado
+- status pode ser enviado
+- report final pode ser enviado
+- launch expirado e projeto nao mapeado possuem UX clara
+- a implementacao nao salva token em settings
+
+
+40. Riscos e mitigacoes
+
+Risco:
+perda de estado apos openFolder
+
+Mitigacao:
+pendingLaunch persistido
+
+Risco:
+path fixo por maquina
+
+Mitigacao:
+binding local por projectSlug
+
+Risco:
+duplicidade de run
+
+Mitigacao:
+retomada por padrao
+
+Risco:
+token exposto
+
+Mitigacao:
+SecretStorage + launchToken temporario
+
+Risco:
+repositorio sujo ou branch errada
+
+Mitigacao:
+aviso claro, sem automacao destrutiva
+
+Risco:
+ambiente remoto nao suportado
+
+Mitigacao:
+modelagem por profileType + UX explicita
+
+
+41. O que outro agente precisa fazer para implementar
+
+Se este documento for entregue para outro agente, a ordem recomendada de trabalho e:
+
+1. implementar contratos do backend SagB
+2. implementar bootstrap da extensao
+3. implementar autenticacao com SecretStorage
+4. implementar abertura por ID
+5. implementar bindings locais
+6. implementar launch token e URI handler
+7. implementar pendingLaunch e reidratacao
+8. implementar criacao e retomada de run
+9. implementar painel da task
+10. implementar status e report final
+11. implementar tela Sala dos Programadores no SagB
+12. validar fluxos reais ponta a ponta
+
+Regras para esse agente:
+
+- nao usar localPath vindo da API como verdade global
+- nao salvar token em settings
+- nao usar taskId puro na URI como desenho final
+- nao depender de variaveis em memoria apos openFolder
+- nao prometer controle visual do Codex na V1
+
+
+42. Formula final de decisao
+
+A forma correta, profissional e escalavel de integrar o SagB ao VS Code e:
+
+- SagB web como sala de comando
+- API do SagB como fonte de verdade
+- extensao `grupob.sagb-bridge` como ponte operacional
+- launch token temporario para deep link
+- project binding local para resolver caminhos
+- task runs para rastrear execucao
+- Codex operando dentro do VS Code, sem hack de automacao na V1
+
+Este documento define o padrao oficial do projeto SagB Bridge.
