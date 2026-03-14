@@ -19,7 +19,7 @@ Organizar e comunicar o portfolio de iniciativas estrategicas relacionadas a int
 
 - `components/NAGIView.tsx`
 - `App.tsx`
-- `supabase/migrations/20260313_nagi_radar_core.sql`
+- `supabase/migrations/20260313000102_nagi_radar_core.sql`
 
 ## Dependencias
 

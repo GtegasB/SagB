@@ -10,7 +10,7 @@ Conectar o SagB ao VS Code por meio de uma ponte operacional para tarefas tecnic
 
 - `ProgrammersRoomView.tsx` mostra o blueprint do modulo e cards de briefing.
 - `data/sagbBridgeBlueprint.ts` sustenta a tela.
-- Existe migration `20260313_sagb_bridge_core.sql` com tabelas `dev_projects`, `dev_tasks`, `dev_task_runs`, `dev_developer_sessions` e `dev_task_launches`.
+- Existe migration `20260313000103_sagb_bridge_core.sql` com tabelas `dev_projects`, `dev_tasks`, `dev_task_runs`, `dev_developer_sessions` e `dev_task_launches`.
 
 ### Inferencia
 
@@ -21,7 +21,7 @@ Conectar o SagB ao VS Code por meio de uma ponte operacional para tarefas tecnic
 - `components/ProgrammersRoomView.tsx`
 - `data/sagbBridgeBlueprint.ts`
 - `docs/Estrutura_SagB/SagB_Bridge_Extensao_VSCode`
-- `supabase/migrations/20260313_sagb_bridge_core.sql`
+- `supabase/migrations/20260313000103_sagb_bridge_core.sql`
 - `tests/configuration.test.mjs`
 
 ## Dependencias
@@ -75,4 +75,4 @@ Conectar o SagB ao VS Code por meio de uma ponte operacional para tarefas tecnic
 ## Arquivos de apoio recomendados
 
 - `docs/Estrutura_SagB/SagB_Bridge_Extensao_VSCode`
-- `supabase/migrations/20260313_sagb_bridge_core.sql`
+- `supabase/migrations/20260313000103_sagb_bridge_core.sql`

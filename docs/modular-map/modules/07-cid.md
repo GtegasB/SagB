@@ -18,7 +18,7 @@ Transformar documentos, audios e videos em ativos processaveis por meio de inges
 ## Arquivos principais
 
 - `components/CIDView.tsx`
-- `supabase/migrations/20260312_cid_center.sql`
+- `supabase/migrations/20260312000101_cid_center.sql`
 - `services/gemini.ts`
 - `netlify/functions/ai.mjs`
 - `docs/Estrutura_SagB/CID_Centro_de_Inteligencia_Documental`

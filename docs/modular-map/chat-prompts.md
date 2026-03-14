@@ -120,7 +120,7 @@ Quero trabalhar apenas no modulo CID do SagB.
 
 Escopo:
 - components/CIDView.tsx
-- supabase/migrations/20260312_cid_center.sql
+- supabase/migrations/20260312000101_cid_center.sql
 - services/gemini.ts quando usado para resumo ou consolidacao do CID
 - transcricao via ai proxy
 - docs/Estrutura_SagB/CID_Centro_de_Inteligencia_Documental
@@ -141,7 +141,7 @@ Quero trabalhar apenas no modulo Memoria Continua do SagB.
 Escopo:
 - components/ContinuousMemoryView.tsx
 - services/continuousMemory.ts
-- supabase/migrations/20260313_continuous_memory.sql
+- supabase/migrations/20260313000101_continuous_memory.sql
 - docs/WHISPER_LOCAL_TRANSCRICAO.md
 - tools/local_whisper_server.py
 
@@ -162,7 +162,7 @@ Escopo:
 - components/IntelligenceFlowView.tsx
 - services/intelligenceFlow.ts
 - utils/intelligenceFlow.ts
-- supabase/migrations/20260312_intelligence_flows_v2.sql
+- supabase/migrations/20260312000102_intelligence_flows_v2.sql
 - docs/FLUXO_INTELIGENCIA_V1_MODELAGEM.md
 
 Objetivo desta conversa:
@@ -181,7 +181,7 @@ Quero trabalhar apenas no modulo Sensor de Qualidade do SagB.
 Escopo:
 - components/QualitySensorView.tsx
 - services/qualitySensor.ts
-- supabase/migrations/20260311_agent_quality_events.sql
+- supabase/migrations/20260311000101_agent_quality_events.sql
 
 Objetivo desta conversa:
 - revisar deteccao heuristica, eventos, indicadores, custos estimados e uso operacional do sensor
@@ -237,7 +237,7 @@ Escopo:
 - components/ProgrammersRoomView.tsx
 - data/sagbBridgeBlueprint.ts
 - docs/Estrutura_SagB/SagB_Bridge_Extensao_VSCode
-- supabase/migrations/20260313_sagb_bridge_core.sql
+- supabase/migrations/20260313000103_sagb_bridge_core.sql
 - testes de configuracao ligados ao bridge
 
 Objetivo desta conversa:

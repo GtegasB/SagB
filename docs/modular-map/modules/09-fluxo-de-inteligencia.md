@@ -21,7 +21,7 @@ Registrar oficialmente os fluxos de execucao intelectual do sistema, com etapas,
 - `components/IntelligenceFlowView.tsx`
 - `services/intelligenceFlow.ts`
 - `utils/intelligenceFlow.ts`
-- `supabase/migrations/20260312_intelligence_flows_v2.sql`
+- `supabase/migrations/20260312000102_intelligence_flows_v2.sql`
 - `docs/FLUXO_INTELIGENCIA_V1_MODELAGEM.md`
 
 ## Dependencias

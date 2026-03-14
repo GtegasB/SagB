@@ -10,7 +10,7 @@ Mapear conexoes, sinais, sinergias e oportunidades do ecossistema, com forte ori
 
 - `RadarConnectionsView.tsx` consome um blueprint estatico de `data/radarConnectionsBlueprint.ts`.
 - Existe documento canonico em `docs/Estrutura_SagB/Radar_de_Conexoes`.
-- Existe migration `20260313_nagi_radar_core.sql` com schema de ecossistema, relacoes, sinais e distribuicao.
+- Existe migration `20260313000102_nagi_radar_core.sql` com schema de ecossistema, relacoes, sinais e distribuicao.
 
 ### Inferencia
 
@@ -21,7 +21,7 @@ Mapear conexoes, sinais, sinergias e oportunidades do ecossistema, com forte ori
 - `components/RadarConnectionsView.tsx`
 - `data/radarConnectionsBlueprint.ts`
 - `docs/Estrutura_SagB/Radar_de_Conexoes`
-- `supabase/migrations/20260313_nagi_radar_core.sql`
+- `supabase/migrations/20260313000102_nagi_radar_core.sql`
 
 ## Dependencias
 
@@ -71,4 +71,4 @@ Mapear conexoes, sinais, sinergias e oportunidades do ecossistema, com forte ori
 ## Arquivos de apoio recomendados
 
 - `components/NAGIView.tsx`
-- `supabase/migrations/20260313_nagi_radar_core.sql`
+- `supabase/migrations/20260313000102_nagi_radar_core.sql`

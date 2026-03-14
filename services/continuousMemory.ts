@@ -65,6 +65,7 @@ type IngestChunkParams = {
   audioBlob: Blob;
   mimeType?: string;
   labelLookup?: Record<string, string>;
+  skipSessionRollup?: boolean;
 };
 
 type RetryChunkParams = {
@@ -94,6 +95,10 @@ type ChunkSignalAnalysis = {
 
 const LOCAL_STORAGE_SESSION_KEY = 'sagb_supabase_session_v1';
 const LOCAL_STORE_PREFIX = 'sagb_continuous_memory_v1';
+const LOCAL_AUDIO_DB_NAME = 'sagb_continuous_memory_audio_v1';
+const LOCAL_AUDIO_DB_VERSION = 1;
+const LOCAL_AUDIO_STORE = 'audio_blobs';
+const LOCAL_INLINE_AUDIO_MAX_BYTES = 350_000;
 export const CONTINUOUS_MEMORY_BUCKET = 'continuous-memory';
 export const DEFAULT_CHUNK_MINUTES = 3;
 export const CONTINUOUS_MEMORY_LABEL_SEED: Array<Pick<ContinuousMemoryLabel, 'name' | 'description' | 'color'>> = [
@@ -206,7 +211,76 @@ const readLocalStore = (workspaceId?: string | null): ContinuousMemoryLocalStore
 
 const writeLocalStore = (workspaceId: string, store: ContinuousMemoryLocalStore) => {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(buildLocalStorageKey(workspaceId), JSON.stringify(store));
+  const key = buildLocalStorageKey(workspaceId);
+  try {
+    window.localStorage.setItem(key, JSON.stringify(store));
+  } catch (error: any) {
+    const compactedStore: ContinuousMemoryLocalStore = {
+      ...store,
+      files: store.files.map((file) => {
+        const payload = file.payload && typeof file.payload === 'object' ? { ...file.payload } : {};
+        if ('inlineBase64' in payload) {
+          delete payload.inlineBase64;
+          payload.storageWarning = String(payload.storageWarning || 'Audio inline removido para aliviar a cota local do navegador.');
+          payload.storageMode = payload.localBlobKey ? 'browser_indexeddb' : (payload.storageMode || 'browser_compacted');
+        }
+        return { ...file, payload };
+      })
+    };
+
+    window.localStorage.setItem(key, JSON.stringify(compactedStore));
+    if (error?.name) {
+      console.warn(`Local store compactado apos erro de quota (${error.name}).`);
+    }
+  }
+};
+
+const openLocalAudioDb = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
+  if (typeof indexedDB === 'undefined') {
+    reject(new Error('IndexedDB indisponivel neste navegador.'));
+    return;
+  }
+
+  const request = indexedDB.open(LOCAL_AUDIO_DB_NAME, LOCAL_AUDIO_DB_VERSION);
+  request.onupgradeneeded = () => {
+    const db = request.result;
+    if (!db.objectStoreNames.contains(LOCAL_AUDIO_STORE)) {
+      db.createObjectStore(LOCAL_AUDIO_STORE);
+    }
+  };
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error || new Error('Falha ao abrir IndexedDB do audio local.'));
+});
+
+const persistLocalAudioBlob = async (key: string, blob: Blob) => {
+  const db = await openLocalAudioDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(LOCAL_AUDIO_STORE, 'readwrite');
+    const store = tx.objectStore(LOCAL_AUDIO_STORE);
+    const request = store.put(blob, key);
+
+    request.onerror = () => reject(request.error || new Error('Falha ao salvar audio local no IndexedDB.'));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('Falha ao concluir persistencia do audio local.'));
+    tx.onabort = () => reject(tx.error || new Error('Persistencia do audio local abortada.'));
+  }).finally(() => db.close());
+};
+
+const readLocalAudioBlob = async (key: string): Promise<Blob | null> => {
+  const db = await openLocalAudioDb();
+  return new Promise<Blob | null>((resolve, reject) => {
+    const tx = db.transaction(LOCAL_AUDIO_STORE, 'readonly');
+    const store = tx.objectStore(LOCAL_AUDIO_STORE);
+    const request = store.get(key);
+
+    request.onsuccess = () => resolve((request.result as Blob | undefined) || null);
+    request.onerror = () => reject(request.error || new Error('Falha ao ler audio local do IndexedDB.'));
+    tx.oncomplete = () => db.close();
+    tx.onabort = () => {
+      db.close();
+      reject(tx.error || new Error('Leitura do audio local abortada.'));
+    };
+  });
 };
 
 const mutateLocalStore = <T,>(workspaceId: string, mutator: (store: ContinuousMemoryLocalStore) => T): T => {
@@ -219,6 +293,42 @@ const mutateLocalStore = <T,>(workspaceId: string, mutator: (store: ContinuousMe
 export const loadContinuousMemoryLocalState = (workspaceId?: string | null) => {
   const scopedWorkspaceId = resolveWorkspaceId(workspaceId);
   return readLocalStore(scopedWorkspaceId);
+};
+
+export const compactContinuousMemoryLocalAudio = async (workspaceId?: string | null) => {
+  if (typeof window === 'undefined') return false;
+
+  const scopedWorkspaceId = resolveWorkspaceId(workspaceId);
+  const store = readLocalStore(scopedWorkspaceId);
+  let mutated = false;
+
+  const migratedFiles = await Promise.all(store.files.map(async (file) => {
+    const payload = file.payload && typeof file.payload === 'object' ? { ...file.payload } : {};
+    const inlineBase64 = String(payload.inlineBase64 || '');
+    if (!inlineBase64) return file;
+
+    const localBlobKey = String(payload.localBlobKey || file.storagePath || `legacy/${file.id}`);
+    try {
+      await persistLocalAudioBlob(localBlobKey, base64ToBlob(inlineBase64, String(file.mimeType || 'audio/webm')));
+      delete payload.inlineBase64;
+      payload.localBlobKey = localBlobKey;
+      payload.storageMode = 'browser_indexeddb';
+      payload.migratedFromInline = true;
+      mutated = true;
+      return { ...file, payload };
+    } catch (error: any) {
+      payload.storageWarning = String(error?.message || 'Falha ao migrar audio local legado para IndexedDB.');
+      return { ...file, payload };
+    }
+  }));
+
+  if (!mutated) return false;
+
+  writeLocalStore(scopedWorkspaceId, {
+    ...store,
+    files: migratedFiles
+  });
+  return true;
 };
 
 const getAccessToken = () => {
@@ -587,6 +697,16 @@ const loadBase64FromFileRecord = async (mode: ContinuousMemoryPersistenceMode, f
   const mimeType = String(file.mimeType || 'audio/webm');
 
   if (mode === 'local') {
+    const localBlobKey = String(file.payload?.localBlobKey || '');
+    if (localBlobKey) {
+      const localBlob = await readLocalAudioBlob(localBlobKey);
+      if (localBlob) {
+        return {
+          base64Audio: await blobToBase64(localBlob),
+          mimeType: localBlob.type || mimeType
+        };
+      }
+    }
     const inlineBase64 = String(file.payload?.inlineBase64 || '');
     if (!inlineBase64) throw new Error('Audio local nao disponivel para reprocessamento.');
     return { base64Audio: inlineBase64, mimeType };
@@ -634,6 +754,7 @@ const persistSessionRollup = async (
 export const ingestContinuousMemoryChunk = async (params: IngestChunkParams) => {
   const workspaceId = resolveWorkspaceId(params.workspaceId);
   const now = new Date();
+  const processorName = String(import.meta.env.VITE_TRANSCRIBE_PROVIDER || 'gemini_or_local_whisper');
   const mimeType = params.mimeType || params.audioBlob.type || 'audio/webm';
   const durationSeconds = Math.max(1, Math.round((params.endedAt.getTime() - params.startedAt.getTime()) / 1000));
   const base64Audio = await blobToBase64(params.audioBlob);
@@ -705,6 +826,27 @@ export const ingestContinuousMemoryChunk = async (params: IngestChunkParams) => 
       });
     }
 
+    let localFilePayload: Record<string, any> | undefined;
+    if (params.mode === 'local') {
+      try {
+        await persistLocalAudioBlob(storagePath, params.audioBlob);
+        localFilePayload = { localBlobKey: storagePath, storageMode: 'browser_indexeddb' };
+      } catch (storageError: any) {
+        if (params.audioBlob.size <= LOCAL_INLINE_AUDIO_MAX_BYTES) {
+          localFilePayload = {
+            inlineBase64: base64Audio,
+            storageMode: 'browser_local_inline',
+            storageWarning: String(storageError?.message || 'IndexedDB indisponivel; usando fallback inline.')
+          };
+        } else {
+          throw new Error(
+            `Armazenamento local insuficiente para o audio deste bloco (${Math.round(params.audioBlob.size / 1024)} KB). ` +
+            'Aplique o schema oficial no Supabase ou reduza o tempo do chunk.'
+          );
+        }
+      }
+    }
+
     fileRecord = await saveFile(params.mode, workspaceId, {
       id: makeId(),
       workspaceId,
@@ -719,7 +861,7 @@ export const ingestContinuousMemoryChunk = async (params: IngestChunkParams) => 
       durationSeconds,
       createdAt: new Date(),
       payload: params.mode === 'local'
-        ? { inlineBase64: base64Audio, storageMode: 'browser_local' }
+        ? localFilePayload
         : { storageClass: 'cold' }
     });
 
@@ -755,7 +897,7 @@ export const ingestContinuousMemoryChunk = async (params: IngestChunkParams) => 
     jobType: 'transcribe_chunk',
     jobStatus: 'running',
     processorType: 'speech_to_text',
-    processorName: String(import.meta.env.VITE_TRANSCRIBE_PROVIDER || 'gemini_or_local_whisper'),
+    processorName,
     attemptCount: 1,
     startedAt: new Date(),
     createdAt: new Date(),
@@ -771,8 +913,9 @@ export const ingestContinuousMemoryChunk = async (params: IngestChunkParams) => 
       updatedAt: new Date()
     });
 
-    const transcriptText = String(await transcribeAudio(base64Audio, mimeType) || '').trim();
+    const transcriptText = String(await transcribeAudio(base64Audio, mimeType, fileRecord.storagePath) || '').trim();
     const signals = inferSignals(transcriptText);
+    const transcriptWarning = transcriptText ? null : `Transcricao vazia via ${processorName}. Verifique o audio captado e o Whisper local.`;
 
     await updateChunk(params.mode, workspaceId, chunk.id, {
       status: 'completed',
@@ -783,22 +926,24 @@ export const ingestContinuousMemoryChunk = async (params: IngestChunkParams) => 
       noiseScore: signals.noiseScore,
       importanceFlag: signals.importanceFlag,
       anchorFlag: signals.anchorFlag,
-      errorMessage: transcriptText ? null : 'Transcricao vazia.',
+      errorMessage: transcriptWarning,
       updatedAt: new Date()
     });
 
-    await saveOutput(params.mode, workspaceId, {
-      id: makeId(),
-      workspaceId,
-      sessionId: params.session.id,
-      chunkId: chunk.id,
-      outputType: 'transcript',
-      content: transcriptText,
-      version: 1,
-      generatedBy: 'continuous_memory.v1.transcribe',
-      createdAt: new Date(),
-      payload: { detectedLanguage: 'pt-BR', storageTemperature: 'warm' }
-    });
+    if (transcriptText) {
+      await saveOutput(params.mode, workspaceId, {
+        id: makeId(),
+        workspaceId,
+        sessionId: params.session.id,
+        chunkId: chunk.id,
+        outputType: 'transcript',
+        content: transcriptText,
+        version: 1,
+        generatedBy: 'continuous_memory.v1.transcribe',
+        createdAt: new Date(),
+        payload: { detectedLanguage: 'pt-BR', storageTemperature: 'warm' }
+      });
+    }
 
     if (signals.labels.length > 0) {
       await saveOutput(params.mode, workspaceId, {
@@ -883,10 +1028,12 @@ export const ingestContinuousMemoryChunk = async (params: IngestChunkParams) => 
       finishedAt: new Date(),
       latencyMs: Date.now() - transcriptionJobStartedAt,
       updatedAt: new Date(),
-      statusNote: transcriptText ? 'Transcricao concluida.' : 'Chunk finalizado com transcricao vazia.'
+      statusNote: transcriptText ? 'Transcricao concluida.' : (transcriptWarning || 'Chunk finalizado com transcricao vazia.')
     });
 
-    const sessionPatch = await persistSessionRollup(params.mode, workspaceId, params.session, durationSeconds);
+    const sessionPatch = params.skipSessionRollup
+      ? null
+      : await persistSessionRollup(params.mode, workspaceId, params.session, durationSeconds);
     return { chunkId: chunk.id, fileId: fileRecord.id, sessionPatch };
   } catch (error: any) {
     const message = String(error?.message || 'Falha ao transcrever chunk.');
@@ -903,7 +1050,9 @@ export const ingestContinuousMemoryChunk = async (params: IngestChunkParams) => 
       errorMessage: message,
       updatedAt: new Date()
     });
-    await persistSessionRollup(params.mode, workspaceId, params.session, durationSeconds);
+    if (!params.skipSessionRollup) {
+      await persistSessionRollup(params.mode, workspaceId, params.session, durationSeconds);
+    }
     throw error;
   }
 };
@@ -911,6 +1060,7 @@ export const ingestContinuousMemoryChunk = async (params: IngestChunkParams) => 
 export const retryContinuousMemoryChunk = async (params: RetryChunkParams) => {
   const workspaceId = resolveWorkspaceId(params.workspaceId);
   const retryStartedAt = Date.now();
+  const processorName = String(import.meta.env.VITE_TRANSCRIBE_PROVIDER || 'gemini_or_local_whisper');
   const transcriptionJob = await saveJob(params.mode, workspaceId, createJobRecord({
     workspaceId,
     sessionId: params.session.id,
@@ -918,7 +1068,7 @@ export const retryContinuousMemoryChunk = async (params: RetryChunkParams) => {
     jobType: 'retry_transcribe_chunk',
     jobStatus: 'running',
     processorType: 'speech_to_text',
-    processorName: String(import.meta.env.VITE_TRANSCRIBE_PROVIDER || 'gemini_or_local_whisper'),
+    processorName,
     attemptCount: 1,
     startedAt: new Date(),
     createdAt: new Date(),
@@ -936,8 +1086,9 @@ export const retryContinuousMemoryChunk = async (params: RetryChunkParams) => {
     });
 
     const { base64Audio, mimeType } = await loadBase64FromFileRecord(params.mode, params.file);
-    const transcriptText = String(await transcribeAudio(base64Audio, mimeType) || '').trim();
+    const transcriptText = String(await transcribeAudio(base64Audio, mimeType, params.file.storagePath) || '').trim();
     const signals = inferSignals(transcriptText);
+    const transcriptWarning = transcriptText ? null : `Transcricao vazia via ${processorName} apos retry. Verifique o audio captado e o Whisper local.`;
 
     await updateChunk(params.mode, workspaceId, params.chunk.id, {
       status: 'completed',
@@ -948,29 +1099,31 @@ export const retryContinuousMemoryChunk = async (params: RetryChunkParams) => {
       noiseScore: signals.noiseScore,
       importanceFlag: signals.importanceFlag,
       anchorFlag: signals.anchorFlag,
-      errorMessage: transcriptText ? null : 'Transcricao vazia apos retry.',
+      errorMessage: transcriptWarning,
       updatedAt: new Date()
     });
 
-    await saveOutput(params.mode, workspaceId, {
-      id: makeId(),
-      workspaceId,
-      sessionId: params.session.id,
-      chunkId: params.chunk.id,
-      outputType: 'transcript',
-      content: transcriptText,
-      version: Math.max(1, Number(params.currentTranscriptVersion || 1) + 1),
-      generatedBy: 'continuous_memory.v1.retry',
-      createdAt: new Date(),
-      payload: { retried: true, storageTemperature: 'warm' }
-    });
+    if (transcriptText) {
+      await saveOutput(params.mode, workspaceId, {
+        id: makeId(),
+        workspaceId,
+        sessionId: params.session.id,
+        chunkId: params.chunk.id,
+        outputType: 'transcript',
+        content: transcriptText,
+        version: Math.max(1, Number(params.currentTranscriptVersion || 1) + 1),
+        generatedBy: 'continuous_memory.v1.retry',
+        createdAt: new Date(),
+        payload: { retried: true, storageTemperature: 'warm' }
+      });
+    }
 
     await updateJob(params.mode, workspaceId, transcriptionJob.id, {
       jobStatus: transcriptText ? 'completed' : 'completed_warning',
       finishedAt: new Date(),
       latencyMs: Date.now() - retryStartedAt,
       updatedAt: new Date(),
-      statusNote: transcriptText ? 'Retry concluido.' : 'Retry concluiu com transcricao vazia.'
+      statusNote: transcriptText ? 'Retry concluido.' : (transcriptWarning || 'Retry concluiu com transcricao vazia.')
     });
   } catch (error: any) {
     const message = String(error?.message || 'Falha ao reprocessar chunk.');

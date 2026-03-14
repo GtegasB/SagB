@@ -213,7 +213,7 @@ do $$
 declare
   tbl text;
 begin
-  foreach tbl in array [
+  foreach tbl in array array[
     'nagi_ecosystem_entities',
     'nagi_entity_relations',
     'nagi_external_signals',

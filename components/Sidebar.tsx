@@ -84,6 +84,12 @@ const Sidebar: React.FC<SidebarProps> = ({
       icon: 'M4 7h6m4 0h6M4 12h4m6 0h6M4 17h8m2 0h6'
     },
     {
+      id: 'missions',
+      label: 'Missões',
+      subtitle: 'Orquestração nativa',
+      icon: 'M4 6h16M4 12h10M4 18h7m7-8 5 5m0-5-5 5'
+    },
+    {
       id: 'nagi',
       label: 'NAGI',
       subtitle: 'Núcleo Avançado de Gestão de Inteligência',
@@ -145,12 +151,12 @@ const Sidebar: React.FC<SidebarProps> = ({
               key={item.id}
               onClick={() => setActiveTab(item.id)}
               className={`
-                group flex items-center w-full px-3 py-2.5 rounded-lg transition-all duration-200
-                ${isActive ? 'bg-gray-50 text-gray-900' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'}
+                group flex items-center w-full px-3 py-2.5 rounded-xl transition-all duration-200
+                ${isActive ? 'bg-cyan-50 text-slate-900 border border-cyan-100 shadow-sm' : 'text-gray-500 hover:bg-slate-50 hover:text-gray-800 border border-transparent'}
               `}
             >
               <svg
-                className={`w-5 h-5 mr-3 shrink-0 transition-colors duration-200 stroke-[1.5] ${isActive ? 'text-gray-900' : 'text-gray-400 group-hover:text-gray-600'}`}
+                className={`w-5 h-5 mr-3 shrink-0 transition-colors duration-200 stroke-[1.5] ${isActive ? 'text-cyan-700' : 'text-gray-400 group-hover:text-gray-600'}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -163,14 +169,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                   {item.label}
                 </span>
                 {item.subtitle && (
-                  <span className={`block text-[9px] uppercase tracking-[0.22em] ${isActive ? 'text-gray-500' : 'text-gray-300 group-hover:text-gray-400'}`}>
+                  <span className={`block text-[9px] uppercase tracking-[0.22em] ${isActive ? 'text-cyan-700/70' : 'text-gray-300 group-hover:text-gray-400'}`}>
                     {item.subtitle}
                   </span>
                 )}
               </span>
 
               {isActive && (
-                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-gray-900"></span>
+                <span className="ml-auto w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_0_4px_rgba(34,211,238,0.16)]"></span>
               )}
             </button>
           );

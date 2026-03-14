@@ -19,7 +19,7 @@ Capturar sessoes de memoria viva, transcrever, classificar, extrair itens e mant
 
 - `components/ContinuousMemoryView.tsx`
 - `services/continuousMemory.ts`
-- `supabase/migrations/20260313_continuous_memory.sql`
+- `supabase/migrations/20260313000101_continuous_memory.sql`
 - `docs/WHISPER_LOCAL_TRANSCRICAO.md`
 - `tools/local_whisper_server.py`
 

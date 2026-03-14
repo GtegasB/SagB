@@ -4,7 +4,8 @@ import { BackIcon, CloudUploadIcon, SearchIcon } from './Icon';
 import { CidAsset, CidAssetFile, CidChunk, CidOutput, CidProcessingJob, UserProfile, Venture } from '../types';
 import { addDoc, collection, db, doc, onSnapshot, orderBy, query, updateDoc, where } from '../services/supabase';
 import { callAiProxy } from '../services/aiProxy';
-import { transcribeAudio } from '../services/gemini';
+import { transcribeMediaBlob } from '../services/gemini';
+import { buildCidStoragePath, uploadBlobToSupabaseStorage } from '../services/storage';
 
 type CidTab = 'upload' | 'library' | 'processing' | 'intelligence';
 type Material = 'pdf' | 'doc' | 'docx' | 'txt' | 'spreadsheet' | 'image' | 'audio' | 'video' | 'other';
@@ -41,6 +42,8 @@ const EXTRACTED_OUTPUT_PREVIEW_CHARS = 12000;
 const MAX_INTELLIGENCE_CHUNK_ROWS = 240;
 const MAX_INTELLIGENCE_OUTPUT_ROWS = 120;
 const MAX_INTELLIGENCE_ROW_CHARS = 2200;
+const CID_STORAGE_LIMIT_BYTES = 2147483648;
+const INLINE_PREVIEW_MAX_BYTES = 2000000;
 
 const toDate = (value: any): Date => {
   if (value instanceof Date) return value;
@@ -49,6 +52,28 @@ const toDate = (value: any): Date => {
 };
 
 const fmt = (value: any) => toDate(value).toLocaleString('pt-BR');
+const formatBytes = (value?: number | null) => {
+  if (value === undefined || value === null || !Number.isFinite(value)) return '-';
+  if (value < 1024) return `${value} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = value / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toLocaleString('pt-BR', { maximumFractionDigits: size >= 100 ? 0 : 1 })} ${units[unitIndex]}`;
+};
+
+const resolveAssetSizeBytes = (asset?: CidAsset | null, files: CidAssetFile[] = []) => {
+  const fileSize = files.find((file) => Number(file.sizeBytes || 0) > 0)?.sizeBytes;
+  if (fileSize !== undefined && fileSize !== null) return Number(fileSize);
+  const payloadSize = asset?.payload?.originalSizeBytes;
+  if (payloadSize !== undefined && payloadSize !== null && Number.isFinite(Number(payloadSize))) {
+    return Number(payloadSize);
+  }
+  return null;
+};
 const CID_LABELS: Record<string, string> = {
   assets: 'Ativos',
   jobs: 'Processos',
@@ -237,7 +262,6 @@ const readAsDataUrl = (file: File): Promise<string> => new Promise((resolve, rej
   reader.readAsDataURL(file);
 });
 
-const dataUrlBase64 = (dataUrl: string) => String(dataUrl || '').split(',')[1] || '';
 const isUuidLike = (value: any) => typeof value === 'string' && UUID_LIKE_RE.test(value.trim());
 
 const isTextLike = (file: File, materialType: Material) => {
@@ -350,6 +374,15 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
 
   const selectedAsset = useMemo(() => assets.find((a) => a.id === selectedAssetId) || null, [assets, selectedAssetId]);
   const selectedAssetFiles = useMemo(() => assetFiles.filter((x) => x.assetId === selectedAssetId), [assetFiles, selectedAssetId]);
+  const assetFileMap = useMemo(() => {
+    const map = new Map<string, CidAssetFile[]>();
+    assetFiles.forEach((file) => {
+      const current = map.get(file.assetId) || [];
+      current.push(file);
+      map.set(file.assetId, current);
+    });
+    return map;
+  }, [assetFiles]);
   const selectedChunks = useMemo(
     () => chunks.filter((x) => x.assetId === selectedAssetId).sort((a, b) => (a.chunkIndex || 0) - (b.chunkIndex || 0)),
     [chunks, selectedAssetId]
@@ -384,6 +417,18 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
   const selectedProcessingRow = useMemo(
     () => processingRows.find((row) => (row.asset?.id || row.job.assetId) === selectedAssetId) || null,
     [processingRows, selectedAssetId]
+  );
+  const selectedAssetSizeBytes = useMemo(
+    () => resolveAssetSizeBytes(selectedAsset, selectedAssetFiles),
+    [selectedAsset, selectedAssetFiles]
+  );
+  const selectedFilesTotalBytes = useMemo(
+    () => selectedFiles.reduce((sum, file) => sum + Number(file.size || 0), 0),
+    [selectedFiles]
+  );
+  const hasFilesAboveOfficialLimit = useMemo(
+    () => selectedFiles.some((file) => Number(file.size || 0) > CID_STORAGE_LIMIT_BYTES),
+    [selectedFiles]
   );
 
   useEffect(() => {
@@ -504,8 +549,8 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
     const title = selectedFiles.length === 1 ? (form.title.trim() || file.name) : file.name;
     const ownerId = resolveOwnerUserId();
     const safeVentureId = isUuidLike(form.ventureId) ? form.ventureId : null;
-    const needsInlinePreview = file.size <= 2_000_000;
-    const needsDataUrl = needsInlinePreview || materialType === 'audio' || materialType === 'video';
+    const needsInlinePreview = file.size <= INLINE_PREVIEW_MAX_BYTES && (materialType === 'image' || materialType === 'pdf');
+    const needsDataUrl = needsInlinePreview;
     const dataUrl = needsDataUrl ? await readAsDataUrl(file) : '';
 
     const assetRef = await addDoc(collection(db, 'cid_assets'), {
@@ -537,23 +582,53 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
     });
 
     const assetId = assetRef.id;
-
-    await addDoc(collection(db, 'cid_asset_files'), {
-      assetId,
+    const storagePath = buildCidStoragePath({
       workspaceId: scopedWorkspaceId,
-      bucket: 'cid-assets',
-      path: `inline://${assetId}/${encodeURIComponent(file.name)}`,
-      filename: file.name,
-      mimeType: file.type,
-      sizeBytes: file.size,
-      status: 'stored',
+      assetId,
       createdAt,
-      updatedAt: createdAt,
-      payload: {
-        inlinePreviewDataUrl: needsInlinePreview ? dataUrl : null,
-        storageMode: needsInlinePreview ? 'inline_preview' : 'metadata_only'
-      }
+      fileName: file.name
     });
+
+    try {
+      await uploadBlobToSupabaseStorage({
+        bucket: 'cid-assets',
+        path: storagePath,
+        blob: file,
+        mimeType: file.type || 'application/octet-stream'
+      });
+
+      await addDoc(collection(db, 'cid_asset_files'), {
+        assetId,
+        workspaceId: scopedWorkspaceId,
+        bucket: 'cid-assets',
+        path: storagePath,
+        filename: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+        status: 'stored',
+        createdAt,
+        updatedAt: createdAt,
+        payload: {
+          inlinePreviewDataUrl: needsInlinePreview ? dataUrl : null,
+          storageMode: needsInlinePreview ? 'supabase_storage_with_inline_preview' : 'supabase_storage',
+          uploadedAt: createdAt.toISOString()
+        }
+      });
+    } catch (error: any) {
+      const uploadMessage = String(error?.message || 'Falha ao enviar arquivo original para o storage do CID.');
+      await safeUpdate('cid_assets', assetId, {
+        status: 'error',
+        failedAt: new Date(),
+        updatedAt: new Date(),
+        payload: {
+          originalFilename: file.name,
+          originalSizeBytes: file.size,
+          originalMimeType: file.type,
+          processingError: uploadMessage
+        }
+      });
+      throw new Error(uploadMessage);
+    }
 
     if (batchId) {
       await addDoc(collection(db, 'cid_batch_items'), {
@@ -602,10 +677,12 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
       const extractedText = sanitizeUtf16Text(await readExtractedText(file, materialType));
       let transcription = '';
 
-      if (canTranscribe(desiredAction) && (materialType === 'audio' || materialType === 'video')) {
+      const transcriptionRequested = canTranscribe(desiredAction) && (materialType === 'audio' || materialType === 'video');
+
+      if (transcriptionRequested) {
         await safeUpdate('cid_processing_jobs', jobId, { status: 'transcribing', updatedAt: new Date() });
         await safeUpdate('cid_assets', assetId, { status: 'transcribing', updatedAt: new Date() });
-        transcription = sanitizeUtf16Text(await transcribeAudio(dataUrlBase64(dataUrl), file.type || 'audio/webm'));
+        transcription = sanitizeUtf16Text(await transcribeMediaBlob(file, file.type || 'audio/webm', file.name));
       }
 
       const sourceText = sanitizeUtf16Text(String(transcription || extractedText || '').trim());
@@ -747,8 +824,12 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
         });
       }
 
-      const finalStatus = canSummarize(desiredAction) && !sourceText ? 'completed_warning' : 'completed';
-      const finalMessage = canSummarize(desiredAction) && !sourceText ? 'Sem texto base para resumo automático nesta V1.' : null;
+      const warnings: string[] = [];
+      if (transcriptionRequested && !transcription) warnings.push('Transcricao vazia ou indisponivel nesta tentativa.');
+      if (canSummarize(desiredAction) && !sourceText) warnings.push('Sem texto base para resumo automatico nesta V1.');
+
+      const finalStatus = warnings.length > 0 ? 'completed_warning' : 'completed';
+      const finalMessage = warnings.length > 0 ? warnings.join(' ') : null;
 
       await safeUpdate('cid_processing_jobs', jobId, {
         status: finalStatus,
@@ -765,7 +846,13 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
         completedParts: totalParts,
         pendingParts: 0,
         completedAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        payload: warnings.length > 0 ? {
+          originalFilename: file.name,
+          originalSizeBytes: file.size,
+          originalMimeType: file.type,
+          processingWarning: finalMessage
+        } : undefined
       });
 
       return { ok: true as const };
@@ -952,8 +1039,33 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
                     accept=".pdf,.doc,.docx,.txt,.md,.json,.xml,.csv,.xls,.xlsx,image/*,audio/*,video/*"
                   />
                   {!!selectedFiles.length && (
-                    <p className="text-xs text-gray-500 mt-2">{selectedFiles.length} arquivo(s): {selectedFiles.map((f) => f.name).join(', ')}</p>
+                    <div className="mt-2 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                      <p className="text-xs text-gray-600 font-semibold">
+                        {selectedFiles.length} arquivo(s) selecionado(s) • total {formatBytes(selectedFilesTotalBytes)}
+                      </p>
+                      <div className="mt-2 space-y-1">
+                        {selectedFiles.map((file) => (
+                          <div key={`${file.name}-${file.size}-${file.lastModified}`} className="flex items-center justify-between gap-3 text-[11px] text-gray-600">
+                            <span className="truncate">{file.name}</span>
+                            <span className="shrink-0 font-semibold text-gray-800">{formatBytes(file.size)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
+                  <div className="mt-2 space-y-1">
+                    <p className="text-[11px] text-gray-500">
+                      Limite oficial atual do bucket `cid-assets`: <span className="font-semibold text-gray-700">{formatBytes(CID_STORAGE_LIMIT_BYTES)}</span>.
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Preview inline so vai para imagem/PDF leves ate <span className="font-semibold text-gray-700">{formatBytes(INLINE_PREVIEW_MAX_BYTES)}</span>.
+                    </p>
+                    {hasFilesAboveOfficialLimit && (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                        Ha arquivo acima do limite oficial atual do storage do CID. Nessa V1, isso nao fica suportado de forma oficial no bucket.
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div>
@@ -1027,7 +1139,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
               </div>
 
               <div className="pt-2 flex items-center justify-between gap-3">
-                <p className="text-xs text-gray-500">ET 01: upload, fragmentação em partes de ate {CID_CHUNK_MAX_CHARS.toLocaleString('pt-BR')} caracteres, transcrição, resumo e status rastreável.</p>
+                <p className="text-xs text-gray-500">ET 01: upload, fragmentação em partes de ate {CID_CHUNK_MAX_CHARS.toLocaleString('pt-BR')} caracteres, transcrição, resumo e status rastreável. Limite oficial do bucket: {formatBytes(CID_STORAGE_LIMIT_BYTES)}.</p>
                 <button type="submit" disabled={isSubmitting} className="px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-bold hover:bg-gray-800 disabled:opacity-60">
                   {isSubmitting ? 'Processando...' : 'Enviar para CID'}
                 </button>
@@ -1059,7 +1171,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
                     className={`w-full text-left rounded-xl border px-3 py-2 transition-colors ${selectedAssetId === asset.id ? 'border-gray-300 bg-gray-50' : 'border-gray-100 hover:border-gray-200'}`}
                   >
                     <p className="text-sm font-semibold text-gray-900 truncate">{asset.title}</p>
-                    <p className="text-[11px] text-gray-500 mt-1">{toLabel(asset.materialType)} • {fmt(asset.createdAt)}</p>
+                    <p className="text-[11px] text-gray-500 mt-1">{toLabel(asset.materialType)} • {fmt(asset.createdAt)} • {formatBytes(resolveAssetSizeBytes(asset, assetFileMap.get(asset.id) || []))}</p>
                     <div className="mt-2 flex items-center justify-between">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${statusBadge(asset.status)}`}>{toLabel(asset.status)}</span>
                       <span className="text-[10px] text-gray-500 font-bold">{asset.progressPct || 0}%</span>
@@ -1076,18 +1188,49 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-bold text-gray-900">{selectedAsset.title}</h3>
-                      <p className="text-xs text-gray-500">{toLabel(selectedAsset.materialType)} • {fmt(selectedAsset.createdAt)}</p>
+                      <p className="text-xs text-gray-500">{toLabel(selectedAsset.materialType)} • {fmt(selectedAsset.createdAt)} • {formatBytes(selectedAssetSizeBytes)}</p>
                     </div>
                     <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold ${statusBadge(selectedAsset.status)}`}>{toLabel(selectedAsset.status)}</span>
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                     <div className="rounded-xl border border-gray-100 p-2"><span className="text-gray-400">Área</span><p className="font-semibold text-gray-800">{selectedAsset.area || '-'}</p></div>
                     <div className="rounded-xl border border-gray-100 p-2"><span className="text-gray-400">Projeto</span><p className="font-semibold text-gray-800">{selectedAsset.project || '-'}</p></div>
                     <div className="rounded-xl border border-gray-100 p-2"><span className="text-gray-400">Idioma</span><p className="font-semibold text-gray-800">{selectedAsset.language || '-'}</p></div>
                     <div className="rounded-xl border border-gray-100 p-2"><span className="text-gray-400">Ação</span><p className="font-semibold text-gray-800">{toLabel(selectedAsset.desiredAction)}</p></div>
+                    <div className="rounded-xl border border-gray-100 p-2"><span className="text-gray-400">Tamanho</span><p className="font-semibold text-gray-800">{formatBytes(selectedAssetSizeBytes)}</p></div>
                   </div>
+                  {!!selectedProcessingRow?.job.errorMessage && (
+                    <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                      <strong className="font-black uppercase tracking-[0.16em] text-[10px]">Aviso de processamento</strong>
+                      <p className="mt-1">{selectedProcessingRow.job.errorMessage}</p>
+                    </div>
+                  )}
                   <div className="rounded-xl border border-gray-100 p-3">
                     <p className="text-[11px] uppercase tracking-widest font-black text-gray-500 mb-2">Original</p>
+                    <div className="mb-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                      <div className="rounded-lg border border-gray-100 px-2.5 py-2">
+                        <span className="text-gray-400">Arquivo</span>
+                        <p className="font-semibold text-gray-800 truncate">{inlineFile?.filename || String(selectedAsset.payload?.originalFilename || '-')}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-100 px-2.5 py-2">
+                        <span className="text-gray-400">Tamanho</span>
+                        <p className="font-semibold text-gray-800">{formatBytes(selectedAssetSizeBytes)}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-100 px-2.5 py-2">
+                        <span className="text-gray-400">Mime type</span>
+                        <p className="font-semibold text-gray-800 truncate">{inlineFile?.mimeType || String(selectedAsset.payload?.originalMimeType || '-')}</p>
+                      </div>
+                    </div>
+                    <div className="mb-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-lg border border-gray-100 px-2.5 py-2">
+                        <span className="text-gray-400">Storage</span>
+                        <p className="font-semibold text-gray-800">{String(inlineFile?.payload?.storageMode || '-')}</p>
+                      </div>
+                      <div className="rounded-lg border border-gray-100 px-2.5 py-2">
+                        <span className="text-gray-400">Path</span>
+                        <p className="font-semibold text-gray-800 truncate">{inlineFile?.path || '-'}</p>
+                      </div>
+                    </div>
                     {inlinePreviewDataUrl && isImagePreview && <img src={inlinePreviewDataUrl} alt={inlineFile?.filename || 'preview'} className="max-h-72 rounded-lg border border-gray-100" />}
                     {inlinePreviewDataUrl && isPdfPreview && <iframe src={inlinePreviewDataUrl} className="w-full h-72 rounded-lg border border-gray-100" title="pdf-preview" />}
                     {!inlinePreviewDataUrl && <p className="text-xs text-gray-500">Preview inline indisponível para este arquivo nesta V1.</p>}
@@ -1123,6 +1266,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
                     <th className="py-2 pr-3">Status</th>
                     <th className="py-2 pr-3">Progresso</th>
                     <th className="py-2 pr-3">Partes</th>
+                    <th className="py-2 pr-3">Tamanho</th>
                     <th className="py-2 pr-3">Criado</th>
                     <th className="py-2 pr-3">Início</th>
                     <th className="py-2 pr-3">Conclusão</th>
@@ -1140,6 +1284,7 @@ const CIDView: React.FC<CIDViewProps> = ({ workspaceId, ownerUserId, userProfile
                       <td className="py-2 pr-3"><span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${statusBadge(job.status)}`}>{toLabel(job.status)}</span></td>
                       <td className="py-2 pr-3 w-[190px]"><div className="w-full h-2 rounded-full bg-gray-100 overflow-hidden"><div className="h-full bg-gray-800" style={{ width: `${Math.max(0, Math.min(100, job.progressPct || 0))}%` }} /></div><span className="text-[10px] text-gray-500">{job.progressPct || 0}%</span></td>
                       <td className="py-2 pr-3 text-gray-600">{job.completedParts || 0}/{job.totalParts || 0} ({job.pendingParts || 0} pend.)</td>
+                      <td className="py-2 pr-3 text-gray-600">{formatBytes(resolveAssetSizeBytes(asset || null, asset ? (assetFileMap.get(asset.id) || []) : []))}</td>
                       <td className="py-2 pr-3 text-gray-600">{fmt(job.createdAt)}</td>
                       <td className="py-2 pr-3 text-gray-600">{job.startedAt ? fmt(job.startedAt) : '-'}</td>
                       <td className="py-2 pr-3 text-gray-600">{job.completedAt ? fmt(job.completedAt) : '-'}</td>

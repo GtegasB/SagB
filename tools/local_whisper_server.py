@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 from functools import lru_cache
 from pathlib import Path
@@ -23,7 +24,7 @@ app.add_middleware(
 def resolve_model_alias(model_name: str) -> str:
     normalized = (model_name or '').strip().lower()
     aliases = {
-        'whisper-1': os.getenv('LOCAL_WHISPER_DEFAULT_MODEL', 'small'),
+        'whisper-1': os.getenv('LOCAL_WHISPER_DEFAULT_MODEL', 'base'),
         'tiny': 'tiny',
         'base': 'base',
         'small': 'small',
@@ -31,7 +32,32 @@ def resolve_model_alias(model_name: str) -> str:
         'large': 'large-v3',
         'large-v3': 'large-v3',
     }
-    return aliases.get(normalized, normalized or os.getenv('LOCAL_WHISPER_DEFAULT_MODEL', 'small'))
+    return aliases.get(normalized, normalized or os.getenv('LOCAL_WHISPER_DEFAULT_MODEL', 'base'))
+
+
+def env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+      return default
+    return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def cleanup_transcript_text(text: str) -> str:
+    cleaned = ' '.join((text or '').split()).strip()
+    if not cleaned:
+        return ''
+
+    cleaned = re.sub(
+        r'(?iu)\b([a-zà-ÿ]{1,3})\b(?:\s*[,.;:-]?\s*\1\b){3,}',
+        lambda match: f"{match.group(1)}, {match.group(1)}",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r'(?iu)\b((?:[a-zà-ÿ]{1,12}\s+){1,2}[a-zà-ÿ]{1,12})\b(?:\s*[,.;:-]?\s*\1\b){2,}',
+        lambda match: match.group(1),
+        cleaned,
+    )
+    return cleaned.strip(' ,;:-')
 
 
 @lru_cache(maxsize=4)
@@ -67,11 +93,25 @@ async def transcribe(
         segments, info = whisper_model.transcribe(
             tmp_path,
             language=(language or None),
-            vad_filter=True,
-            beam_size=1,
+            vad_filter=env_flag('LOCAL_WHISPER_VAD_FILTER', True),
+            vad_parameters={
+                'min_silence_duration_ms': int(os.getenv('LOCAL_WHISPER_MIN_SILENCE_MS', '350')),
+                'speech_pad_ms': int(os.getenv('LOCAL_WHISPER_SPEECH_PAD_MS', '180')),
+            },
+            beam_size=2,
+            best_of=2,
+            temperature=0.0,
+            condition_on_previous_text=False,
+            without_timestamps=True,
+            repetition_penalty=float(os.getenv('LOCAL_WHISPER_REPETITION_PENALTY', '1.12')),
+            no_repeat_ngram_size=int(os.getenv('LOCAL_WHISPER_NO_REPEAT_NGRAM', '3')),
+            no_speech_threshold=float(os.getenv('LOCAL_WHISPER_NO_SPEECH_THRESHOLD', '0.45')),
+            compression_ratio_threshold=float(os.getenv('LOCAL_WHISPER_COMPRESSION_RATIO_THRESHOLD', '1.9')),
+            hallucination_silence_threshold=float(os.getenv('LOCAL_WHISPER_HALLUCINATION_SILENCE_THRESHOLD', '1.2')),
         )
 
         text = ' '.join((seg.text or '').strip() for seg in segments).strip()
+        text = cleanup_transcript_text(text)
         return {
             'text': text,
             'language': getattr(info, 'language', None),

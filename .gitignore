@@ -119,3 +119,7 @@ dist
 .vscode
 *.swp
 *.swo
+
+# Local tool/runtime temp
+supabase/.temp/
+tools/__pycache__/

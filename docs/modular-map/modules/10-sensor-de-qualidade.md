@@ -19,7 +19,7 @@ Detectar eventos de qualidade, correcoes, handoffs, repeticoes e indicadores de 
 
 - `components/QualitySensorView.tsx`
 - `services/qualitySensor.ts`
-- `supabase/migrations/20260311_agent_quality_events.sql`
+- `supabase/migrations/20260311000101_agent_quality_events.sql`
 
 ## Dependencias
 

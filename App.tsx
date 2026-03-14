@@ -17,6 +17,7 @@ import ProgrammersRoomView from './components/ProgrammersRoomView';
 import GovernanceView from './components/GovernanceView';
 import QualitySensorView from './components/QualitySensorView';
 import IntelligenceFlowView from './components/IntelligenceFlowView';
+import AgentMissionsView from './components/AgentMissionsView';
 import CIDView from './components/CIDView';
 import ContinuousMemoryView from './components/ContinuousMemoryView';
 import NAGIView from './components/NAGIView';
@@ -1483,6 +1484,15 @@ if (userId) {
         return (
           <IntelligenceFlowView
             workspaceId={activeWorkspaceId}
+            onBack={() => setActiveTab('ecosystem')}
+          />
+        );
+      case 'missions':
+        return (
+          <AgentMissionsView
+            workspaceId={activeWorkspaceId}
+            ownerUserId={ownerUserId}
+            agents={activatedAgents}
             onBack={() => setActiveTab('ecosystem')}
           />
         );

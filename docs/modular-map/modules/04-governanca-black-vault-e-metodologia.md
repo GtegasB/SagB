@@ -21,9 +21,9 @@ Formalizar cultura, compliance, documentos, vault e configuracoes de conheciment
 - `components/GovernanceView.tsx`
 - `components/MethodologyView.tsx`
 - `services/knowledge.ts`
-- `supabase/migrations/20240207_governance_core.sql`
-- `supabase/migrations/20240207_governance_knowledge.sql`
-- `supabase/migrations/20240207_governance_audit_members.sql`
+- `supabase/migrations/20240207000102_governance_core.sql`
+- `supabase/migrations/20240207000103_governance_knowledge.sql`
+- `supabase/migrations/20240207000101_governance_audit_members.sql`
 - `docs/CASSIO_HANDOFF_GOVERNANCA_AI_PROXY.md`
 
 ## Dependencias

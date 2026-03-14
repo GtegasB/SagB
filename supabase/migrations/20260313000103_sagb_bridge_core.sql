@@ -190,7 +190,7 @@ do $$
 declare
   tbl text;
 begin
-  foreach tbl in array [
+  foreach tbl in array array[
     'dev_projects',
     'dev_tasks',
     'dev_task_runs',

@@ -1095,6 +1095,82 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     };
   }
 
+  if (table === 'agent_missions') {
+    return {
+      id: String(r.id),
+      workspaceId: String(r.workspace_id ?? ''),
+      title: String(r.title ?? 'Missao'),
+      initialInput: String(r.initial_input ?? r.initialInput ?? ''),
+      status: r.status ?? 'queued',
+      currentStepIndex: Number(r.current_step_index ?? r.currentStepIndex ?? 1),
+      createdBy: r.created_by ?? r.createdBy ?? null,
+      startedAt: asJsDate(pick(r, 'started_at', 'startedAt')) ?? null,
+      finishedAt: asJsDate(pick(r, 'finished_at', 'finishedAt')) ?? null,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'agent_mission_steps') {
+    return {
+      id: String(r.id),
+      workspaceId: String(r.workspace_id ?? ''),
+      missionId: String(r.mission_id ?? r.missionId ?? ''),
+      stepIndex: Number(r.step_index ?? r.stepIndex ?? 0),
+      agentId: r.agent_id ?? r.agentId ?? null,
+      agentName: String(r.agent_name ?? r.agentName ?? 'Agente'),
+      stepName: String(r.step_name ?? r.stepName ?? 'Etapa'),
+      artifactType: String(r.artifact_type ?? r.artifactType ?? 'artifact'),
+      status: r.status ?? 'pending',
+      validationStatus: r.validation_status ?? r.validationStatus ?? null,
+      retryCount: Number(r.retry_count ?? r.retryCount ?? 0),
+      promptSnapshot: r.prompt_snapshot ?? r.promptSnapshot ?? null,
+      contextSnapshot: r.context_snapshot ?? r.contextSnapshot ?? null,
+      errorMessage: r.error_message ?? r.errorMessage ?? null,
+      startedAt: asJsDate(pick(r, 'started_at', 'startedAt')) ?? null,
+      finishedAt: asJsDate(pick(r, 'finished_at', 'finishedAt')) ?? null,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'agent_artifacts') {
+    return {
+      id: String(r.id),
+      workspaceId: String(r.workspace_id ?? ''),
+      missionId: String(r.mission_id ?? r.missionId ?? ''),
+      stepId: String(r.step_id ?? r.stepId ?? ''),
+      artifactType: String(r.artifact_type ?? r.artifactType ?? 'artifact'),
+      status: r.status ?? 'created',
+      version: Number(r.version ?? 1),
+      contentJson: r.content_json ?? r.contentJson ?? null,
+      contentText: r.content_text ?? r.contentText ?? null,
+      createdByAgentId: r.created_by_agent_id ?? r.createdByAgentId ?? null,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'agent_handoffs') {
+    return {
+      id: String(r.id),
+      workspaceId: String(r.workspace_id ?? ''),
+      missionId: String(r.mission_id ?? r.missionId ?? ''),
+      fromStepId: String(r.from_step_id ?? r.fromStepId ?? ''),
+      toStepId: r.to_step_id ?? r.toStepId ?? null,
+      fromAgentId: r.from_agent_id ?? r.fromAgentId ?? null,
+      toAgentId: r.to_agent_id ?? r.toAgentId ?? null,
+      artifactId: r.artifact_id ?? r.artifactId ?? null,
+      status: r.status ?? 'created',
+      note: r.note ?? null,
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      acceptedAt: asJsDate(pick(r, 'accepted_at', 'acceptedAt')) ?? null,
+      payload: r.payload ?? undefined
+    };
+  }
+
   return r;
 };
 
@@ -1860,6 +1936,65 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     if (p.tokensIn !== undefined) { p.tokens_in = p.tokensIn; delete p.tokensIn; }
     if (p.tokensOut !== undefined) { p.tokens_out = p.tokensOut; delete p.tokensOut; }
     if (p.eventTime !== undefined) { p.event_time = p.eventTime; delete p.eventTime; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
+  if (table === 'agent_missions') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.initialInput !== undefined) { p.initial_input = p.initialInput; delete p.initialInput; }
+    if (p.currentStepIndex !== undefined) { p.current_step_index = p.currentStepIndex; delete p.currentStepIndex; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.startedAt !== undefined) { p.started_at = p.startedAt; delete p.startedAt; }
+    if (p.finishedAt !== undefined) { p.finished_at = p.finishedAt; delete p.finishedAt; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'agent_mission_steps') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.missionId !== undefined) { p.mission_id = p.missionId; delete p.missionId; }
+    if (p.stepIndex !== undefined) { p.step_index = p.stepIndex; delete p.stepIndex; }
+    if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
+    if (p.agentName !== undefined) { p.agent_name = p.agentName; delete p.agentName; }
+    if (p.stepName !== undefined) { p.step_name = p.stepName; delete p.stepName; }
+    if (p.artifactType !== undefined) { p.artifact_type = p.artifactType; delete p.artifactType; }
+    if (p.validationStatus !== undefined) { p.validation_status = p.validationStatus; delete p.validationStatus; }
+    if (p.retryCount !== undefined) { p.retry_count = p.retryCount; delete p.retryCount; }
+    if (p.promptSnapshot !== undefined) { p.prompt_snapshot = p.promptSnapshot; delete p.promptSnapshot; }
+    if (p.contextSnapshot !== undefined) { p.context_snapshot = p.contextSnapshot; delete p.contextSnapshot; }
+    if (p.errorMessage !== undefined) { p.error_message = p.errorMessage; delete p.errorMessage; }
+    if (p.startedAt !== undefined) { p.started_at = p.startedAt; delete p.startedAt; }
+    if (p.finishedAt !== undefined) { p.finished_at = p.finishedAt; delete p.finishedAt; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'agent_artifacts') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.missionId !== undefined) { p.mission_id = p.missionId; delete p.missionId; }
+    if (p.stepId !== undefined) { p.step_id = p.stepId; delete p.stepId; }
+    if (p.artifactType !== undefined) { p.artifact_type = p.artifactType; delete p.artifactType; }
+    if (p.contentJson !== undefined) { p.content_json = p.contentJson; delete p.contentJson; }
+    if (p.contentText !== undefined) { p.content_text = p.contentText; delete p.contentText; }
+    if (p.createdByAgentId !== undefined) { p.created_by_agent_id = p.createdByAgentId; delete p.createdByAgentId; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    delete p.createdAt;
+  }
+
+  if (table === 'agent_handoffs') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.missionId !== undefined) { p.mission_id = p.missionId; delete p.missionId; }
+    if (p.fromStepId !== undefined) { p.from_step_id = p.fromStepId; delete p.fromStepId; }
+    if (p.toStepId !== undefined) { p.to_step_id = p.toStepId; delete p.toStepId; }
+    if (p.fromAgentId !== undefined) { p.from_agent_id = p.fromAgentId; delete p.fromAgentId; }
+    if (p.toAgentId !== undefined) { p.to_agent_id = p.toAgentId; delete p.toAgentId; }
+    if (p.artifactId !== undefined) { p.artifact_id = p.artifactId; delete p.artifactId; }
+    if (p.acceptedAt !== undefined) { p.accepted_at = p.acceptedAt; delete p.acceptedAt; }
     if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
     delete p.createdAt;
   }

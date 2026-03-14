@@ -12,7 +12,7 @@ export type AgentStatus = 'PLANNED' | 'STAGING' | 'ACTIVE' | 'MAINTENANCE' | 'BL
 export type ModelProvider = 'gemini' | 'deepseek' | 'llama_local' | 'openai' | 'claude' | 'qwen'; // Opções de Cérebro
 
 // V4.2 - Adicionado 'home' como Dashboard Inicial
-export type TabId = 'home' | 'ecosystem' | 'team' | 'conversations' | 'management' | 'programmers-room' | 'redir' | 'vault' | 'fabrica-ca' | 'governance' | 'nagi' | 'radar-connections' | 'cid' | 'quality' | 'intelligence-flow' | 'continuous-memory' | 'methodology' | 'hub' | 'alignment' | 'market' | 'sales' | 'expansion' | '3forb-home' | 'audacus-home' | 'startyb-home' | 'requests' | 'unit-room' | 'chat-room' | 'ventures';
+export type TabId = 'home' | 'ecosystem' | 'team' | 'conversations' | 'management' | 'programmers-room' | 'redir' | 'vault' | 'fabrica-ca' | 'governance' | 'missions' | 'nagi' | 'radar-connections' | 'cid' | 'quality' | 'intelligence-flow' | 'continuous-memory' | 'methodology' | 'hub' | 'alignment' | 'market' | 'sales' | 'expansion' | '3forb-home' | 'audacus-home' | 'startyb-home' | 'requests' | 'unit-room' | 'chat-room' | 'ventures';
 
 export type BUType = 'CORE' | 'VENTURY' | 'PERSONAL' | 'METHODOLOGY';
 
@@ -243,7 +243,8 @@ export type IntelligenceFlowType =
   | 'handoff'
   | 'decision'
   | 'task_generation'
-  | 'cid_processing';
+  | 'cid_processing'
+  | 'agent_orchestration';
 
 export type IntelligenceFlowSourceKind =
   | 'conversation'
@@ -321,6 +322,79 @@ export interface IntelligenceFlowStepRow {
   eventTime: Date;
   payload?: Record<string, any>;
   createdAt?: Date;
+}
+
+export type AgentMissionStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type AgentMissionStepStatus = 'pending' | 'ready' | 'running' | 'completed' | 'failed';
+export type AgentArtifactStatus = 'created' | 'validated' | 'rejected';
+export type AgentHandoffStatus = 'created' | 'accepted' | 'failed';
+
+export interface AgentMission {
+  id: string;
+  workspaceId: string;
+  title: string;
+  initialInput: string;
+  status: AgentMissionStatus;
+  currentStepIndex: number;
+  createdBy?: string | null;
+  startedAt?: Date | null;
+  finishedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface AgentMissionStep {
+  id: string;
+  workspaceId: string;
+  missionId: string;
+  stepIndex: number;
+  agentId?: string | null;
+  agentName: string;
+  stepName: string;
+  artifactType: string;
+  status: AgentMissionStepStatus;
+  validationStatus?: string | null;
+  retryCount: number;
+  promptSnapshot?: string | null;
+  contextSnapshot?: Record<string, any> | null;
+  errorMessage?: string | null;
+  startedAt?: Date | null;
+  finishedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface AgentArtifact {
+  id: string;
+  workspaceId: string;
+  missionId: string;
+  stepId: string;
+  artifactType: string;
+  status: AgentArtifactStatus;
+  version: number;
+  contentJson?: Record<string, any> | null;
+  contentText?: string | null;
+  createdByAgentId?: string | null;
+  createdAt: Date;
+  payload?: Record<string, any>;
+}
+
+export interface AgentHandoff {
+  id: string;
+  workspaceId: string;
+  missionId: string;
+  fromStepId: string;
+  toStepId?: string | null;
+  fromAgentId?: string | null;
+  toAgentId?: string | null;
+  artifactId?: string | null;
+  status: AgentHandoffStatus;
+  note?: string | null;
+  createdAt: Date;
+  acceptedAt?: Date | null;
+  payload?: Record<string, any>;
 }
 
 export type CidMaterialType = 'Pdf' | 'Doc' | 'Docx' | 'Txt' | 'Spreadsheet' | 'Image' | 'Audio' | 'Video' | 'Other';

@@ -20,7 +20,7 @@ Registrar agentes do ecossistema, sua estrutura organizacional, estados, atribut
 - `components/AgentFactory.tsx`
 - `types.ts`
 - `App.tsx`
-- `supabase/migrations/20260307_agents_rls_hotfix.sql`
+- `supabase/migrations/20260307000102_agents_rls_hotfix.sql`
 - `services/supabase.ts`
 - `netlify/functions/ai.mjs` no handler `create_agent_from_scratch`
 

@@ -16,6 +16,7 @@ import { BackIcon, FileTextIcon, MicIcon, SearchIcon, StopCircleIcon } from './I
 import { collection, db, onSnapshot, orderBy, query, where } from '../services/supabase';
 import { resolveWorkspaceId } from '../utils/supabaseChat';
 import {
+  compactContinuousMemoryLocalAudio,
   DEFAULT_CHUNK_MINUTES,
   ingestContinuousMemoryChunk,
   loadContinuousMemoryAudioUrl,
@@ -37,6 +38,11 @@ interface ContinuousMemoryViewProps {
 }
 
 const DEFAULT_WORKSPACE_ID = '00000000-0000-0000-0000-000000000000';
+const LOCAL_WHISPER_HEALTH_URL = (() => {
+  const rawUrl = String(import.meta.env.VITE_LOCAL_WHISPER_URL || '').trim();
+  if (!rawUrl) return '';
+  return `${rawUrl.replace(/\/+$/, '')}/health`;
+})();
 
 const toDate = (value: any): Date => {
   if (value instanceof Date) return value;
@@ -57,6 +63,35 @@ const fmtDuration = (seconds?: number | null) => {
   const minutes = Math.floor(total / 60);
   const rest = total % 60;
   return `${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
+};
+
+const formatChunkDurationLabel = (minutes?: number | null) => {
+  const numeric = Number(minutes || 0);
+  if (!numeric) return '0 min';
+  if (numeric < 1) return `${Math.round(numeric * 60)}s`;
+  if (Number.isInteger(numeric)) return `${numeric} min`;
+  return `${numeric.toFixed(2).replace(/\.?0+$/, '').replace('.', ',')} min`;
+};
+
+type ExecutionFlowState = 'idle' | 'active' | 'success' | 'warning' | 'error';
+
+const executionFlowTone = (state: ExecutionFlowState) => {
+  if (state === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+  if (state === 'active') return 'border-cyan-200 bg-cyan-50 text-cyan-800';
+  if (state === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (state === 'error') return 'border-rose-200 bg-rose-50 text-rose-800';
+  return 'border-slate-200 bg-white text-slate-500';
+};
+
+const deriveFileExtension = (mimeType?: string | null, storagePath?: string | null) => {
+  const namedExt = String(storagePath || '').split('.').pop();
+  if (namedExt && /^[a-z0-9]{2,5}$/i.test(namedExt)) return namedExt.toLowerCase();
+  const normalized = String(mimeType || '').toLowerCase();
+  if (normalized.includes('wav')) return 'wav';
+  if (normalized.includes('mp4')) return 'm4a';
+  if (normalized.includes('mpeg') || normalized.includes('mp3')) return 'mp3';
+  if (normalized.includes('ogg')) return 'ogg';
+  return 'webm';
 };
 
 const sessionStatusLabel = (value: string) => {
@@ -82,19 +117,51 @@ const chunkStatusLabel = (value: string) => {
     transcribing: 'Transcrevendo',
     classified: 'Classificado',
     completed: 'Pronto',
+    completed_warning: 'Concluido com aviso',
     error: 'Erro',
     retrying: 'Reprocessando'
   };
   return map[String(value || '').toLowerCase()] || 'Pronto';
 };
 
+const jobStatusLabel = (value: string) => {
+  const map: Record<string, string> = {
+    queued: 'Na fila',
+    running: 'Executando',
+    completed: 'Concluido',
+    completed_warning: 'Concluido com aviso',
+    error: 'Erro',
+    cancelled: 'Cancelado',
+    retrying: 'Reprocessando'
+  };
+  return map[String(value || '').toLowerCase()] || 'Executando';
+};
+
 const statusBadge = (value: string) => {
   const normalized = String(value || '').toLowerCase();
   if (['completed', 'stored'].includes(normalized)) return 'bg-emerald-100 text-emerald-700';
+  if (['completed_warning'].includes(normalized)) return 'bg-amber-100 text-amber-800';
   if (['live', 'transcribing', 'capturing', 'processing', 'retrying', 'running'].includes(normalized)) return 'bg-cyan-100 text-cyan-800';
   if (['paused', 'queued', 'draft'].includes(normalized)) return 'bg-amber-100 text-amber-800';
   if (['error', 'cancelled'].includes(normalized)) return 'bg-rose-100 text-rose-700';
   return 'bg-slate-100 text-slate-700';
+};
+
+const chunkVisualStatus = (chunk?: ContinuousMemoryChunk | null) => {
+  if (!chunk) return 'queued';
+  if (String(chunk.status) === 'completed' && String(chunk.transcriptStatus) === 'error') return 'completed_warning';
+  return String(chunk.status || 'queued');
+};
+
+const transcriptStatusLabel = (value: string) => {
+  const map: Record<string, string> = {
+    pending: 'Pendente',
+    processing: 'Processando',
+    completed: 'Concluida',
+    error: 'Erro',
+    retrying: 'Reprocessando'
+  };
+  return map[String(value || '').toLowerCase()] || 'Pendente';
 };
 
 const renderMetric = (label: string, value: string | number, tone: string) => (
@@ -102,6 +169,13 @@ const renderMetric = (label: string, value: string | number, tone: string) => (
     <span className="text-[10px] uppercase tracking-[0.35em] font-black opacity-70 block mb-3">{label}</span>
     <strong className="text-3xl font-black tracking-tight">{value}</strong>
   </div>
+);
+
+const MicPulse: React.FC<{ active: boolean }> = ({ active }) => (
+  <span className="relative inline-flex w-3.5 h-3.5 items-center justify-center">
+    {active && <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400/45 animate-ping" />}
+    <span className={`relative inline-flex h-3 w-3 rounded-full ${active ? 'bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,0.18)]' : 'bg-slate-300'}`} />
+  </span>
 );
 
 const groupCount = (values: string[]) => {
@@ -149,6 +223,8 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
   const [audioUrl, setAudioUrl] = useState<string>('');
   const [isRecording, setIsRecording] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [localWhisperOnline, setLocalWhisperOnline] = useState<boolean | null>(null);
+  const [currentChunkElapsedMs, setCurrentChunkElapsedMs] = useState(0);
 
   const [sessions, setSessions] = useState<ContinuousMemorySession[]>([]);
   const [chunks, setChunks] = useState<ContinuousMemoryChunk[]>([]);
@@ -166,8 +242,12 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
   const chunkIndexRef = useRef<number>(1);
   const activeSessionRef = useRef<ContinuousMemorySession | null>(null);
   const objectUrlRef = useRef<string>('');
+  const chunkStopTimeoutRef = useRef<number | null>(null);
+  const recordingContinuationRef = useRef(false);
+  const chunkDurationMs = Math.max(15_000, Math.round(Number(chunkMinutes || DEFAULT_CHUNK_MINUTES) * 60 * 1000));
 
-  const applyLocalStore = () => {
+  const applyLocalStore = async () => {
+    await compactContinuousMemoryLocalAudio(scopedWorkspaceId).catch(() => false);
     const store = loadContinuousMemoryLocalState(scopedWorkspaceId);
     setSessions(store.sessions);
     setChunks(store.chunks);
@@ -182,7 +262,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
 
   useEffect(() => {
     if (persistenceMode === 'local') {
-      applyLocalStore();
+      void applyLocalStore();
       return;
     }
 
@@ -201,7 +281,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
             setPersistenceMode('local');
             setTableMissing(true);
             setFeedback('Base oficial ainda nao aplicada. Operando em modo local seguro.');
-            applyLocalStore();
+            void applyLocalStore();
             return;
           }
           console.error('Erro ao carregar continuous_memory_sessions:', error);
@@ -316,9 +396,74 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
 
   useEffect(() => {
     return () => {
+      recordingContinuationRef.current = false;
+      if (chunkStopTimeoutRef.current !== null && typeof window !== 'undefined') {
+        window.clearTimeout(chunkStopTimeoutRef.current);
+        chunkStopTimeoutRef.current = null;
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          // noop
+        }
+      }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!LOCAL_WHISPER_HEALTH_URL) {
+      setLocalWhisperOnline(null);
+      return;
+    }
+
+    let cancelled = false;
+    let intervalId: number | null = null;
+
+    const pingLocalWhisper = async () => {
+      try {
+        const response = await fetch(LOCAL_WHISPER_HEALTH_URL, { method: 'GET' });
+        if (!cancelled) setLocalWhisperOnline(response.ok);
+      } catch {
+        if (!cancelled) setLocalWhisperOnline(false);
+      }
+    };
+
+    pingLocalWhisper();
+    if (typeof window !== 'undefined') {
+      intervalId = window.setInterval(pingLocalWhisper, 15000);
+    }
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null && typeof window !== 'undefined') {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isRecording) {
+      setCurrentChunkElapsedMs(0);
+      return;
+    }
+
+    const updateElapsed = () => {
+      const startedAt = chunkWindowStartedAtRef.current;
+      if (!startedAt) {
+        setCurrentChunkElapsedMs(0);
+        return;
+      }
+      setCurrentChunkElapsedMs(Math.max(0, Date.now() - startedAt.getTime()));
+    };
+
+    updateElapsed();
+    const intervalId = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [isRecording, chunkDurationMs]);
 
   const labelLookup = useMemo(() => {
     const out: Record<string, string> = {};
@@ -352,7 +497,142 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
     [links, selectedChunk]
   );
 
+  const clearChunkTimer = () => {
+    if (chunkStopTimeoutRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(chunkStopTimeoutRef.current);
+      chunkStopTimeoutRef.current = null;
+    }
+  };
+
+  const stopActiveStream = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  };
+
+  const syncSessionRollupAfterCapture = async (session: ContinuousMemorySession, durationSeconds: number) => {
+    const baseSession = activeSessionRef.current?.id === session.id ? activeSessionRef.current : session;
+    const nextSession: ContinuousMemorySession = {
+      ...baseSession,
+      totalChunks: Number(baseSession.totalChunks || 0) + 1,
+      totalDurationSeconds: Number(baseSession.totalDurationSeconds || 0) + durationSeconds,
+      updatedAt: new Date()
+    };
+    activeSessionRef.current = nextSession;
+
+    try {
+      await updateContinuousMemorySession({
+        mode: persistenceMode,
+        workspaceId: scopedWorkspaceId,
+        sessionId: session.id,
+        patch: {
+          totalChunks: nextSession.totalChunks,
+          totalDurationSeconds: nextSession.totalDurationSeconds,
+          updatedAt: nextSession.updatedAt
+        }
+      });
+      if (persistenceMode === 'local') void applyLocalStore();
+    } catch (error) {
+      console.error('Falha ao sincronizar rollup da sessão.', error);
+    }
+  };
+
+  const processCapturedChunk = async (
+    sessionSnapshot: ContinuousMemorySession,
+    chunkIndex: number,
+    startedAt: Date,
+    endedAt: Date,
+    audioBlob: Blob,
+    mimeType: string
+  ) => {
+    try {
+      setFeedback(`Processando bloco ${chunkIndex}...`);
+      await ingestContinuousMemoryChunk({
+        mode: persistenceMode,
+        workspaceId: scopedWorkspaceId,
+        session: sessionSnapshot,
+        chunkIndex,
+        startedAt,
+        endedAt,
+        audioBlob,
+        mimeType,
+        labelLookup,
+        skipSessionRollup: true
+      });
+
+      if (persistenceMode === 'local') void applyLocalStore();
+      setFeedback(`Bloco ${chunkIndex} captado, transcrito e organizado.`);
+    } catch (error: any) {
+      if (persistenceMode === 'local') void applyLocalStore();
+      setFeedback(String(error?.message || `Falha ao processar bloco ${chunkIndex}.`));
+    }
+  };
+
+  const startChunkRecorder = (session: ContinuousMemorySession, stream: MediaStream, preferredMime: string) => {
+    const recorder = preferredMime
+      ? new MediaRecorder(stream, { mimeType: preferredMime })
+      : new MediaRecorder(stream);
+    const chunkStartedAt = new Date();
+    const chunkIndex = chunkIndexRef.current;
+    const parts: Blob[] = [];
+
+    mediaRecorderRef.current = recorder;
+    chunkWindowStartedAtRef.current = chunkStartedAt;
+
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) parts.push(event.data);
+    };
+
+    recorder.onerror = (event: any) => {
+      const message = String(event?.error?.message || 'Falha no MediaRecorder.');
+      setFeedback(message);
+    };
+
+    recorder.onstop = () => {
+      clearChunkTimer();
+
+      const endedAt = new Date();
+      const mimeType = parts[0]?.type || preferredMime || 'audio/webm';
+      const audioBlob = parts.length > 0 ? new Blob(parts, { type: mimeType }) : null;
+      const shouldContinue = recordingContinuationRef.current && stream.active && Boolean(activeSessionRef.current);
+
+      if (audioBlob && audioBlob.size > 0) {
+        const durationSeconds = Math.max(1, Math.round((endedAt.getTime() - chunkStartedAt.getTime()) / 1000));
+        const sessionSnapshot = activeSessionRef.current || session;
+        chunkIndexRef.current = chunkIndex + 1;
+        void syncSessionRollupAfterCapture(sessionSnapshot, durationSeconds);
+
+        if (shouldContinue) {
+          startChunkRecorder(activeSessionRef.current || sessionSnapshot, stream, preferredMime);
+        } else {
+          mediaRecorderRef.current = null;
+          stopActiveStream();
+        }
+
+        void processCapturedChunk(sessionSnapshot, chunkIndex, chunkStartedAt, endedAt, audioBlob, mimeType);
+        return;
+      }
+
+      if (shouldContinue) {
+        startChunkRecorder(activeSessionRef.current || session, stream, preferredMime);
+      } else {
+        mediaRecorderRef.current = null;
+        stopActiveStream();
+      }
+    };
+
+    recorder.start();
+    clearChunkTimer();
+    if (typeof window !== 'undefined') {
+      chunkStopTimeoutRef.current = window.setTimeout(() => {
+        if (recorder.state === 'recording') recorder.stop();
+      }, chunkDurationMs);
+    }
+    setIsRecording(true);
+    setCurrentChunkElapsedMs(0);
+  };
+
   const startRecorder = async (session: ContinuousMemorySession) => {
+    recordingContinuationRef.current = true;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -362,57 +642,11 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
     });
     streamRef.current = stream;
 
-    const preferredMime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-    const recorder = new MediaRecorder(stream, { mimeType: preferredMime });
-    mediaRecorderRef.current = recorder;
-    chunkWindowStartedAtRef.current = new Date();
+    const mimeCandidates = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'];
+    const preferredMime = mimeCandidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || '';
 
-    recorder.ondataavailable = async (event) => {
-      if (!event.data || event.data.size === 0 || !activeSessionRef.current) return;
-      const startedAt = chunkWindowStartedAtRef.current || new Date();
-      const endedAt = new Date();
-      const sessionSnapshot = activeSessionRef.current;
-
-      try {
-        setFeedback(`Processando bloco ${chunkIndexRef.current}...`);
-        await ingestContinuousMemoryChunk({
-          mode: persistenceMode,
-          workspaceId: scopedWorkspaceId,
-          session: sessionSnapshot,
-          chunkIndex: chunkIndexRef.current,
-          startedAt,
-          endedAt,
-          audioBlob: event.data,
-          mimeType: event.data.type || preferredMime,
-          labelLookup
-        });
-
-        chunkIndexRef.current += 1;
-        activeSessionRef.current = activeSessionRef.current ? {
-          ...activeSessionRef.current,
-          totalChunks: Number(activeSessionRef.current.totalChunks || 0) + 1,
-          totalDurationSeconds: Number(activeSessionRef.current.totalDurationSeconds || 0) + Math.max(1, Math.round((endedAt.getTime() - startedAt.getTime()) / 1000))
-        } : activeSessionRef.current;
-
-        if (persistenceMode === 'local') applyLocalStore();
-        setFeedback('Chunk captado, transcrito e organizado.');
-      } catch (error: any) {
-        if (persistenceMode === 'local') applyLocalStore();
-        setFeedback(String(error?.message || 'Falha ao processar chunk.'));
-      } finally {
-        chunkWindowStartedAtRef.current = new Date();
-      }
-    };
-
-    recorder.onstop = () => {
-      stream.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-      mediaRecorderRef.current = null;
-    };
-
-    recorder.start(chunkMinutes * 60 * 1000);
-    setIsRecording(true);
-    setFeedback('Captação contínua ativa.');
+    startChunkRecorder(session, stream, preferredMime);
+    setFeedback(`Captação contínua ativa. Corte automático em ${formatChunkDurationLabel(chunkMinutes)}.`);
   };
 
   const handleStart = async () => {
@@ -425,7 +659,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
           sessionId: activeSession.id,
           patch: { status: 'live', startedAt: activeSession.startedAt || new Date() }
         });
-        if (persistenceMode === 'local') applyLocalStore();
+        if (persistenceMode === 'local') void applyLocalStore();
         await startRecorder({ ...activeSession, status: 'live' });
         return;
       }
@@ -449,7 +683,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
       setCurrentSessionId(newSession.id);
       activeSessionRef.current = newSession;
       chunkIndexRef.current = 1;
-      if (persistenceMode === 'local') applyLocalStore();
+      if (persistenceMode === 'local') void applyLocalStore();
       await startRecorder(newSession);
     } catch (error: any) {
       setFeedback(String(error?.message || 'Nao foi possivel iniciar a sessao.'));
@@ -462,6 +696,8 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
     const recorder = mediaRecorderRef.current;
     const session = activeSessionRef.current;
     if (!session) return;
+    recordingContinuationRef.current = false;
+    clearChunkTimer();
 
     try {
       await updateContinuousMemorySession({
@@ -473,15 +709,16 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
           endedAt: status === 'ended' ? new Date() : null
         }
       });
-      if (persistenceMode === 'local') applyLocalStore();
+      if (persistenceMode === 'local') void applyLocalStore();
     } catch (error: any) {
       setFeedback(String(error?.message || 'Nao foi possivel atualizar a sessao.'));
     }
 
     if (recorder && recorder.state !== 'inactive') recorder.stop();
-    else if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop());
+    else stopActiveStream();
 
     setIsRecording(false);
+    setCurrentChunkElapsedMs(0);
     setFeedback(status === 'paused' ? 'Sessao pausada.' : 'Sessao encerrada.');
   };
 
@@ -500,13 +737,25 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
         labelLookup,
         currentTranscriptVersion: transcriptVersions
       });
-      if (persistenceMode === 'local') applyLocalStore();
+      if (persistenceMode === 'local') void applyLocalStore();
       setFeedback(`Bloco ${selectedChunk.chunkIndex} reprocessado.`);
     } catch (error: any) {
       setFeedback(String(error?.message || 'Falha ao reprocessar bloco.'));
     } finally {
       setIsBusy(false);
     }
+  };
+
+  const handleDownloadAudio = () => {
+    if (!audioUrl || !selectedChunk || !selectedFile || typeof document === 'undefined') return;
+    const anchor = document.createElement('a');
+    const stamp = toDate(selectedChunk.startedAt || selectedChunk.createdAt).toISOString().replace(/[:.]/g, '-');
+    const ext = deriveFileExtension(selectedFile.mimeType, selectedFile.storagePath);
+    anchor.href = audioUrl;
+    anchor.download = `memoria-continua-${stamp}-chunk-${selectedChunk.chunkIndex}.${ext}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
   };
 
   const filteredChunks = useMemo(() => {
@@ -563,60 +812,159 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
     [chunkLabels, labelNameById]
   );
 
+  const secondsUntilNextCut = Math.max(0, Math.ceil((chunkDurationMs - currentChunkElapsedMs) / 1000));
+  const selectedUploadJob = selectedChunkJobs.find((job) => String(job.jobType || '').includes('upload'));
+  const selectedTranscriptionJob = selectedChunkJobs.find((job) => String(job.jobType || '').includes('transcribe'));
+  const chunkExecutionSteps = useMemo(() => {
+    const captureState: ExecutionFlowState = isRecording ? 'active' : (selectedChunk ? 'success' : 'idle');
+    const cutState: ExecutionFlowState = isRecording ? 'active' : (selectedChunk ? 'success' : 'idle');
+    const uploadState: ExecutionFlowState = selectedFile
+      ? 'success'
+      : (selectedUploadJob?.jobStatus === 'error' ? 'error' : (selectedChunk ? 'warning' : 'idle'));
+
+    const transcriptionState: ExecutionFlowState = (() => {
+      if (!selectedChunk) return localWhisperOnline === false ? 'error' : 'idle';
+      if (['processing', 'retrying'].includes(String(selectedChunk.transcriptStatus || '').toLowerCase())) return 'active';
+      if (selectedTranscriptionJob?.jobStatus === 'running') return 'active';
+      if (selectedChunk.transcriptText) return 'success';
+      if (selectedTranscriptionJob?.jobStatus === 'completed_warning') return 'warning';
+      if (String(selectedChunk.transcriptStatus || '').toLowerCase() === 'error' || selectedTranscriptionJob?.jobStatus === 'error') return 'error';
+      return 'idle';
+    })();
+
+    const organizationState: ExecutionFlowState = selectedChunkItems.length > 0 || selectedChunkLabels.length > 0
+      ? 'success'
+      : (transcriptionState === 'warning' ? 'warning' : (transcriptionState === 'error' ? 'error' : (selectedChunk ? 'success' : 'idle')));
+
+    return [
+      {
+        label: 'Captacao',
+        state: captureState,
+        detail: isRecording ? `Ouvindo agora • ${fmtDuration(currentChunkElapsedMs / 1000)}` : (selectedChunk ? 'Audio captado' : 'Aguardando')
+      },
+      {
+        label: 'Corte',
+        state: cutState,
+        detail: isRecording ? `Proximo corte em ${fmtDuration(secondsUntilNextCut)}` : `Janela de ${formatChunkDurationLabel(chunkMinutes)}`
+      },
+      {
+        label: 'Audio',
+        state: uploadState,
+        detail: selectedFile ? 'Arquivo salvo' : (selectedUploadJob?.statusNote || 'Sem audio salvo ainda')
+      },
+      {
+        label: 'Transcricao',
+        state: transcriptionState,
+        detail: selectedChunk?.errorMessage || selectedTranscriptionJob?.statusNote || transcriptStatusLabel(String(selectedChunk?.transcriptStatus || 'pending'))
+      },
+      {
+        label: 'Organizacao',
+        state: organizationState,
+        detail: `${selectedChunkLabels.length} labels • ${selectedChunkItems.length} itens`
+      }
+    ];
+  }, [
+    currentChunkElapsedMs,
+    chunkMinutes,
+    isRecording,
+    localWhisperOnline,
+    secondsUntilNextCut,
+    selectedChunk,
+    selectedChunkItems.length,
+    selectedChunkLabels.length,
+    selectedFile,
+    selectedTranscriptionJob?.jobStatus,
+    selectedTranscriptionJob?.statusNote,
+    selectedUploadJob?.jobStatus,
+    selectedUploadJob?.statusNote
+  ]);
+
   return (
     <div className="flex-1 h-full overflow-y-auto bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.16),_transparent_32%),radial-gradient(circle_at_top_right,_rgba(251,191,36,0.14),_transparent_28%),linear-gradient(180deg,_#f8fafc_0%,_#edf4ff_100%)] custom-scrollbar">
       <div className="max-w-[1600px] mx-auto px-6 md:px-10 py-8 space-y-8">
-        <header className="rounded-[32px] border border-white/70 bg-slate-950 text-white shadow-[0_30px_80px_rgba(15,23,42,0.22)] overflow-hidden">
+        <header className="rounded-[32px] border border-white/80 bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(240,249,255,0.96)_48%,rgba(226,232,240,0.96))] text-slate-900 shadow-[0_30px_80px_rgba(15,23,42,0.12)] overflow-hidden">
           <div className="px-8 md:px-10 py-8 flex flex-col gap-6">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
               <div className="flex items-start gap-4">
                 {onBack && (
-                  <button onClick={onBack} className="w-11 h-11 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors">
+                  <button onClick={onBack} className="w-11 h-11 rounded-2xl border border-slate-200 bg-white flex items-center justify-center hover:bg-slate-50 transition-colors shadow-sm">
                     <BackIcon className="w-5 h-5" />
                   </button>
                 )}
                 <div>
-                  <span className="text-[10px] uppercase tracking-[0.38em] font-black text-cyan-300 block mb-3">Modulo Oficial</span>
+                  <span className="text-[10px] uppercase tracking-[0.38em] font-black text-cyan-600 block mb-3">Modulo Oficial</span>
                   <h1 className="text-4xl md:text-5xl font-black tracking-[-0.04em]">Memoria Continua</h1>
-                  <p className="text-slate-300 max-w-3xl mt-3">
+                  <p className="text-slate-600 max-w-3xl mt-3">
                     Linha do Dia para captação contínua, blocos curtos, transcrição operacional e base viva pronta para extrações, resumos e leitura futura por agentes.
                   </p>
                 </div>
               </div>
 
               <div className="flex flex-wrap gap-3 items-center">
-                <div className={`px-4 py-3 rounded-2xl border border-white/10 ${statusBadge(String(activeSession?.status || 'draft'))}`}>
+                <div className={`px-4 py-3 rounded-2xl border border-slate-200 bg-white ${statusBadge(String(activeSession?.status || 'draft'))}`}>
                   <span className="text-[10px] uppercase tracking-[0.28em] font-black block mb-1 opacity-70">Sessao</span>
                   <strong className="text-sm">{sessionStatusLabel(String(activeSession?.status || 'draft'))}</strong>
                 </div>
-                <div className="px-4 py-3 rounded-2xl border border-white/10 bg-white/5">
+                <div className="px-4 py-3 rounded-2xl border border-slate-200 bg-white min-w-[122px]">
                   <span className="text-[10px] uppercase tracking-[0.28em] font-black block mb-1 text-slate-400">Microfone</span>
-                  <strong className={`text-sm ${isRecording ? 'text-emerald-300' : 'text-slate-200'}`}>{isRecording ? 'Ativo' : 'Inativo'}</strong>
+                  <strong className={`text-sm inline-flex items-center gap-2 ${isRecording ? 'text-emerald-600' : 'text-slate-500'}`}>
+                    <MicPulse active={isRecording} />
+                    {isRecording ? 'Gravando' : 'Inativo'}
+                  </strong>
                 </div>
-                <button onClick={handleStart} disabled={isBusy || isRecording} className="px-5 py-3 rounded-2xl bg-cyan-400 text-slate-950 font-black tracking-tight disabled:opacity-50">
+                {LOCAL_WHISPER_HEALTH_URL && (
+                  <div className="px-4 py-3 rounded-2xl border border-slate-200 bg-white min-w-[138px]">
+                    <span className="text-[10px] uppercase tracking-[0.28em] font-black block mb-1 text-slate-400">Whisper local</span>
+                    <strong className={`text-sm inline-flex items-center gap-2 ${localWhisperOnline === false ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      <MicPulse active={Boolean(localWhisperOnline)} />
+                      {localWhisperOnline === false ? 'Offline' : (localWhisperOnline === true ? 'Online' : 'Verificando')}
+                    </strong>
+                  </div>
+                )}
+                <div className="px-4 py-3 rounded-2xl border border-slate-200 bg-white min-w-[138px]">
+                  <span className="text-[10px] uppercase tracking-[0.28em] font-black block mb-1 text-slate-400">Corte automatico</span>
+                  <strong className={`text-sm inline-flex items-center gap-2 ${isRecording ? 'text-emerald-600' : 'text-slate-500'}`}>
+                    <MicPulse active={isRecording} />
+                    {isRecording ? `Ligado • ${fmtDuration(secondsUntilNextCut)}` : `Pronto • ${formatChunkDurationLabel(chunkMinutes)}`}
+                  </strong>
+                </div>
+                <div className="px-4 py-3 rounded-2xl border border-slate-200 bg-white min-w-[126px]">
+                  <span className="text-[10px] uppercase tracking-[0.28em] font-black block mb-1 text-slate-400">Storage</span>
+                  <strong className={`text-sm inline-flex items-center gap-2 ${persistenceMode === 'local' ? 'text-amber-700' : 'text-emerald-600'}`}>
+                    <MicPulse active={persistenceMode !== 'local'} />
+                    {persistenceMode === 'local' ? 'Local' : 'Supabase'}
+                  </strong>
+                </div>
+                <button onClick={handleStart} disabled={isBusy || isRecording} className="px-5 py-3 rounded-2xl bg-cyan-500 text-white font-black tracking-tight shadow-[0_12px_24px_rgba(6,182,212,0.22)] disabled:opacity-50">
                   <span className="inline-flex items-center gap-2"><MicIcon className="w-4 h-4" /> Iniciar</span>
                 </button>
-                <button onClick={() => stopRecorder('paused')} disabled={!isRecording || isBusy} className="px-5 py-3 rounded-2xl bg-white/10 text-white font-black tracking-tight disabled:opacity-50">
+                <button onClick={() => stopRecorder('paused')} disabled={!isRecording || isBusy} className="px-5 py-3 rounded-2xl bg-white text-slate-700 border border-slate-200 font-black tracking-tight disabled:opacity-50">
                   Pausar
                 </button>
-                <button onClick={() => stopRecorder('ended')} disabled={(!isRecording && !activeSession) || isBusy} className="px-5 py-3 rounded-2xl bg-rose-500/90 text-white font-black tracking-tight disabled:opacity-50">
+                <button onClick={() => stopRecorder('ended')} disabled={(!isRecording && !activeSession) || isBusy} className="px-5 py-3 rounded-2xl bg-rose-500 text-white font-black tracking-tight shadow-[0_12px_24px_rgba(244,63,94,0.2)] disabled:opacity-50">
                   <span className="inline-flex items-center gap-2"><StopCircleIcon className="w-4 h-4" /> Encerrar</span>
                 </button>
               </div>
             </div>
 
             <div className="flex flex-wrap gap-3 items-center text-sm">
-              <span className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-slate-200">Linha do Dia</span>
-              <span className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-slate-200">Chunks de {chunkMinutes} min</span>
-              <span className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-slate-200">Retenção fria/morna/quente</span>
-              <span className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-slate-200">{allowAgentReading ? 'Leitura futura por agentes habilitada' : 'Leitura futura por agentes bloqueada'}</span>
+              <span className="px-3 py-1.5 rounded-full bg-white border border-slate-200 text-slate-700 shadow-sm">Linha do Dia</span>
+              <span className="px-3 py-1.5 rounded-full bg-cyan-50 border border-cyan-100 text-cyan-700">Chunks de {formatChunkDurationLabel(chunkMinutes)}</span>
+              <span className="px-3 py-1.5 rounded-full bg-amber-50 border border-amber-100 text-amber-700">Retenção fria/morna/quente</span>
+              <span className="px-3 py-1.5 rounded-full bg-violet-50 border border-violet-100 text-violet-700">{allowAgentReading ? 'Leitura futura por agentes habilitada' : 'Leitura futura por agentes bloqueada'}</span>
             </div>
           </div>
         </header>
 
         {tableMissing && (
           <div className="rounded-[24px] border border-amber-200 bg-amber-50 px-5 py-4 text-amber-900">
-            O schema oficial ainda nao foi aplicado no Supabase deste ambiente. A interface segue operando em modo local para validarmos a V1 sem perder a arquitetura final.
+            O schema oficial ainda nao foi aplicado no Supabase deste ambiente. A interface segue operando em modo local para validarmos a V1 sem perder a arquitetura final. Neste modo, o audio fica salvo localmente no navegador deste computador, nao no Supabase Storage.
+          </div>
+        )}
+
+        {LOCAL_WHISPER_HEALTH_URL && localWhisperOnline === false && (
+          <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-rose-800">
+            O transcritor local esta offline agora. A gravacao pode continuar salvando o audio, mas a transcricao vai falhar ate o servidor do Whisper voltar.
           </div>
         )}
 
@@ -627,6 +975,38 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
           {renderMetric('Min Transcritos', minutesTranscribedToday, 'border-emerald-200 bg-emerald-50 text-emerald-900')}
           {renderMetric('Itens Extraidos', filteredItems.length, 'border-violet-200 bg-violet-50 text-violet-900')}
           {renderMetric('Jobs em Fila', jobsInFlight, 'border-rose-200 bg-rose-50 text-rose-900')}
+        </section>
+
+        <section className="rounded-[28px] border border-slate-200 bg-white/90 p-5 shadow-[0_16px_45px_rgba(15,23,42,0.06)]">
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+            <div>
+              <span className="text-[10px] uppercase tracking-[0.35em] font-black text-slate-400 block mb-2">Pipeline visual de execucao</span>
+              <h2 className="text-2xl font-black tracking-tight text-slate-900">Fluxo do bloco em tempo real</h2>
+              <p className="text-sm text-slate-500 mt-2">
+                Esta trilha mostra a execução do processo, no estilo de um workflow em execução: captação, corte, salvamento, transcrição e organização.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 min-w-[280px]">
+              <div className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 mb-2">Status atual</div>
+              <div className="text-sm font-bold text-slate-800">{feedback || 'Sem execução em andamento.'}</div>
+              <div className="text-xs text-slate-500 mt-2">
+                {isRecording ? `Proximo corte em ${fmtDuration(secondsUntilNextCut)}.` : `Janela configurada: ${formatChunkDurationLabel(chunkMinutes)}.`}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            {chunkExecutionSteps.map((step, index) => (
+              <div key={step.label} className={`rounded-[22px] border px-4 py-4 ${executionFlowTone(step.state)}`}>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <span className="text-[10px] uppercase tracking-[0.28em] font-black opacity-70">Etapa {index + 1}</span>
+                  <span className={`inline-flex h-2.5 w-2.5 rounded-full ${step.state === 'active' ? 'bg-cyan-500 animate-pulse' : step.state === 'success' ? 'bg-emerald-500' : step.state === 'warning' ? 'bg-amber-500' : step.state === 'error' ? 'bg-rose-500' : 'bg-slate-300'}`}></span>
+                </div>
+                <div className="text-base font-black tracking-tight mb-2">{step.label}</div>
+                <div className="text-xs leading-5">{step.detail}</div>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className="rounded-[30px] border border-white/80 bg-white/85 backdrop-blur-xl p-4 md:p-6 shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
@@ -642,7 +1022,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as ContinuousMemoryTab)}
-                  className={`px-4 py-2.5 rounded-2xl text-sm font-black tracking-tight transition-colors ${activeTab === tab.id ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  className={`px-4 py-2.5 rounded-2xl text-sm font-black tracking-tight transition-colors ${activeTab === tab.id ? 'bg-cyan-500 text-white shadow-[0_12px_24px_rgba(6,182,212,0.2)]' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                 >
                   {tab.label}
                 </button>
@@ -678,18 +1058,43 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
           {activeTab === 'line' && (
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.3fr)_420px] gap-6">
               <div className="space-y-4">
-                <div className="rounded-[26px] border border-slate-200 bg-slate-950 text-white px-5 py-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="rounded-[26px] border border-slate-200 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(30,41,59,0.96)_42%,rgba(14,165,233,0.9))] text-white px-5 py-4 grid grid-cols-1 md:grid-cols-4 gap-4 shadow-[0_18px_45px_rgba(15,23,42,0.12)]">
                   <div>
                     <span className="text-[10px] uppercase tracking-[0.3em] font-black text-cyan-300 block mb-2">Sessao atual</span>
                     <strong className="text-lg font-black">{activeSession?.title || 'Sem sessao ativa'}</strong>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 block mb-2">Chunk size</span>
-                    <select value={chunkMinutes} onChange={(event) => setChunkMinutes(Number(event.target.value))} className="bg-white/10 border border-white/10 rounded-xl px-3 py-2 text-sm w-full">
-                      <option value={3}>3 minutos</option>
-                      <option value={4}>4 minutos</option>
-                      <option value={5}>5 minutos</option>
-                    </select>
+                    <span className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 block mb-2">Corte automatico</span>
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap gap-2">
+                        {[0.25, 0.5, 1, 2, 3, 5].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setChunkMinutes(preset)}
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-black tracking-tight border ${chunkMinutes === preset ? 'bg-cyan-400 text-slate-950 border-cyan-300' : 'bg-white/10 text-white border-white/10 hover:bg-white/20'}`}
+                          >
+                            {formatChunkDurationLabel(preset)}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={0.25}
+                          max={15}
+                          step={0.25}
+                          value={chunkMinutes}
+                          onChange={(event) => setChunkMinutes(Math.min(15, Math.max(0.25, Number(event.target.value || DEFAULT_CHUNK_MINUTES))))}
+                          className="bg-white/10 border border-white/10 rounded-xl px-3 py-2 text-sm w-full"
+                        />
+                        <span className="text-xs uppercase tracking-[0.18em] text-slate-300 font-black">min</span>
+                      </div>
+                      <div className="text-xs text-slate-300 leading-5">
+                        Escolha livre: `0.25` = 15s, `0.5` = 30s, `1` = 1 min, `2` = 2 min, `3` = 3 min.
+                        {isRecording ? ` Proximo corte em ${fmtDuration(secondsUntilNextCut)}.` : ` Proxima sessao vai cortar em ${formatChunkDurationLabel(chunkMinutes)}.`}
+                      </div>
+                    </div>
                   </div>
                   <div>
                     <span className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 block mb-2">Sensibilidade</span>
@@ -711,24 +1116,25 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                 {filteredChunks.map((chunk) => {
                   const labelsForChunk = chunkLabels.filter((row) => row.chunkId === chunk.id).map((row) => labelNameById[row.labelId]).filter(Boolean);
                   const itemsForChunk = extractedItems.filter((row) => row.chunkId === chunk.id);
+                  const visualStatus = chunkVisualStatus(chunk);
                   return (
-                    <button key={chunk.id} onClick={() => setSelectedChunkId(chunk.id)} className={`w-full text-left rounded-[26px] border p-5 transition-all ${selectedChunk?.id === chunk.id ? 'border-slate-950 bg-slate-950 text-white shadow-[0_20px_45px_rgba(15,23,42,0.18)]' : 'border-slate-200 bg-white hover:border-cyan-300 hover:shadow-[0_16px_30px_rgba(8,145,178,0.10)]'}`}>
+                    <button key={chunk.id} onClick={() => setSelectedChunkId(chunk.id)} className={`w-full text-left rounded-[26px] border p-5 transition-all ${selectedChunk?.id === chunk.id ? 'border-cyan-200 bg-[linear-gradient(135deg,rgba(236,254,255,0.95),rgba(255,255,255,0.98))] text-slate-900 shadow-[0_20px_45px_rgba(6,182,212,0.14)]' : 'border-slate-200 bg-white hover:border-cyan-300 hover:shadow-[0_16px_30px_rgba(8,145,178,0.10)]'}`}>
                       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                         <div>
                           <div className="flex flex-wrap items-center gap-2 mb-3">
-                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? 'bg-white/10 text-white' : statusBadge(String(chunk.status))}`}>{chunkStatusLabel(String(chunk.status))}</span>
-                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-700'}`}>{fmtTime(toDate(chunk.startedAt || chunk.createdAt))}</span>
-                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? 'bg-white/10 text-cyan-200' : 'bg-cyan-50 text-cyan-700'}`}>{fmtDuration(chunk.durationSeconds)}</span>
+                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? statusBadge(visualStatus) : statusBadge(visualStatus)}`}>{chunkStatusLabel(visualStatus)}</span>
+                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? 'bg-white text-slate-700 border border-slate-200' : 'bg-slate-100 text-slate-700'}`}>{fmtTime(toDate(chunk.startedAt || chunk.createdAt))}</span>
+                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? 'bg-cyan-100 text-cyan-700' : 'bg-cyan-50 text-cyan-700'}`}>{fmtDuration(chunk.durationSeconds)}</span>
                           </div>
                           <h3 className="text-lg font-black tracking-tight mb-2">Bloco #{chunk.chunkIndex}</h3>
-                          <p className={`text-sm leading-6 ${selectedChunk?.id === chunk.id ? 'text-slate-200' : 'text-slate-600'}`}>
+                          <p className={`text-sm leading-6 ${selectedChunk?.id === chunk.id ? 'text-slate-600' : 'text-slate-600'}`}>
                             {String(chunk.transcriptText || 'Transcricao ainda nao disponivel.').slice(0, 220) || 'Transcricao ainda nao disponivel.'}
                           </p>
                         </div>
                         <div className="flex flex-col items-start md:items-end gap-3">
                           <div className="flex flex-wrap gap-2">
                             {labelsForChunk.slice(0, 4).map((label) => (
-                              <span key={`${chunk.id}-${label}`} className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{label}</span>
+                              <span key={`${chunk.id}-${label}`} className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? 'bg-white text-slate-600 border border-slate-200' : 'bg-slate-100 text-slate-600'}`}>{label}</span>
                             ))}
                           </div>
                           <div className="text-sm font-bold tracking-tight">
@@ -748,7 +1154,17 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                   <p className="text-sm text-slate-500 mt-2">{selectedChunk ? `${fmtDateTime(toDate(selectedChunk.startedAt || selectedChunk.createdAt))} • ${fmtDuration(selectedChunk.durationSeconds)}` : 'Abra um bloco na timeline para ver audio, transcricao, jobs e vinculos.'}</p>
                 </div>
 
-                {audioUrl && <audio controls className="w-full" src={audioUrl} />}
+                {audioUrl && (
+                  <div className="space-y-3">
+                    <audio controls className="w-full" src={audioUrl} />
+                    <button
+                      onClick={handleDownloadAudio}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 text-sm font-black hover:bg-slate-50"
+                    >
+                      Baixar audio deste bloco
+                    </button>
+                  </div>
+                )}
 
                 {selectedChunk && (
                   <>
@@ -757,6 +1173,12 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                         <span className="text-sm font-black tracking-tight">Transcricao completa</span>
                         <button onClick={handleRetryChunk} disabled={isBusy} className="px-3 py-2 rounded-xl bg-slate-950 text-white text-sm font-black disabled:opacity-50">Reprocessar bloco</button>
                       </div>
+                      {!!selectedChunk.errorMessage && (
+                        <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          <strong className="font-black uppercase tracking-[0.16em] text-[10px]">Aviso de transcricao</strong>
+                          <p className="mt-1">{selectedChunk.errorMessage}</p>
+                        </div>
+                      )}
                       <p className="text-sm leading-7 text-slate-700 whitespace-pre-wrap">{selectedChunk.transcriptText || 'Sem transcricao registrada.'}</p>
                     </div>
 
@@ -786,19 +1208,29 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                       <h4 className="text-sm font-black tracking-tight mb-3">Jobs e metadados</h4>
                       <div className="space-y-2 mb-4">
                         {selectedChunkJobs.length > 0 ? selectedChunkJobs.map((job) => (
-                          <div key={job.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2">
-                            <div>
-                              <div className="text-sm font-bold text-slate-800">{job.jobType}</div>
-                              <div className="text-xs text-slate-400">{job.processorName || 'processor'} • {fmtDateTime(job.startedAt)}</div>
+                          <div key={job.id} className="rounded-xl border border-slate-200 px-3 py-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-bold text-slate-800">{job.jobType}</div>
+                                <div className="text-xs text-slate-400">{job.processorName || 'processor'} • {fmtDateTime(job.startedAt)}</div>
+                              </div>
+                              <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${statusBadge(String(job.jobStatus))}`}>{jobStatusLabel(String(job.jobStatus))}</span>
                             </div>
-                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${statusBadge(String(job.jobStatus))}`}>{String(job.jobStatus)}</span>
+                            {(job.statusNote || job.errorMessage) && (
+                              <div className={`mt-2 text-xs ${job.errorMessage ? 'text-rose-600' : 'text-slate-500'}`}>
+                                {job.errorMessage || job.statusNote}
+                              </div>
+                            )}
                           </div>
                         )) : <span className="text-sm text-slate-400">Sem jobs vinculados.</span>}
                       </div>
                       <div className="text-sm text-slate-600 space-y-1">
+                        <div>Status da transcricao: {transcriptStatusLabel(String(selectedChunk.transcriptStatus || 'pending'))}</div>
                         <div>Idioma: {selectedChunk.detectedLanguage || 'n/d'}</div>
                         <div>Confianca: {selectedChunk.transcriptConfidence ? selectedChunk.transcriptConfidence.toFixed(2) : 'n/d'}</div>
                         <div>Noise score: {selectedChunk.noiseScore ? selectedChunk.noiseScore.toFixed(2) : 'n/d'}</div>
+                        <div>Persistencia: {persistenceMode === 'local' ? 'Navegador local' : 'Supabase Storage'}</div>
+                        <div>Arquivo: {selectedFile?.storagePath || 'n/d'}</div>
                         <div>Vinculos: {selectedChunkLinks.length}</div>
                       </div>
                     </div>
@@ -810,6 +1242,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                   <div className="space-y-2 text-sm text-slate-600">
                     <div>Sessao atual: {activeSession?.title || 'Sem sessao'}</div>
                     <div>Chunk atual: {selectedChunk ? `#${selectedChunk.chunkIndex}` : '-'}</div>
+                    <div>Persistencia: {persistenceMode === 'local' ? 'Navegador local' : 'Supabase'}</div>
                     <div>Fila de jobs: {jobsInFlight}</div>
                     <div>Ultimos erros: {jobs.filter((job) => job.jobStatus === 'error').slice(0, 2).length}</div>
                     <div>Ultimas extrações: {filteredItems.slice(0, 3).map((item) => item.title).join(' • ') || 'nenhuma'}</div>

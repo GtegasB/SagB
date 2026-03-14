@@ -27,11 +27,14 @@ VITE_TRANSCRIBE_PROVIDER=local_whisper
 VITE_LOCAL_WHISPER_URL=http://127.0.0.1:8000
 VITE_LOCAL_WHISPER_MODEL=whisper-1
 VITE_LOCAL_WHISPER_LANGUAGE=pt
+VITE_LOCAL_WHISPER_TIMEOUT_MS=180000
 ```
 
 Observação:
 - Se `VITE_TRANSCRIBE_PROVIDER=local_whisper`, o app não tenta usar `/api/ai` para transcrição.
 - `VITE_LOCAL_WHISPER_API_KEY` é opcional (somente se seu endpoint exigir autenticação).
+- `VITE_LOCAL_WHISPER_TIMEOUT_MS` define o tempo maximo de espera da UI pelo Whisper local.
+- Por padrao, `whisper-1` no servidor local usa o modelo `base` para reduzir carga de CPU em testes.
 
 ## Endpoint esperado
 - Health: `GET http://127.0.0.1:8000/health`
