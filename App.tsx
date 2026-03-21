@@ -286,14 +286,29 @@ const App: React.FC = () => {
     if (!Array.isArray(rows) || rows.length === 0) return [];
     if (!isUuid(activeWorkspaceId)) return rows;
 
+    const globalFallbackRows = rows.filter(row => !row.workspaceId || row.workspaceId === DEFAULT_WORKSPACE_ID);
     const exact = rows.filter(row => row.workspaceId === activeWorkspaceId);
-    if (exact.length > 0) return exact;
+    if (exact.length > 0) {
+      const merged = [...exact];
+      globalFallbackRows.forEach((row) => {
+        if (!merged.includes(row)) merged.push(row);
+      });
+      return merged;
+    }
 
     if (memberWorkspaceIds.length > 0) {
       const validWorkspaces = new Set(memberWorkspaceIds);
       const memberScoped = rows.filter(row => !!row.workspaceId && validWorkspaces.has(row.workspaceId));
-      if (memberScoped.length > 0) return memberScoped;
+      if (memberScoped.length > 0) {
+        const merged = [...memberScoped];
+        globalFallbackRows.forEach((row) => {
+          if (!merged.includes(row)) merged.push(row);
+        });
+        return merged;
+      }
     }
+
+    if (globalFallbackRows.length > 0) return globalFallbackRows;
 
     return rows;
   };
@@ -638,7 +653,7 @@ if (userId) {
       const mapped: Record<string, { fullPrompt?: string; globalDocuments?: Agent['globalDocuments']; docCount?: number }> = {};
       rows.forEach((row) => {
         const targetAgentId = String(row.agentId || row.agent_id || '').trim();
-        if (!targetAgentId) return;
+        if (!targetAgentId || mapped[targetAgentId]) return;
         mapped[targetAgentId] = {
           fullPrompt: row.fullPrompt || row.full_prompt || '',
           globalDocuments: row.globalDocuments || row.global_documents || [],
@@ -655,8 +670,8 @@ if (userId) {
       const rows = scopeGovernanceRowsByWorkspace(snapshot.docs.map(doc => doc.data() as AgentDnaProfile));
       const mapped: Record<string, AgentDnaProfile> = {};
       rows.forEach((row) => {
-        const targetAgentId = String(row.agentId || '').trim();
-        if (!targetAgentId) return;
+        const targetAgentId = String((row as any).agentId || (row as any).agent_id || '').trim();
+        if (!targetAgentId || mapped[targetAgentId]) return;
         mapped[targetAgentId] = row;
       });
       setAgentDnaProfilesByAgentId(mapped);
@@ -679,8 +694,8 @@ if (userId) {
       const rows = scopeGovernanceRowsByWorkspace(snapshot.docs.map(doc => doc.data() as AgentDnaEffective));
       const mapped: Record<string, AgentDnaEffective> = {};
       rows.forEach((row) => {
-        const targetAgentId = String(row.agentId || '').trim();
-        if (!targetAgentId) return;
+        const targetAgentId = String((row as any).agentId || (row as any).agent_id || '').trim();
+        if (!targetAgentId || mapped[targetAgentId]) return;
         mapped[targetAgentId] = row;
       });
       setAgentDnaEffectiveByAgentId(mapped);

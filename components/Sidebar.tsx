@@ -25,6 +25,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const DEFAULT_LOGO = "https://static.wixstatic.com/media/64c3dc_866011d493924761b15d6162e82c4948~mv2.png";
   const DEFAULT_AVATAR = "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&q=80&w=200&h=200";
+  const GENERIC_PROFILE_NAME = "Perfil em configuração";
+  const GENERIC_PROFILE_TIER = "CADASTRO PENDENTE";
 
   const menuItems: { id: TabId; label: string; subtitle?: string; icon: string }[] = [
     {
@@ -204,14 +206,14 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="mt-4 pt-4 border-t border-gray-100 px-3">
         <div className="flex items-center gap-3 p-2 rounded-xl bg-gray-50/50 border border-gray-100/50">
           <div className="w-9 h-9 rounded-lg overflow-hidden border border-white shadow-sm shrink-0">
-            <img src={userProfile?.avatarUrl || DEFAULT_AVATAR} className="w-full h-full object-cover" />
+            <img src={DEFAULT_AVATAR} alt="Perfil genérico" className="w-full h-full object-cover" />
           </div>
           <div className="flex flex-col min-w-0">
             <span className="text-[11px] font-bold text-gray-900 truncate tracking-tight">
-              {userProfile?.name || 'Usuário'}
+              {GENERIC_PROFILE_NAME}
             </span>
             <span className="text-[9px] font-black text-gray-400 truncate uppercase tracking-widest">
-              {userProfile?.tier || 'ESTRATÉGICO'}
+              {GENERIC_PROFILE_TIER}
             </span>
           </div>
         </div>
