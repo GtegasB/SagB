@@ -2,6 +2,9 @@
 import React, { useEffect, useState } from 'react';
 import { Agent } from '../types';
 import { AlertTriangleIcon, BotIcon, ChevronRightIcon, SearchIcon } from './Icon';
+import { Avatar } from './Avatar';
+import { db, collection, query, where, orderBy, onSnapshot } from '../services/supabase';
+import { getLastMessageForSession, resolveWorkspaceId } from '../utils/supabaseChat';
 
 interface ConversationsViewProps {
   agents: Agent[];

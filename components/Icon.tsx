@@ -45,6 +45,10 @@ export const BotIcon = ({ className }: { className?: string }) => (
   <BaseIcon d="M12 2a2 2 0 0 1 2 2v2h-4V4a2 2 0 0 1 2-2zM6 8h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2zM9 14h6" className={className} />
 );
 
+export const AlertTriangleIcon = ({ className }: { className?: string }) => (
+  <BaseIcon d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01" className={className} />
+);
+
 export const EyeIcon = ({ className }: { className?: string }) => (
   <BaseIcon d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" className={className} />
 );
