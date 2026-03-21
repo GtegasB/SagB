@@ -1,12 +1,11 @@
 
-// 🔒 LOCKED MODULE - GOLDEN SEAL (Protocolo Newton)
-// Esta tela foi aprovada como funcionalidade "ClickUp-Like". 
-// Não alterar lógica de entrada sem permissão expressa de Douglas Rodrigues.
+// 🔒 LOCKED MODULE - GOLDEN SEAL
+// Esta tela foi aprovada como funcionalidade "ClickUp-Like".
 
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Message, Sender, Task } from '../types';
-import { startKlausSession, transcribeAudio } from '../services/gemini';
+import { startMainSession, transcribeAudio } from '../services/gemini';
 import { SendIcon, MicIcon, StopCircleIcon, PaperclipIcon, XIcon, FileTextIcon } from './Icon';
 import {
   appendMessage,
@@ -26,6 +25,14 @@ interface ManagementViewProps {
 }
 
 const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpdateTaskStatus, activeWorkspaceId, ownerUserId }) => {
+  const managementAgentId = 'management-console';
+  const managementAgentName = 'Assistente de Gestão';
+  const managementInstruction = `
+Você é um assistente de gestão e execução.
+Organize tarefas, converta pedidos em ações e mantenha objetividade.
+Quando fizer sentido, devolva JSON com formato de criação de tarefa.
+`.trim();
+
   // Chat State
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -49,16 +56,15 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
   // Initialize Chat Session
   useEffect(() => {
     let cancelled = false;
-    const klausAgentId = 'klaus-management';
 
     const bootstrap = async () => {
-      const session = startKlausSession();
+      const session = startMainSession('Console de gestão operacional.', managementInstruction);
       setChatSession(session);
 
       try {
         const existing = await findLatestSession({
           workspaceId: activeWorkspaceId,
-          agentId: klausAgentId,
+          agentId: managementAgentId,
           buId: 'grupob'
         });
 
@@ -66,20 +72,20 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
         if (!targetSessionId) {
           targetSessionId = await createSession({
             workspaceId: activeWorkspaceId,
-            agentId: klausAgentId,
+            agentId: managementAgentId,
             ownerUserId,
             buId: 'grupob',
-            title: 'Klaus • Console de Estratégia',
+            title: 'Console de Gestão',
             payload: { kind: 'management-chat' }
           });
           await appendMessage({
             workspaceId: activeWorkspaceId,
             sessionId: targetSessionId,
-            agentId: klausAgentId,
+            agentId: managementAgentId,
             sender: Sender.Bot,
             text: 'Console de estratégia pronto. Traga o cenário e converto para execução.',
             buId: 'grupob',
-            participantName: 'Klaus'
+            participantName: managementAgentName
           });
         }
 
@@ -160,7 +166,7 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
         status: 'todo',
         createdAt: new Date(),
         dueDate: targetDate ? new Date(targetDate) : undefined,
-        assignee: 'Klaus'
+        assignee: managementAgentName
     };
     
     onAddTask(newTask);
@@ -185,7 +191,7 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
       const savedUser = await appendMessage({
         workspaceId: activeWorkspaceId,
         sessionId,
-        agentId: 'klaus-management',
+        agentId: managementAgentId,
         sender: Sender.User,
         text: displayText,
         buId: 'grupob',
@@ -216,11 +222,11 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
       const savedBot = await appendMessage({
         workspaceId: activeWorkspaceId,
         sessionId,
-        agentId: 'klaus-management',
+        agentId: managementAgentId,
         sender: Sender.Bot,
         text: '',
         buId: 'grupob',
-        participantName: 'Klaus',
+        participantName: managementAgentName,
         isStreaming: true
       });
       persistedBotId = savedBot.id;
@@ -244,14 +250,14 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
                   title: command.title,
                   status: command.status || 'todo',
                   createdAt: new Date(),
-                  assignee: 'Klaus'
+                  assignee: managementAgentName
                };
                onAddTask(newTask);
                const sysText = `✅ Tarefa criada via Chat: "${newTask.title}"`;
                const savedSystem = await appendMessage({
                  workspaceId: activeWorkspaceId,
                  sessionId,
-                 agentId: 'klaus-management',
+                 agentId: managementAgentId,
                  sender: Sender.System,
                  text: sysText,
                  buId: 'grupob',
@@ -266,7 +272,7 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
                }]);
             }
          } catch (e) {
-            console.error("Failed to parse Klaus JSON", e);
+            console.error("Failed to parse management JSON", e);
          }
       }
       
@@ -319,7 +325,7 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
          </div>
 
          <div className="flex items-center gap-4 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">
-            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider hidden md:block">{task.assignee || 'Klaus'}</span>
+            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider hidden md:block">{task.assignee || managementAgentName}</span>
             
             <div className="relative group/status">
                <select 
@@ -431,14 +437,14 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
           </div>
        </div>
 
-       {/* RIGHT: KLAUS CONSOLE (40%) */}
+      {/* RIGHT: MANAGEMENT CONSOLE (40%) */}
        <div className="flex-[2] flex flex-col bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.02)] z-10 border-l border-gray-100">
           <header className="h-16 px-6 flex items-center gap-4 border-b border-gray-100 bg-white">
              <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-black text-xs border border-blue-200">
-                K
+                {managementAgentName.charAt(0).toUpperCase()}
              </div>
              <div>
-                <h3 className="text-xs font-black text-gray-800 uppercase tracking-wide">Klaus (Architect)</h3>
+                <h3 className="text-xs font-black text-gray-800 uppercase tracking-wide">{managementAgentName}</h3>
                 <p className="text-[9px] text-green-500 font-bold uppercase tracking-widest flex items-center gap-1">
                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
                    Online
@@ -488,7 +494,7 @@ const ManagementView: React.FC<ManagementViewProps> = ({ tasks, onAddTask, onUpd
                 <input 
                    value={input}
                    onChange={e => setInput(e.target.value)}
-                   placeholder={isTranscribing ? "Ouvindo..." : "Debater estratégia com Klaus..."}
+                   placeholder={isTranscribing ? "Ouvindo..." : "Debater estratégia com o assistente..."}
                    className="flex-1 bg-transparent px-4 py-2 text-xs font-medium outline-none text-gray-700"
                    disabled={isLoading || isTranscribing}
                 />

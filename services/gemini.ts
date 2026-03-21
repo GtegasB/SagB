@@ -133,6 +133,13 @@ export const setRuntimeAiContext = (next: RuntimeAiContext) => {
   };
 };
 
+export const getRuntimeAiContext = (): RuntimeAiContext => ({
+  ...runtimeAiContext,
+  agentIdentityByKey: {
+    ...(runtimeAiContext.agentIdentityByKey || {})
+  }
+});
+
 const buildInstruction = (coreIdentity: string, agentKey?: string): string => {
   const constitution = runtimeAiContext.constitution || GLOBAL_LAYER;
   const context = runtimeAiContext.context || CONTEXT_LAYER;
@@ -157,9 +164,14 @@ ${context}
 `.trim();
 };
 
-export const createPietroInstruction = (): string => buildInstruction(PIETRO_CORE, 'ca006gpb');
-export const createCassioInstruction = (): string => buildInstruction(CASSIO_CORE, 'ca045tgs');
-export const createKlausInstruction = (): string => buildInstruction(KLAUS_CORE, 'ca044tgs');
+export const createDefaultInstruction = (): string => buildInstruction(PIETRO_CORE, 'ca006gpb');
+export const createSpecialistInstruction = (): string => buildInstruction(CASSIO_CORE, 'ca045tgs');
+export const createManagementInstruction = (): string => buildInstruction(KLAUS_CORE, 'ca044tgs');
+
+// Aliases legados para compatibilidade retroativa.
+export const createPietroInstruction = (): string => createDefaultInstruction();
+export const createCassioInstruction = (): string => createSpecialistInstruction();
+export const createKlausInstruction = (): string => createManagementInstruction();
 
 export { GLOBAL_LAYER as GLOBAL_GOVERNANCE_RULES, DEFAULT_PIETRO_PROMPT, DEFAULT_CASSIO_PROMPT, KLAUS_PROMPT, NEWTON_PROMPT } from "../data/prompts";
 
@@ -167,7 +179,7 @@ let mainChatSession: BackendChatSession | null = null;
 
 export const startMainSession = (context: string = "", customInstruction: string | null = null) => {
   const instruction = `
-${customInstruction || createPietroInstruction()}
+${customInstruction || createDefaultInstruction()}
 [SITUACAO DA SALA]:
 ${context || 'Sala de Comando Central.'}
 `.trim();
@@ -182,18 +194,18 @@ ${context || 'Sala de Comando Central.'}
 };
 
 export const startPietroSession = (participantsContext: string = "") => {
-  return startMainSession(participantsContext, createPietroInstruction());
+  return startMainSession(participantsContext, createDefaultInstruction());
 };
 
 export const startKlausSession = () => {
   return new BackendChatSession({
     modelId: 'gemini-2.5-flash',
-    systemInstruction: createKlausInstruction(),
+    systemInstruction: createManagementInstruction(),
     temperature: 0.3
   });
 };
 
-export const sendMessageStream = async (message: string, participantsContext: string = "") => {
+export const sendMessageStream = async (message: SessionSendPayload['message'], participantsContext: string = "") => {
   if (!mainChatSession) startPietroSession(participantsContext);
   if (!mainChatSession) throw new Error("Session not initialized");
 
@@ -247,9 +259,9 @@ ${kbContext}
 
 [PROTOCOLO DE ORQUESTRACAO / SUMMON]:
 Se o usuario pedir explicitamente para "chamar", "convocar" ou "colocar" outra pessoa/agente na conversa:
-1. Responda confirmando a acao naturalmente (Ex: "Certo, chamando o Pietro agora.").
+1. Responda confirmando a acao naturalmente (Ex: "Certo, chamando o especialista agora.").
 2. IMEDIATAMENTE APOS a confirmacao, adicione a tag oculta: <<<CALL: Nome do Agente>>>
-Exemplo: "Entendido, Rodrigues. O Klaus entrara na sala. <<<CALL: Klaus Wagner>>>"
+Exemplo: "Entendido. O especialista entrara na sala. <<<CALL: Especialista Growth>>>"
 Nao simule o dialogo do novo agente ainda. Apenas emita o comando.
 
 [ID DO AGENTE]: ${agentId}

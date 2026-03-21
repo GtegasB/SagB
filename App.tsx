@@ -25,17 +25,15 @@ import RadarConnectionsView from './components/RadarConnectionsView';
 import UnitView from './components/UnitView';
 import ConversationsView from './components/ConversationsView';
 import Auth from './components/Auth'; // NOVA IMPORTAÇÃO
-import { Message, Sender, PersonaConfig, TabId, Agent, Decision, Topic, Venture, BusinessUnit, BusinessBlueprint, Task, UserProfile, GovernanceCulture, ComplianceRule, VaultItem, KnowledgeNode, WorkspaceMember, AgentQualityEvent } from './types';
+import { Message, Sender, TabId, Agent, Topic, Venture, BusinessUnit, BusinessBlueprint, Task, UserProfile, GovernanceCulture, ComplianceRule, VaultItem, KnowledgeNode, WorkspaceMember, AgentQualityEvent, AgentDnaProfile, AgentDnaEffective } from './types';
 import {
   sendMessageStream,
   startMainSession,
-  createPietroInstruction,
-  createCassioInstruction,
   setRuntimeAiContext,
-  KLAUS_PROMPT,
-  NEWTON_PROMPT,
+  getRuntimeAiContext,
   transcribeAudio
 } from './services/gemini';
+import { composeEffectivePrompt, resolveAgentBasePrompt } from './services/agentDna';
 import metadata from './metadata.json';
 import { db, auth, onAuthStateChanged, signOut, User } from './services/supabase';
 import { collection, onSnapshot, doc, addDoc, updateDoc, deleteDoc, setDoc, query, where, orderBy, Timestamp } from './services/supabase';
@@ -59,9 +57,8 @@ const isUuid = (value: any) =>
 const normalizeStatus = (value: any) => String(value || '').trim().toLowerCase();
 
 // IMAGENS ESTÁVEIS (ATUALIZADAS V5.3 - CDN LINKS)
-const PIETRO_IMAGE = "https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&q=80&w=200&h=200";
-const DOUGLAS_IMAGE = "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&q=80&w=200&h=200";
-const CASSIO_IMAGE = "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=200&h=200";
+const USER_FALLBACK_IMAGE = "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&q=80&w=200&h=200";
+const ASSISTANT_FALLBACK_IMAGE = "https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&q=80&w=200&h=200";
 
 const INITIAL_BUSINESS_UNITS: BusinessUnit[] = [
   // CORE - Paleta "Spectrum 600" (Clarificada e Moderna)
@@ -126,7 +123,7 @@ const INITIAL_BUSINESS_UNITS: BusinessUnit[] = [
   { id: 'ziplia', name: 'Ziplia', themeColor: '#8B5CF6', description: 'Plataforma Multi-IA', type: 'VENTURY', sigla: 'zip' },
   { id: 'seddore', name: 'Seddore', themeColor: '#475569', description: 'Ambientes de Alto Padrão', type: 'VENTURY', sigla: 'sed' },
   { id: 'piblo', name: 'Piblo', themeColor: '#0EA5E9', description: 'Hub de Negócios Multicategoria', type: 'VENTURY', sigla: 'pib' },
-  { id: 'douglas-rodrigues', name: 'Douglas Rodrigues', themeColor: '#111827', description: 'Mentoria Estratégica de Crescimento', type: 'VENTURY', sigla: 'drg' },
+  { id: 'mentoria-estrategica', name: 'Mentoria Estratégica', themeColor: '#111827', description: 'Mentoria Estratégica de Crescimento', type: 'VENTURY', sigla: 'mec' },
 
   // METODOLOGIAS
   { id: 'gerac', name: 'GERAC', themeColor: '#800080', description: 'Gestão e Empreendedorismo Responsável', type: 'METHODOLOGY', sigla: 'grc' },
@@ -135,28 +132,19 @@ const INITIAL_BUSINESS_UNITS: BusinessUnit[] = [
   { id: 'dr-metodo', name: 'Decisão & Resultado', themeColor: '#10B981', description: 'Metodologia de Performance', type: 'METHODOLOGY', sigla: 'drm' }
 ];
 
-const PIETRO_PERSONA: PersonaConfig = {
-  id: 'pietro',
-  name: 'Pietro Carboni',
-  baseRole: 'Diretor de Metodologias e Arquitetura Mental',
-  tier: 'CONTROLE',
-  contextInfo: 'Guardião da cultura e métodos GrupoB',
-  tone: 'Estratégico, seco e focado em ROI',
-  welcomeMessage: 'Na linha, Rodrigues. Qual a pauta?',
-  avatarColor: '#800080',
-  imageUrl: PIETRO_IMAGE
-};
+const DIRECT_CHANNEL_FALLBACK_PROMPT = `
+Você é um assistente estratégico do ecossistema.
+Atue com clareza, objetividade e foco em execução.
+Quando houver dúvidas, proponha próximos passos práticos.
+`.trim();
 
-const CASSIO_PERSONA: PersonaConfig = {
-  id: 'cassio',
-  name: 'Cássio Mendes',
-  baseRole: 'Arquiteto de Software Sênior',
-  tier: 'TÁTICO',
-  contextInfo: 'Especialista em React, Tailwind e Arquitetura Limpa',
-  tone: 'Técnico, preciso e focado em excelência de código',
-  welcomeMessage: 'Editor aberto, Rodrigues. Qual a stack de hoje?',
-  avatarColor: '#0EA5E9',
-  imageUrl: null
+const getTierRank = (tier?: string | null) => {
+  const normalized = String(tier || '').toUpperCase();
+  if (normalized === 'CONTROLE') return 0;
+  if (normalized === 'ESTRATÉGICO') return 1;
+  if (normalized === 'TÁTICO') return 2;
+  if (normalized === 'OPERACIONAL') return 3;
+  return 99;
 };
 
 const App: React.FC = () => {
@@ -173,6 +161,8 @@ const App: React.FC = () => {
 
   const [activatedAgents, setActivatedAgents] = useState<Agent[]>([]);
   const [agentConfigsByAgentId, setAgentConfigsByAgentId] = useState<Record<string, { fullPrompt?: string; globalDocuments?: Agent['globalDocuments']; docCount?: number }>>({});
+  const [agentDnaProfilesByAgentId, setAgentDnaProfilesByAgentId] = useState<Record<string, AgentDnaProfile>>({});
+  const [agentDnaEffectiveByAgentId, setAgentDnaEffectiveByAgentId] = useState<Record<string, AgentDnaEffective>>({});
   const [agentMemoriesByAgentId, setAgentMemoriesByAgentId] = useState<Record<string, string[]>>({});
   const [messages, setMessages] = useState<Message[]>([]);
   const [mainChatSessionId, setMainChatSessionId] = useState<string | null>(null);
@@ -332,6 +322,7 @@ const App: React.FC = () => {
   // Seleção de Agente para Onboarding (Vem do Ecossistema)
   const [agentToOnboard, setAgentToOnboard] = useState<Agent | null>(null);
   const [chatTargetAgent, setChatTargetAgent] = useState<Agent | null>(null); // Agente alvo para conversa
+  const [chatTargetSessionId, setChatTargetSessionId] = useState<string | null>(null);
 
   // V1.7.8 - Governance Deep Link State
   const [governanceTargetId, setGovernanceTargetId] = useState<string | null>(null);
@@ -539,6 +530,7 @@ if (userId) {
   useEffect(() => {
     if (activeTab !== 'chat-room' && chatTargetAgent) {
       setChatTargetAgent(null);
+      setChatTargetSessionId(null);
     }
   }, [activeTab, chatTargetAgent]);
 
@@ -596,6 +588,8 @@ if (userId) {
       setVaultItems([]);
       setKnowledgeNodes([]);
       setAgentConfigsByAgentId({});
+      setAgentDnaProfilesByAgentId({});
+      setAgentDnaEffectiveByAgentId({});
       setAgentMemoriesByAgentId({});
       setAgentQualityEvents([]);
       return;
@@ -614,6 +608,8 @@ if (userId) {
     );
 
     const agentConfigsQuery = query(collection(db, 'agent_configs'), orderBy('updatedAt', 'desc'));
+    const agentDnaProfilesQuery = query(collection(db, 'agent_dna_profiles'), orderBy('updatedAt', 'desc'));
+    const agentDnaEffectiveQuery = query(collection(db, 'agent_dna_effective'), orderBy('updatedAt', 'desc'));
     const agentMemoriesQuery = query(collection(db, 'agent_memories'), orderBy('createdAt', 'desc'));
     const qualityEventsQuery = query(collection(db, 'agent_quality_events'), orderBy('createdAt', 'desc'));
 
@@ -651,6 +647,54 @@ if (userId) {
       });
       setAgentConfigsByAgentId(mapped);
     }, (error) => console.error('Erro ao carregar agent_configs:', error));
+
+    let unsubscribeAgentDnaProfiles: () => void = () => {};
+    let agentDnaProfilesSubscriptionDisabled = false;
+    unsubscribeAgentDnaProfiles = onSnapshot(agentDnaProfilesQuery, (snapshot) => {
+      if (agentDnaProfilesSubscriptionDisabled) return;
+      const rows = scopeGovernanceRowsByWorkspace(snapshot.docs.map(doc => doc.data() as AgentDnaProfile));
+      const mapped: Record<string, AgentDnaProfile> = {};
+      rows.forEach((row) => {
+        const targetAgentId = String(row.agentId || '').trim();
+        if (!targetAgentId) return;
+        mapped[targetAgentId] = row;
+      });
+      setAgentDnaProfilesByAgentId(mapped);
+    }, (error) => {
+      const rawMessage = String((error as any)?.details?.message || (error as any)?.message || error || '');
+      if (/Could not find the table 'public\.agent_dna_profiles'/i.test(rawMessage)) {
+        agentDnaProfilesSubscriptionDisabled = true;
+        setAgentDnaProfilesByAgentId({});
+        console.warn('Tabela public.agent_dna_profiles ainda nao existe no Supabase. Assinatura de DNA individual desativada ate aplicar migration.');
+        unsubscribeAgentDnaProfiles();
+        return;
+      }
+      console.error('Erro ao carregar agent_dna_profiles:', error);
+    });
+
+    let unsubscribeAgentDnaEffective: () => void = () => {};
+    let agentDnaEffectiveSubscriptionDisabled = false;
+    unsubscribeAgentDnaEffective = onSnapshot(agentDnaEffectiveQuery, (snapshot) => {
+      if (agentDnaEffectiveSubscriptionDisabled) return;
+      const rows = scopeGovernanceRowsByWorkspace(snapshot.docs.map(doc => doc.data() as AgentDnaEffective));
+      const mapped: Record<string, AgentDnaEffective> = {};
+      rows.forEach((row) => {
+        const targetAgentId = String(row.agentId || '').trim();
+        if (!targetAgentId) return;
+        mapped[targetAgentId] = row;
+      });
+      setAgentDnaEffectiveByAgentId(mapped);
+    }, (error) => {
+      const rawMessage = String((error as any)?.details?.message || (error as any)?.message || error || '');
+      if (/Could not find the table 'public\.agent_dna_effective'/i.test(rawMessage)) {
+        agentDnaEffectiveSubscriptionDisabled = true;
+        setAgentDnaEffectiveByAgentId({});
+        console.warn('Tabela public.agent_dna_effective ainda nao existe no Supabase. Assinatura de DNA efetivo desativada ate aplicar migration.');
+        unsubscribeAgentDnaEffective();
+        return;
+      }
+      console.error('Erro ao carregar agent_dna_effective:', error);
+    });
 
     let unsubscribeAgentMemories: () => void = () => {};
     let agentMemoriesSubscriptionDisabled = false;
@@ -706,6 +750,8 @@ if (userId) {
       unsubscribeVault();
       unsubscribeKnowledge();
       unsubscribeAgentConfigs();
+      unsubscribeAgentDnaProfiles();
+      unsubscribeAgentDnaEffective();
       unsubscribeAgentMemories();
       unsubscribeQualityEvents();
     };
@@ -873,8 +919,20 @@ if (userId) {
     } else {
       // Se ativo, vai para Chat (SystemicVision/SplitView)
       setChatTargetAgent(agent);
+      setChatTargetSessionId(null);
       setActiveTab('chat-room');
     }
+  };
+
+  const handleOpenAgentSession = (agent: Agent, sessionId: string) => {
+    if (agent.status === 'PLANNED') {
+      setAgentToOnboard(agent);
+      setActiveTab('fabrica-ca');
+      return;
+    }
+    setChatTargetAgent(agent);
+    setChatTargetSessionId(sessionId);
+    setActiveTab('chat-room');
   };
 
   // Nova função para atualizar agentes diretamente da Governança (DNA Editor)
@@ -889,6 +947,12 @@ if (userId) {
     const currentUserId = userProfile?.uid || user?.id || null;
     const normalizedGlobalDocuments = globalDocuments || [];
     const normalizedDocCount = docCount ?? normalizedGlobalDocuments.length;
+    const governanceForComposition = {
+      constitution: latestCultureEntry?.contentMd || getRuntimeAiContext().constitution,
+      context: latestCultureEntry?.summary || getRuntimeAiContext().context,
+      compliance: activeComplianceRule?.ruleMd || getRuntimeAiContext().compliance
+    };
+    const effectivePrompt = composeEffectivePrompt(fullPrompt || '', governanceForComposition);
 
     // Atualização do cadastro-base do agente é best-effort para não bloquear o salvamento do DNA.
     // Tabelas em produção podem variar de schema e rejeitar colunas extras.
@@ -921,6 +985,29 @@ if (userId) {
     } catch (e: any) {
       console.error("Erro ao salvar agent_configs:", e);
       throw new Error(`Falha ao salvar DNA do agente no Supabase: ${String(e?.message || e)}`);
+    }
+
+    try {
+      await setDoc(doc(db, 'agent_dna_profiles', id), {
+        workspaceId: workspaceIdForSave,
+        agentId: id,
+        individualPrompt: fullPrompt || '',
+        status: 'active',
+        updatedBy: currentUserId,
+        updatedAt: new Date()
+      }, { merge: true });
+
+      await setDoc(doc(db, 'agent_dna_effective', id), {
+        workspaceId: workspaceIdForSave,
+        agentId: id,
+        effectivePrompt,
+        status: 'active',
+        syncedAt: new Date(),
+        updatedAt: new Date()
+      }, { merge: true });
+    } catch (e: any) {
+      console.error('Erro ao salvar DNA em camadas:', e);
+      throw new Error(`Falha ao sincronizar DNA em camadas: ${String(e?.message || e)}`);
     }
   };
 
@@ -1177,22 +1264,6 @@ if (userId) {
     event.target.value = '';
   };
 
-  useEffect(() => {
-    // SAFEGUARD: Ensure activeBU is valid
-    if (!activeBU) return;
-
-    const isTechUnit = activeBU.id === 'startyb';
-    const context = `Contexto: Unidade ${activeBU.name}. ${isTechUnit ? 'Desenvolvimento e Arquitetura' : 'Pietro auditando operação'}.`;
-
-    try {
-      // Troca o DNA do agente principal baseado na Unidade
-      const instruction = isTechUnit ? createCassioInstruction() : createPietroInstruction();
-      startMainSession(context, instruction);
-    } catch (e) {
-      console.error("Init Error:", e);
-    }
-  }, [activeBU]);
-
   // --- DATABASE SYNC (SUBSTITUI LOCALSTORAGE PARA AGENTES) ---
   useEffect(() => {
     if (!user) return;
@@ -1206,13 +1277,23 @@ if (userId) {
 
       const hydratedAgents = remoteAgents.map((agent) => {
         const config = agentConfigsByAgentId[agent.id] || (agent.universalId ? agentConfigsByAgentId[agent.universalId] : undefined);
+        const dnaProfile = agentDnaProfilesByAgentId[agent.id] || (agent.universalId ? agentDnaProfilesByAgentId[agent.universalId] : undefined);
+        const dnaEffective = agentDnaEffectiveByAgentId[agent.id] || (agent.universalId ? agentDnaEffectiveByAgentId[agent.universalId] : undefined);
         const memories = agentMemoriesByAgentId[agent.id]
           || (agent.universalId ? agentMemoriesByAgentId[agent.universalId] : undefined)
           || agent.learnedMemory
           || [];
+        const basePrompt = dnaProfile?.individualPrompt || config?.fullPrompt || agent.fullPrompt || '';
+        const fallbackEffective = composeEffectivePrompt(basePrompt, {
+          constitution: latestCultureEntry?.contentMd,
+          context: latestCultureEntry?.summary,
+          compliance: activeComplianceRule?.ruleMd
+        });
         return {
           ...agent,
           fullPrompt: config?.fullPrompt ?? agent.fullPrompt ?? '',
+          dnaIndividualPrompt: dnaProfile?.individualPrompt ?? basePrompt,
+          effectivePrompt: dnaEffective?.effectivePrompt ?? fallbackEffective,
           globalDocuments: config?.globalDocuments ?? agent.globalDocuments,
           docCount: config?.docCount ?? agent.docCount,
           learnedMemory: Array.from(new Set(memories.filter(Boolean)))
@@ -1225,7 +1306,15 @@ if (userId) {
     });
 
     return () => unsubscribe();
-  }, [user, agentConfigsByAgentId, agentMemoriesByAgentId]);
+  }, [
+    user,
+    agentConfigsByAgentId,
+    agentDnaProfilesByAgentId,
+    agentDnaEffectiveByAgentId,
+    agentMemoriesByAgentId,
+    latestCultureEntry,
+    activeComplianceRule
+  ]);
 
   // --- SAVE STATE ---
 
@@ -1239,15 +1328,62 @@ if (userId) {
   const filteredMessages = messages.filter(m => activeBU && m.buId === activeBU.id);
   const currentBlueprint = activeBU ? (blueprints[activeBU.id] || {}) : {};
   const ownerUserId = userProfile?.uid || (user as any)?.id || (user as any)?.uid || null;
+  const currentUserDisplayName = userProfile?.name || userProfile?.nickname || 'Usuário';
   const audacusGatewayByBu = (uiPrefs.audacusGatewayByBu && typeof uiPrefs.audacusGatewayByBu === 'object')
     ? uiPrefs.audacusGatewayByBu
     : {};
 
+  const directChannelAgent = useMemo(() => {
+    const buScoped = activatedAgents.filter((agent) =>
+      agent?.status === 'ACTIVE' && (agent?.buId === activeBU.id || activeBU.id === 'grupob')
+    );
+    if (buScoped.length === 0) return null;
+
+    return [...buScoped].sort((a, b) => {
+      const tierDiff = getTierRank(a.tier) - getTierRank(b.tier);
+      if (tierDiff !== 0) return tierDiff;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    })[0] || null;
+  }, [activatedAgents, activeBU.id]);
+
+  const directChannelProfile = useMemo(() => {
+    if (directChannelAgent) {
+      const resolvedInstruction = resolveAgentBasePrompt(directChannelAgent);
+      return {
+        name: directChannelAgent.name,
+        avatarColor: directChannelAgent.avatarColor || '#0EA5E9',
+        imageUrl: directChannelAgent.avatarUrl || ASSISTANT_FALLBACK_IMAGE,
+        instruction: resolvedInstruction || DIRECT_CHANNEL_FALLBACK_PROMPT
+      };
+    }
+
+    return {
+      name: 'Assistente da Unidade',
+      avatarColor: '#0EA5E9',
+      imageUrl: ASSISTANT_FALLBACK_IMAGE,
+      instruction: DIRECT_CHANNEL_FALLBACK_PROMPT
+    };
+  }, [directChannelAgent]);
+
+  useEffect(() => {
+    // SAFEGUARD: Ensure activeBU is valid
+    if (!activeBU) return;
+
+    const context = `Contexto: Unidade ${activeBU.name}. Canal direto com foco em estratégia e execução.`;
+
+    try {
+      startMainSession(context, directChannelProfile.instruction);
+    } catch (e) {
+      console.error("Init Error:", e);
+    }
+  }, [activeBU, directChannelProfile.instruction]);
+
   useEffect(() => {
     const agentIdentityByKey = activatedAgents.reduce((acc, agent) => {
-      if (agent?.fullPrompt?.trim()) {
-        acc[agent.id] = agent.fullPrompt;
-        if (agent.universalId) acc[agent.universalId] = agent.fullPrompt;
+      const resolved = resolveAgentBasePrompt(agent);
+      if (resolved) {
+        acc[agent.id] = resolved;
+        if (agent.universalId) acc[agent.universalId] = resolved;
       }
       return acc;
     }, {} as Record<string, string>);
@@ -1313,9 +1449,6 @@ if (userId) {
     };
   }, [activeBU.id, activeBU.name, activeWorkspaceId, ownerUserId]);
 
-  // Determina o "Diretor Ativo" para exibir o placeholder correto e avatar
-  const activeDirector = activeBU && activeBU.id === 'startyb' ? CASSIO_PERSONA : PIETRO_PERSONA;
-
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if ((!input.trim() && !attachment) || isLoading || !mainChatSessionId) return;
@@ -1347,13 +1480,13 @@ if (userId) {
         sender: Sender.Bot,
         text: '',
         buId: activeBU.id,
-        participantName: activeDirector.name,
+        participantName: directChannelProfile.name,
         isStreaming: true
       });
       persistedBotId = savedBot.id;
 
       setIsLoading(true);
-      setMessages(prev => [...prev, { id: persistedBotId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true, participantName: activeDirector.name }]);
+      setMessages(prev => [...prev, { id: persistedBotId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true, participantName: directChannelProfile.name }]);
 
       let messagePayload: any = userText;
       if (currentAttachment) {
@@ -1362,7 +1495,7 @@ if (userId) {
           { inlineData: { mimeType: currentAttachment.mimeType, data: currentAttachment.data } }
         ];
       }
-      const stream = await sendMessageStream(messagePayload, `Direto com Rodrigues. Unidade: ${activeBU.name}.`);
+      const stream = await sendMessageStream(messagePayload, `Canal direto. Unidade: ${activeBU.name}. Interlocutor: ${currentUserDisplayName}.`);
       let fullText = '';
 
       for await (const chunk of stream) {
@@ -1379,8 +1512,8 @@ if (userId) {
     } catch (error) {
       console.error(error);
       if (persistedBotId) {
-        setMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, text: "Falha de conexão com o Diretor (API Key Error).", isStreaming: false } : msg));
-        await updateMessage(persistedBotId, { text: "Falha de conexão com o Diretor (API Key Error).", isStreaming: false, updatedAt: new Date() }).catch(() => null);
+        setMessages(prev => prev.map(msg => msg.id === persistedBotId ? { ...msg, text: "Falha de conexão com o assistente (API Key Error).", isStreaming: false } : msg));
+        await updateMessage(persistedBotId, { text: "Falha de conexão com o assistente (API Key Error).", isStreaming: false, updatedAt: new Date() }).catch(() => null);
       }
       const sysText = "⚠️ **ERRO DE SISTEMA:** Não foi possível conectar ao Gemini API. Verifique as variáveis de ambiente.";
       const savedSystem = await appendMessage({
@@ -1447,7 +1580,7 @@ if (userId) {
       case 'unit-room': return <UnitView activeBU={activeBU} agents={activatedAgents} onBack={handleBackNavigation} activeWorkspaceId={activeWorkspaceId} ownerUserId={ownerUserId} />;
 
       // NOVA ROTA: CONVERSAS (HISTÓRICO)
-      case 'conversations': return <ConversationsView agents={activatedAgents} onOpenChat={handleAgentInteraction} activeWorkspaceId={activeWorkspaceId} />;
+      case 'conversations': return <ConversationsView agents={activatedAgents} onOpenChat={handleAgentInteraction} onOpenSession={handleOpenAgentSession} activeWorkspaceId={activeWorkspaceId} />;
 
       // NOVA LÓGICA V4.6 - Governance Deep Linking
       case 'governance': return (
@@ -1551,7 +1684,7 @@ if (userId) {
       case 'team': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} viewMode="global" userProfile={userProfile} activeWorkspaceId={activeWorkspaceId} />;
 
       // RESTORED: CHAT ROOM (Systemic Vision Logic) with onConvertToTopic prop
-      case 'chat-room': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} userProfile={userProfile} activeWorkspaceId={activeWorkspaceId} />;
+      case 'chat-room': return <SystemicVision dynamicAgents={activatedAgents} onUpdateAgents={setActivatedAgents} activeBU={activeBU} businessUnits={businessUnits} forcedAgent={chatTargetAgent} forcedSessionId={chatTargetSessionId} onBack={handleBackNavigation} onConvertToTopic={handleCreateTopicFromChat} userProfile={userProfile} activeWorkspaceId={activeWorkspaceId} />;
 
       case 'vault':
         return <BacklogView
@@ -1586,13 +1719,13 @@ if (userId) {
                   <div key={msg.id} className={`flex ${msg.sender === Sender.User ? 'flex-row-reverse' : 'flex-row'} items-start gap-4 animate-msg group`}>
                     <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0 border border-gray-200 bg-white flex items-center justify-center mt-2">
                       {msg.sender === Sender.User ? (
-                        <img src={userProfile?.avatarUrl || DOUGLAS_IMAGE} className="w-full h-full object-cover" />
+                        <img src={userProfile?.avatarUrl || USER_FALLBACK_IMAGE} className="w-full h-full object-cover" />
                       ) : (
-                        activeDirector.imageUrl ? (
-                          <img src={activeDirector.imageUrl} className="w-full h-full object-cover" />
+                        directChannelProfile.imageUrl ? (
+                          <img src={directChannelProfile.imageUrl} className="w-full h-full object-cover" />
                         ) : (
-                          <div className="text-[10px] font-black uppercase text-white" style={{ color: activeDirector.avatarColor }}>
-                            {activeDirector.name.substring(0, 2)}
+                          <div className="text-[10px] font-black uppercase text-white" style={{ color: directChannelProfile.avatarColor }}>
+                            {directChannelProfile.name.substring(0, 2)}
                           </div>
                         )
                       )}
@@ -1601,7 +1734,7 @@ if (userId) {
                     <div className={`flex flex-col ${msg.sender === Sender.User ? 'items-end' : 'items-start'} max-w-[85%]`}>
                       <div className="flex items-center gap-2 mb-1 px-1 opacity-60">
                         <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest">
-                          {msg.sender === Sender.User ? (userProfile?.name || 'Douglas Rodrigues') : activeDirector.name}
+                          {msg.sender === Sender.User ? (currentUserDisplayName || 'Usuário') : directChannelProfile.name}
                         </span>
                       </div>
 
@@ -1654,7 +1787,7 @@ if (userId) {
                 <input
                   value={input}
                   onChange={e => setInput(e.target.value)}
-                  placeholder={isTranscribing ? "Transcrevendo..." : `Falar com ${activeDirector.name} sobre ${activeBU.name}...`}
+                  placeholder={isTranscribing ? "Transcrevendo..." : `Falar com ${directChannelProfile.name} sobre ${activeBU.name}...`}
                   className="flex-1 bg-transparent px-4 py-4 outline-none font-medium text-gray-600 placeholder:text-gray-300 text-sm"
                   disabled={isLoading || isTranscribing}
                 />

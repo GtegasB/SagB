@@ -74,6 +74,7 @@ const formatChunkDurationLabel = (minutes?: number | null) => {
 };
 
 type ExecutionFlowState = 'idle' | 'active' | 'success' | 'warning' | 'error';
+type MicrophoneDiagnosticState = 'checking' | 'ready' | 'blocked' | 'policy_blocked' | 'missing' | 'busy' | 'unsupported';
 
 const executionFlowTone = (state: ExecutionFlowState) => {
   if (state === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
@@ -198,6 +199,165 @@ const buildSummary = (title: string, chunks: ContinuousMemoryChunk[], items: Con
   return `${title}: ${transcriptText.slice(0, 280)}${transcriptText.length > 280 ? '...' : ''}${extracted.length > 0 ? ` | Extrações: ${extracted.join(' | ')}` : ''}`;
 };
 
+const isEmbeddedDocument = () => {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+};
+
+const describeMicrophoneError = (error: any) => {
+  const rawMessage = String(error?.message || error || '').trim();
+  const normalizedMessage = rawMessage.toLowerCase();
+  const errorName = String(error?.name || '').toLowerCase();
+
+  if (
+    normalizedMessage.includes('permissions policy') ||
+    normalizedMessage.includes('not allowed in this document') ||
+    normalizedMessage.includes('permission denied by system')
+  ) {
+    return isEmbeddedDocument()
+      ? 'Microfone bloqueado pela politica do documento. Abra o SagB em uma aba direta do navegador, fora de iframe/preview/embed, e permita o microfone.'
+      : 'Microfone bloqueado pela politica ou permissao do navegador. Libere o microfone para este site e tente novamente.';
+  }
+
+  if (errorName === 'notallowederror' || normalizedMessage.includes('permission denied')) {
+    return 'Permissao de microfone negada. Libere o microfone para este site e tente novamente.';
+  }
+
+  if (
+    errorName === 'notfounderror' ||
+    normalizedMessage.includes('requested device not found') ||
+    normalizedMessage.includes('device not found') ||
+    normalizedMessage.includes('could not start video source')
+  ) {
+    return 'Nenhum microfone disponivel foi encontrado neste dispositivo ou navegador.';
+  }
+
+  if (errorName === 'notreadableerror' || normalizedMessage.includes('could not start audio source')) {
+    return 'O microfone existe, mas esta ocupado por outro app ou o navegador nao conseguiu acessa-lo agora.';
+  }
+
+  if (!window.isSecureContext) {
+    return 'Captacao de microfone exige contexto seguro. Use localhost ou HTTPS para gravar.';
+  }
+
+  return rawMessage || 'Nao foi possivel acessar o microfone neste ambiente.';
+};
+
+const deriveMicrophoneDiagnosticState = (error: any): MicrophoneDiagnosticState => {
+  const rawMessage = String(error?.message || error || '').trim().toLowerCase();
+  const errorName = String(error?.name || '').toLowerCase();
+
+  if (
+    rawMessage.includes('permissions policy') ||
+    rawMessage.includes('not allowed in this document') ||
+    rawMessage.includes('permission denied by system')
+  ) {
+    return 'policy_blocked';
+  }
+
+  if (errorName === 'notallowederror' || rawMessage.includes('permission denied')) {
+    return 'blocked';
+  }
+
+  if (
+    errorName === 'notfounderror' ||
+    rawMessage.includes('requested device not found') ||
+    rawMessage.includes('device not found')
+  ) {
+    return 'missing';
+  }
+
+  if (errorName === 'notreadableerror' || rawMessage.includes('could not start audio source')) {
+    return 'busy';
+  }
+
+  if (rawMessage.includes('nao oferece suporte') || rawMessage.includes('does not support')) {
+    return 'unsupported';
+  }
+
+  return 'blocked';
+};
+
+const microphoneDiagnosticTone = (state: MicrophoneDiagnosticState) => {
+  if (state === 'ready') return 'text-emerald-600';
+  if (state === 'checking') return 'text-slate-500';
+  if (state === 'missing') return 'text-amber-700';
+  if (state === 'busy') return 'text-amber-700';
+  return 'text-rose-600';
+};
+
+const microphoneDiagnosticLabel = (state: MicrophoneDiagnosticState) => {
+  const map: Record<MicrophoneDiagnosticState, string> = {
+    checking: 'Verificando',
+    ready: 'Permitido',
+    blocked: 'Bloqueado',
+    policy_blocked: 'Bloqueado pelo documento',
+    missing: 'Sem dispositivo',
+    busy: 'Ocupado',
+    unsupported: 'Sem suporte'
+  };
+  return map[state];
+};
+
+const microphoneDiagnosticDot = (state: MicrophoneDiagnosticState) => {
+  if (state === 'ready') return 'bg-emerald-500';
+  if (state === 'checking') return 'bg-slate-300';
+  if (state === 'missing' || state === 'busy') return 'bg-amber-500';
+  return 'bg-rose-500';
+};
+
+const requestRecordingStream = async () => {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error('Este navegador nao oferece suporte para captura de microfone.');
+  }
+
+  if (typeof window !== 'undefined' && !window.isSecureContext) {
+    throw new Error('Captacao de microfone exige contexto seguro. Use localhost ou HTTPS para gravar.');
+  }
+
+  const attempts: MediaStreamConstraints[] = [
+    {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    },
+    {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true
+      }
+    },
+    { audio: true }
+  ];
+
+  let lastError: any = null;
+
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error: any) {
+      lastError = error;
+      const errorName = String(error?.name || '').toLowerCase();
+      const normalizedMessage = String(error?.message || '').toLowerCase();
+      const retryable =
+        errorName === 'notfounderror' ||
+        errorName === 'overconstrainederror' ||
+        normalizedMessage.includes('requested device not found') ||
+        normalizedMessage.includes('device not found');
+
+      if (!retryable) break;
+    }
+  }
+
+  throw lastError;
+};
+
 const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
   workspaceId,
   ownerUserId,
@@ -210,6 +370,10 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
   const [persistenceMode, setPersistenceMode] = useState<ContinuousMemoryPersistenceMode>('remote');
   const [tableMissing, setTableMissing] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [microphoneDiagnostic, setMicrophoneDiagnostic] = useState<{ state: MicrophoneDiagnosticState; detail: string }>({
+    state: 'checking',
+    detail: 'Verificando permissao e dispositivo.'
+  });
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [ventureFilter, setVentureFilter] = useState('all');
@@ -258,6 +422,76 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
     setChunkLabels(store.chunkLabels);
     setExtractedItems(store.extractedItems);
     setLinks(store.links);
+  };
+
+  const refreshMicrophoneDiagnostic = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setMicrophoneDiagnostic({
+        state: 'unsupported',
+        detail: 'Este navegador nao oferece suporte para captura de microfone.'
+      });
+      return;
+    }
+
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      setMicrophoneDiagnostic({
+        state: 'blocked',
+        detail: 'Captacao de microfone exige contexto seguro com localhost ou HTTPS.'
+      });
+      return;
+    }
+
+    try {
+      let permissionState = 'prompt';
+      const permissionsApi = navigator.permissions as Permissions | undefined;
+      if (permissionsApi?.query) {
+        try {
+          const permissionStatus = await permissionsApi.query({ name: 'microphone' as PermissionName });
+          permissionState = permissionStatus.state;
+        } catch {
+          permissionState = 'prompt';
+        }
+      }
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter((device) => device.kind === 'audioinput');
+
+      if (audioInputs.length === 0) {
+        setMicrophoneDiagnostic({
+          state: 'missing',
+          detail: 'Nenhum dispositivo de entrada de audio foi encontrado.'
+        });
+        return;
+      }
+
+      if (permissionState === 'denied') {
+        setMicrophoneDiagnostic({
+          state: isEmbeddedDocument() ? 'policy_blocked' : 'blocked',
+          detail: isEmbeddedDocument()
+            ? 'O documento atual bloqueou o microfone. Abra o SagB fora de iframe ou preview.'
+            : 'O navegador bloqueou o acesso ao microfone para este site.'
+        });
+        return;
+      }
+
+      if (permissionState === 'granted') {
+        setMicrophoneDiagnostic({
+          state: 'ready',
+          detail: `${audioInputs.length} microfone(s) detectado(s) e acesso permitido.`
+        });
+        return;
+      }
+
+      setMicrophoneDiagnostic({
+        state: 'checking',
+        detail: `${audioInputs.length} microfone(s) detectado(s). O navegador ainda pode pedir permissao ao iniciar.`
+      });
+    } catch {
+      setMicrophoneDiagnostic({
+        state: 'checking',
+        detail: 'Nao foi possivel confirmar o estado do microfone antes da tentativa de gravacao.'
+      });
+    }
   };
 
   useEffect(() => {
@@ -333,10 +567,12 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
     [sessions, today]
   );
 
+  const latestSession = todaySessions[0] || null;
+
   const activeSession = useMemo(() => {
-    const explicit = sessions.find((session) => session.id === currentSessionId);
+    const explicit = sessions.find((session) => session.id === currentSessionId && ['live', 'paused', 'processing'].includes(String(session.status)));
     if (explicit) return explicit;
-    return todaySessions.find((session) => ['live', 'paused', 'processing'].includes(String(session.status))) || todaySessions[0] || null;
+    return todaySessions.find((session) => ['live', 'paused', 'processing'].includes(String(session.status))) || null;
   }, [sessions, todaySessions, currentSessionId]);
 
   useEffect(() => {
@@ -344,11 +580,14 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
     if (activeSession) {
       setCurrentSessionId(activeSession.id);
       chunkIndexRef.current = Math.max(1, Number(activeSession.totalChunks || 0) + 1);
+      return;
     }
+    setCurrentSessionId(null);
+    activeSessionRef.current = null;
   }, [activeSession]);
 
   const todayChunks = useMemo(
-    () => chunks.filter((chunk) => sameDay(toDate(chunk.createdAt), today)).sort((a, b) => toDate(a.startedAt || a.createdAt).getTime() - toDate(b.startedAt || b.createdAt).getTime()),
+    () => chunks.filter((chunk) => sameDay(toDate(chunk.createdAt), today)).sort((a, b) => toDate(b.startedAt || b.createdAt).getTime() - toDate(a.startedAt || a.createdAt).getTime()),
     [chunks, today]
   );
 
@@ -357,7 +596,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
   }, [selectedChunkId, todayChunks]);
 
   const selectedChunk = useMemo(
-    () => chunks.find((chunk) => chunk.id === selectedChunkId) || todayChunks[todayChunks.length - 1] || null,
+    () => chunks.find((chunk) => chunk.id === selectedChunkId) || todayChunks[0] || null,
     [chunks, selectedChunkId, todayChunks]
   );
 
@@ -412,6 +651,10 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
       streamRef.current = null;
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    void refreshMicrophoneDiagnostic();
   }, []);
 
   useEffect(() => {
@@ -496,6 +739,12 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
     () => links.filter((row) => row.chunkId === selectedChunk?.id),
     [links, selectedChunk]
   );
+
+  const canResumeSession = Boolean(activeSession && !isRecording && ['paused', 'live', 'processing'].includes(String(activeSession.status)));
+  const controlSession = activeSession || null;
+  const displaySession = controlSession || latestSession;
+  const startButtonLabel = canResumeSession ? 'Retomar' : 'Iniciar';
+  const stopButtonLabel = isRecording ? 'Encerrar agora' : 'Fechar sessao';
 
   const clearChunkTimer = () => {
     if (chunkStopTimeoutRef.current !== null && typeof window !== 'undefined') {
@@ -633,34 +882,60 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
 
   const startRecorder = async (session: ContinuousMemorySession) => {
     recordingContinuationRef.current = true;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
-    });
-    streamRef.current = stream;
+    try {
+      const stream = await requestRecordingStream();
+      streamRef.current = stream;
+      setMicrophoneDiagnostic({
+        state: 'ready',
+        detail: 'Microfone ativo e disponivel para captacao.'
+      });
 
-    const mimeCandidates = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'];
-    const preferredMime = mimeCandidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || '';
+      const mimeCandidates = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/webm'];
+      const preferredMime = mimeCandidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || '';
 
-    startChunkRecorder(session, stream, preferredMime);
-    setFeedback(`Captação contínua ativa. Corte automático em ${formatChunkDurationLabel(chunkMinutes)}.`);
+      startChunkRecorder(session, stream, preferredMime);
+      setFeedback(`Captação contínua ativa. Corte automático em ${formatChunkDurationLabel(chunkMinutes)}.`);
+    } catch (error: any) {
+      recordingContinuationRef.current = false;
+      clearChunkTimer();
+      mediaRecorderRef.current = null;
+      stopActiveStream();
+      setIsRecording(false);
+      setCurrentChunkElapsedMs(0);
+      setMicrophoneDiagnostic({
+        state: deriveMicrophoneDiagnosticState(error),
+        detail: describeMicrophoneError(error)
+      });
+      throw new Error(describeMicrophoneError(error));
+    }
   };
 
   const handleStart = async () => {
     try {
       setIsBusy(true);
-      if (activeSession && String(activeSession.status) === 'paused') {
+      if (activeSession && !isRecording && ['paused', 'live', 'processing'].includes(String(activeSession.status))) {
+        const resumedAt = activeSession.startedAt || new Date();
+        const previousStatus = String(activeSession.status || 'paused');
+        const previousEndedAt = activeSession.endedAt || null;
         await updateContinuousMemorySession({
           mode: persistenceMode,
           workspaceId: scopedWorkspaceId,
           sessionId: activeSession.id,
-          patch: { status: 'live', startedAt: activeSession.startedAt || new Date() }
+          patch: { status: 'live', startedAt: resumedAt, endedAt: null }
         });
-        if (persistenceMode === 'local') void applyLocalStore();
-        await startRecorder({ ...activeSession, status: 'live' });
+        if (persistenceMode === 'local') await applyLocalStore();
+        try {
+          await startRecorder({ ...activeSession, status: 'live', startedAt: resumedAt, endedAt: null });
+        } catch (error: any) {
+          await updateContinuousMemorySession({
+            mode: persistenceMode,
+            workspaceId: scopedWorkspaceId,
+            sessionId: activeSession.id,
+            patch: { status: previousStatus, endedAt: previousEndedAt }
+          }).catch(() => undefined);
+          if (persistenceMode === 'local') await applyLocalStore();
+          throw error;
+        }
         return;
       }
 
@@ -683,10 +958,31 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
       setCurrentSessionId(newSession.id);
       activeSessionRef.current = newSession;
       chunkIndexRef.current = 1;
-      if (persistenceMode === 'local') void applyLocalStore();
-      await startRecorder(newSession);
+      if (persistenceMode === 'local') await applyLocalStore();
+      try {
+        await startRecorder(newSession);
+      } catch (error: any) {
+        await updateContinuousMemorySession({
+          mode: persistenceMode,
+          workspaceId: scopedWorkspaceId,
+          sessionId: newSession.id,
+          patch: {
+            status: 'error',
+            endedAt: new Date(),
+            updatedAt: new Date(),
+            payload: {
+              ...(newSession.payload || {}),
+              startError: String(error?.message || error || 'Falha ao iniciar captura.')
+            }
+          }
+        }).catch(() => undefined);
+        if (persistenceMode === 'local') await applyLocalStore();
+        activeSessionRef.current = null;
+        setCurrentSessionId(null);
+        throw error;
+      }
     } catch (error: any) {
-      setFeedback(String(error?.message || 'Nao foi possivel iniciar a sessao.'));
+      setFeedback(describeMicrophoneError(error));
     } finally {
       setIsBusy(false);
     }
@@ -719,11 +1015,13 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
 
     setIsRecording(false);
     setCurrentChunkElapsedMs(0);
+    void refreshMicrophoneDiagnostic();
     setFeedback(status === 'paused' ? 'Sessao pausada.' : 'Sessao encerrada.');
   };
 
   const handleRetryChunk = async () => {
-    if (!selectedChunk || !activeSession) return;
+    const chunkSession = sessions.find((session) => session.id === selectedChunk?.sessionId) || activeSession || latestSession;
+    if (!selectedChunk || !chunkSession) return;
     try {
       setIsBusy(true);
       setFeedback(`Reprocessando bloco ${selectedChunk.chunkIndex}...`);
@@ -731,7 +1029,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
       await retryContinuousMemoryChunk({
         mode: persistenceMode,
         workspaceId: scopedWorkspaceId,
-        session: activeSession,
+        session: chunkSession,
         chunk: selectedChunk,
         file: selectedFile,
         labelLookup,
@@ -903,7 +1201,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
               <div className="flex flex-wrap gap-3 items-center">
                 <div className={`px-4 py-3 rounded-2xl border border-slate-200 bg-white ${statusBadge(String(activeSession?.status || 'draft'))}`}>
                   <span className="text-[10px] uppercase tracking-[0.28em] font-black block mb-1 opacity-70">Sessao</span>
-                  <strong className="text-sm">{sessionStatusLabel(String(activeSession?.status || 'draft'))}</strong>
+                  <strong className="text-sm">{activeSession ? sessionStatusLabel(String(activeSession.status || 'draft')) : 'Pronta'}</strong>
                 </div>
                 <div className="px-4 py-3 rounded-2xl border border-slate-200 bg-white min-w-[122px]">
                   <span className="text-[10px] uppercase tracking-[0.28em] font-black block mb-1 text-slate-400">Microfone</span>
@@ -911,6 +1209,14 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                     <MicPulse active={isRecording} />
                     {isRecording ? 'Gravando' : 'Inativo'}
                   </strong>
+                </div>
+                <div className="px-4 py-3 rounded-2xl border border-slate-200 bg-white min-w-[184px]">
+                  <span className="text-[10px] uppercase tracking-[0.28em] font-black block mb-1 text-slate-400">Diagnostico</span>
+                  <strong className={`text-sm inline-flex items-center gap-2 ${microphoneDiagnosticTone(microphoneDiagnostic.state)}`}>
+                    <span className={`inline-flex h-3 w-3 rounded-full ${microphoneDiagnosticDot(microphoneDiagnostic.state)} ${microphoneDiagnostic.state === 'checking' ? 'animate-pulse' : ''}`}></span>
+                    {microphoneDiagnosticLabel(microphoneDiagnostic.state)}
+                  </strong>
+                  <div className="text-[11px] leading-4 text-slate-500 mt-1 max-w-[220px]">{microphoneDiagnostic.detail}</div>
                 </div>
                 {LOCAL_WHISPER_HEALTH_URL && (
                   <div className="px-4 py-3 rounded-2xl border border-slate-200 bg-white min-w-[138px]">
@@ -936,13 +1242,13 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                   </strong>
                 </div>
                 <button onClick={handleStart} disabled={isBusy || isRecording} className="px-5 py-3 rounded-2xl bg-cyan-500 text-white font-black tracking-tight shadow-[0_12px_24px_rgba(6,182,212,0.22)] disabled:opacity-50">
-                  <span className="inline-flex items-center gap-2"><MicIcon className="w-4 h-4" /> Iniciar</span>
+                  <span className="inline-flex items-center gap-2"><MicIcon className="w-4 h-4" /> {startButtonLabel}</span>
                 </button>
                 <button onClick={() => stopRecorder('paused')} disabled={!isRecording || isBusy} className="px-5 py-3 rounded-2xl bg-white text-slate-700 border border-slate-200 font-black tracking-tight disabled:opacity-50">
                   Pausar
                 </button>
-                <button onClick={() => stopRecorder('ended')} disabled={(!isRecording && !activeSession) || isBusy} className="px-5 py-3 rounded-2xl bg-rose-500 text-white font-black tracking-tight shadow-[0_12px_24px_rgba(244,63,94,0.2)] disabled:opacity-50">
-                  <span className="inline-flex items-center gap-2"><StopCircleIcon className="w-4 h-4" /> Encerrar</span>
+                <button onClick={() => stopRecorder('ended')} disabled={(!controlSession && !isRecording) || isBusy} className="px-5 py-3 rounded-2xl bg-rose-500 text-white font-black tracking-tight shadow-[0_12px_24px_rgba(244,63,94,0.2)] disabled:opacity-50">
+                  <span className="inline-flex items-center gap-2"><StopCircleIcon className="w-4 h-4" /> {stopButtonLabel}</span>
                 </button>
               </div>
             </div>
@@ -969,7 +1275,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
         )}
 
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
-          {renderMetric('Sessao Atual', activeSession ? chunkStatusLabel(String(activeSession.status)) : 'Sem sessao', 'border-slate-200 bg-white text-slate-900')}
+          {renderMetric('Sessao Atual', activeSession ? sessionStatusLabel(String(activeSession.status)) : 'Sem sessao', 'border-slate-200 bg-white text-slate-900')}
           {renderMetric('Blocos Hoje', todayChunks.length, 'border-cyan-200 bg-cyan-50 text-cyan-900')}
           {renderMetric('Min Gravados', minutesRecordedToday, 'border-amber-200 bg-amber-50 text-amber-900')}
           {renderMetric('Min Transcritos', minutesTranscribedToday, 'border-emerald-200 bg-emerald-50 text-emerald-900')}
@@ -1061,7 +1367,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                 <div className="rounded-[26px] border border-slate-200 bg-[linear-gradient(135deg,rgba(15,23,42,0.96),rgba(30,41,59,0.96)_42%,rgba(14,165,233,0.9))] text-white px-5 py-4 grid grid-cols-1 md:grid-cols-4 gap-4 shadow-[0_18px_45px_rgba(15,23,42,0.12)]">
                   <div>
                     <span className="text-[10px] uppercase tracking-[0.3em] font-black text-cyan-300 block mb-2">Sessao atual</span>
-                    <strong className="text-lg font-black">{activeSession?.title || 'Sem sessao ativa'}</strong>
+                    <strong className="text-lg font-black">{displaySession?.title || 'Sem sessao ativa'}</strong>
                   </div>
                   <div>
                     <span className="text-[10px] uppercase tracking-[0.3em] font-black text-slate-400 block mb-2">Corte automatico</span>
@@ -1118,17 +1424,17 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                   const itemsForChunk = extractedItems.filter((row) => row.chunkId === chunk.id);
                   const visualStatus = chunkVisualStatus(chunk);
                   return (
-                    <button key={chunk.id} onClick={() => setSelectedChunkId(chunk.id)} className={`w-full text-left rounded-[26px] border p-5 transition-all ${selectedChunk?.id === chunk.id ? 'border-cyan-200 bg-[linear-gradient(135deg,rgba(236,254,255,0.95),rgba(255,255,255,0.98))] text-slate-900 shadow-[0_20px_45px_rgba(6,182,212,0.14)]' : 'border-slate-200 bg-white hover:border-cyan-300 hover:shadow-[0_16px_30px_rgba(8,145,178,0.10)]'}`}>
-                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                    <button key={chunk.id} onClick={() => setSelectedChunkId(chunk.id)} className={`w-full text-left rounded-[22px] border px-4 py-4 transition-all ${selectedChunk?.id === chunk.id ? 'border-cyan-200 bg-[linear-gradient(135deg,rgba(236,254,255,0.95),rgba(255,255,255,0.98))] text-slate-900 shadow-[0_18px_36px_rgba(6,182,212,0.12)]' : 'border-slate-200 bg-white hover:border-cyan-300 hover:shadow-[0_14px_24px_rgba(8,145,178,0.08)]'}`}>
+                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                         <div>
-                          <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
                             <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? statusBadge(visualStatus) : statusBadge(visualStatus)}`}>{chunkStatusLabel(visualStatus)}</span>
                             <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? 'bg-white text-slate-700 border border-slate-200' : 'bg-slate-100 text-slate-700'}`}>{fmtTime(toDate(chunk.startedAt || chunk.createdAt))}</span>
                             <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-[0.18em] ${selectedChunk?.id === chunk.id ? 'bg-cyan-100 text-cyan-700' : 'bg-cyan-50 text-cyan-700'}`}>{fmtDuration(chunk.durationSeconds)}</span>
                           </div>
-                          <h3 className="text-lg font-black tracking-tight mb-2">Bloco #{chunk.chunkIndex}</h3>
+                          <h3 className="text-base font-black tracking-tight mb-1.5">Bloco #{chunk.chunkIndex}</h3>
                           <p className={`text-sm leading-6 ${selectedChunk?.id === chunk.id ? 'text-slate-600' : 'text-slate-600'}`}>
-                            {String(chunk.transcriptText || 'Transcricao ainda nao disponivel.').slice(0, 220) || 'Transcricao ainda nao disponivel.'}
+                            {String(chunk.transcriptText || 'Transcricao ainda nao disponivel.').slice(0, 160) || 'Transcricao ainda nao disponivel.'}
                           </p>
                         </div>
                         <div className="flex flex-col items-start md:items-end gap-3">
@@ -1240,7 +1546,7 @@ const ContinuousMemoryView: React.FC<ContinuousMemoryViewProps> = ({
                 <div className="rounded-[24px] border border-dashed border-slate-300 bg-white p-4">
                   <span className="text-[10px] uppercase tracking-[0.35em] font-black text-slate-400 block mb-3">Painel lateral</span>
                   <div className="space-y-2 text-sm text-slate-600">
-                    <div>Sessao atual: {activeSession?.title || 'Sem sessao'}</div>
+                    <div>Sessao atual: {displaySession?.title || 'Sem sessao'}</div>
                     <div>Chunk atual: {selectedChunk ? `#${selectedChunk.chunkIndex}` : '-'}</div>
                     <div>Persistencia: {persistenceMode === 'local' ? 'Navegador local' : 'Supabase'}</div>
                     <div>Fila de jobs: {jobsInFlight}</div>

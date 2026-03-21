@@ -169,11 +169,11 @@ const AlignmentView: React.FC<AlignmentViewProps> = ({
         sender: Sender.Bot,
         text: '',
         buId: activeBU.id,
-        participantName: 'Pietro',
+        participantName: 'Assistente de Alinhamento',
         isStreaming: true
       });
       persistedBotId = savedBot.id;
-      setMessages(prev => [...prev, { id: persistedBotId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true, participantName: 'Pietro' }]);
+      setMessages(prev => [...prev, { id: persistedBotId, text: '', sender: Sender.Bot, timestamp: new Date(), buId: activeBU.id, isStreaming: true, participantName: 'Assistente de Alinhamento' }]);
 
       const context = `ALINHAMENTO ESTRATÉGICO (${activeBU.name}): Organização de DNA v1. Foco em ROI e viabilidade.`;
       
@@ -230,7 +230,7 @@ const AlignmentView: React.FC<AlignmentViewProps> = ({
                  <div className="w-16 h-16 rounded-full border-2 border-dashed border-gray-300 mx-auto mb-6 flex items-center justify-center">
                     <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                  </div>
-                 <p className="text-xs font-black uppercase tracking-widest leading-relaxed">Deposite aqui o conhecimento sobre {activeBU.name}.<br/>O Pietro ajudará a extrair o DNA v1.</p>
+                 <p className="text-xs font-black uppercase tracking-widest leading-relaxed">Deposite aqui o conhecimento sobre {activeBU.name}.<br/>O assistente ajudará a extrair o DNA v1.</p>
               </div>
             )}
             {messages.map(msg => (

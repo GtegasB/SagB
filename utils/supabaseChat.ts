@@ -32,6 +32,11 @@ interface AppendMessageParams {
   isStreaming?: boolean;
 }
 
+interface GetLastMessageParams {
+  workspaceId?: string | null;
+  sessionId: string;
+}
+
 interface ChatSessionRecord {
   id: string;
   workspaceId: string;
@@ -128,6 +133,40 @@ export const findLatestSession = async ({
       };
     },
     null
+  );
+};
+
+export const getLastMessageForSession = async ({
+  workspaceId,
+  sessionId,
+}: GetLastMessageParams): Promise<Message | null> => {
+  const scopedWorkspaceId = resolveWorkspaceId(workspaceId);
+  const q = query(
+    collection(db, 'chat_messages'),
+    where('workspaceId', '==', scopedWorkspaceId),
+    where('sessionId', '==', sessionId),
+    orderBy('createdAt', 'desc'),
+  );
+
+  return runOnce(
+    q,
+    (snapshot) => {
+      if (snapshot.docs.length > 0) {
+        const data = snapshot.docs[0].data() as AnyRecord;
+        return {
+          id: String(data.id || snapshot.docs[0].id),
+          text: String(data.text || ''),
+          sender: asSender(data.sender),
+          timestamp: asDate(data.createdAt),
+          buId: String(data.buId || ''),
+          isStreaming: Boolean(data.payload?.isStreaming),
+          participantName: data.participantName,
+          attachment: data.attachment,
+        } as Message;
+      }
+      return null;
+    },
+    null,
   );
 };
 

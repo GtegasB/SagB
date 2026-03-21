@@ -6,6 +6,8 @@ import { startAgentSession, generateTitleOptions, transcribeAudio, generateTaskS
 import { streamDeepSeekResponse, DeepSeekMessage } from '../services/deepseek';
 import { streamLlamaLocalResponse, LlamaMessage } from '../services/llamaLocal';
 import { streamProxyProviderResponse, ProxyProviderMessage } from '../services/providerProxy';
+import { getProvidersHealth, providerHealthToBadge, ProvidersHealthMap } from '../services/providerHealth';
+import { resolveAgentBasePrompt } from '../services/agentDna';
 import { createMessageTelemetry, detectBotQualityEvents, detectUserQualityEvents, getTurnIdFromMessages, persistQualityEvent, persistQualityEventsBatch } from '../services/qualitySensor';
 import {
     appendIntelligenceFlowStep,
@@ -32,6 +34,7 @@ interface SystemicVisionProps {
     businessUnits?: BusinessUnit[];
     totalGlobalAgents?: number;
     forcedAgent?: Agent | null;
+    forcedSessionId?: string | null;
     onBack?: () => void;
     onConvertToTopic?: (topic: Partial<Topic>) => void;
     viewMode?: 'bu' | 'global';
@@ -49,12 +52,12 @@ interface ChatSession {
     participantIds?: string[];
 }
 
-const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdateAgents, activeBU, onAddAgent, onApproveAgent, onPlanAgent, onEnterRoom, businessUnits = [], totalGlobalAgents = 0, forcedAgent, onBack, onConvertToTopic, viewMode = 'bu', userProfile, activeWorkspaceId }) => {
+const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdateAgents, activeBU, onAddAgent, onApproveAgent, onPlanAgent, onEnterRoom, businessUnits = [], totalGlobalAgents = 0, forcedAgent, forcedSessionId, onBack, onConvertToTopic, viewMode = 'bu', userProfile, activeWorkspaceId }) => {
 
     const CURRENT_USER = useMemo(() => ({
-        name: userProfile?.name || "Douglas Rodrigues",
-        nickname: userProfile?.nickname || userProfile?.name?.split(' ')[0] || "Rodrigues",
-        role: userProfile?.role || "Chairman",
+        name: userProfile?.name || "Usuário",
+        nickname: userProfile?.nickname || userProfile?.name?.split(' ')[0] || "Líder",
+        role: userProfile?.role || "Stakeholder",
         avatar: userProfile?.avatarUrl || "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&q=80&w=200&h=200"
     }), [userProfile]);
 
@@ -85,6 +88,8 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
     // --- MODEL SELECTION STATE ---
     const [selectedModelProvider, setSelectedModelProvider] = useState<ModelProvider>('gemini');
+    const [providerHealth, setProviderHealth] = useState<Partial<ProvidersHealthMap>>({});
+    const [providerHealthError, setProviderHealthError] = useState<string>('');
 
     // --- KNOWLEDGE BASE STATE (SIDEBAR REMOVIDA - SÓ HISTÓRICO AGORA) ---
     const [isTraining, setIsTraining] = useState(false);
@@ -126,6 +131,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const hasSummonedRef = useRef(false);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const isCreatingSessionRef = useRef(false);
+    const appliedForcedSessionRef = useRef<string | null>(null);
 
     const DEFAULT_WORKSPACE_ID = '00000000-0000-0000-0000-000000000000';
     const workspaceId = activeWorkspaceId || userProfile?.workspaceId || DEFAULT_WORKSPACE_ID;
@@ -136,7 +142,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     const isDeepSeekProvider = (provider?: ModelProvider | null) => resolveProvider(provider) === 'deepseek';
     const isLlamaLocalProvider = (provider?: ModelProvider | null) => resolveProvider(provider) === 'llama_local';
     const isGeminiProvider = (provider?: ModelProvider | null) => resolveProvider(provider) === 'gemini';
-    const isProxyProvider = (provider?: ModelProvider | null) => ['openai', 'claude', 'qwen'].includes(resolveProvider(provider));
+    const isProxyProvider = (provider?: ModelProvider | null) => ['openai', 'claude'].includes(resolveProvider(provider));
     const statusFromText = (text: string): 'ok' | 'warning' | 'error' => {
         const normalized = String(text || '').toLowerCase();
         if (
@@ -160,12 +166,15 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         { value: 'gemini', label: 'Gemini' },
         { value: 'deepseek', label: 'DeepSeek' },
         { value: 'openai', label: 'OpenAI' },
-        { value: 'claude', label: 'Claude' },
-        { value: 'qwen', label: 'Qwen' }
+        { value: 'claude', label: 'Claude' }
     ];
     const getProviderLabel = (provider?: ModelProvider | null) => {
         const normalized = resolveProvider(provider);
         return MODEL_PROVIDER_OPTIONS.find((item) => item.value === normalized)?.label || 'Gemini';
+    };
+
+    const getProviderHealthBadge = (provider?: ModelProvider | null) => {
+        return providerHealthToBadge(resolveProvider(provider), providerHealth as any);
     };
 
     // New Agent Modal State
@@ -223,6 +232,22 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
         }
     }, [forcedAgent, selectedAgent?.id]);
 
+    useEffect(() => {
+        if (!forcedSessionId) {
+            appliedForcedSessionRef.current = null;
+            return;
+        }
+        if (!selectedAgent) return;
+        if (appliedForcedSessionRef.current === forcedSessionId) return;
+
+        const targetExists = sessions.some((session) => session.id === forcedSessionId);
+        if (!targetExists) return;
+
+        setCurrentSessionId(forcedSessionId);
+        setShowHistorySidebar(false);
+        appliedForcedSessionRef.current = forcedSessionId;
+    }, [forcedSessionId, sessions, selectedAgent]);
+
     // --- RE-INIT SESSION ON MODEL CHANGE ---
     useEffect(() => {
         if (selectedAgent && isGeminiProvider(selectedModelProvider)) {
@@ -233,6 +258,31 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     useEffect(() => {
         setAutoScrollEnabled(true);
     }, [selectedAgent?.id, currentSessionId]);
+
+    useEffect(() => {
+        let cancelled = false;
+        let intervalId: number | null = null;
+
+        const refreshProvidersHealth = async () => {
+            try {
+                const result = await getProvidersHealth();
+                if (cancelled) return;
+                setProviderHealth(result.providers || {});
+                setProviderHealthError('');
+            } catch (error: any) {
+                if (cancelled) return;
+                setProviderHealthError(String(error?.message || 'Falha ao verificar saúde das APIs.'));
+            }
+        };
+
+        refreshProvidersHealth();
+        intervalId = window.setInterval(refreshProvidersHealth, 30000);
+
+        return () => {
+            cancelled = true;
+            if (intervalId !== null) window.clearInterval(intervalId);
+        };
+    }, []);
 
     const initializeSession = (agent: Agent, history: any[] = [], forcedProvider?: ModelProvider) => {
         const modelId = resolveProvider(forcedProvider || selectedModelProvider) === 'gemini'
@@ -248,7 +298,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
         const gs = startAgentSession(
             agent.id,
-            agent.fullPrompt,
+            resolveAgentBasePrompt(agent),
             agent.knowledgeBase || [],
             modelId,
             history.length > 0 ? history : undefined,
@@ -680,7 +730,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     deepSeekHistory.push({ role: 'system', content: ragContext });
                 }
 
-                const stream = streamDeepSeekResponse(deepSeekHistory, selectedAgent.fullPrompt);
+                const stream = streamDeepSeekResponse(deepSeekHistory, resolveAgentBasePrompt(selectedAgent));
                 let fullText = "";
 
                 for await (const chunk of stream) {
@@ -703,7 +753,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     llamaHistory.push({ role: 'system', content: ragContext });
                 }
 
-                const stream = streamLlamaLocalResponse(llamaHistory, selectedAgent.fullPrompt || '');
+                const stream = streamLlamaLocalResponse(llamaHistory, resolveAgentBasePrompt(selectedAgent) || '');
                 let fullText = "";
 
                 for await (const chunk of stream) {
@@ -726,7 +776,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                     proxyHistory.push({ role: 'system', content: ragContext });
                 }
 
-                const stream = streamProxyProviderResponse(providerForMessage, proxyHistory, selectedAgent.fullPrompt || '');
+                const stream = streamProxyProviderResponse(providerForMessage, proxyHistory, resolveAgentBasePrompt(selectedAgent) || '');
                 let fullText = '';
 
                 for await (const chunk of stream) {
@@ -856,38 +906,44 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
         const learningItems = extractLearningItems(learnings || '');
         if (learningItems.length > 0) {
+            const memoryTargets = Array.from(
+                new Map(
+                    [selectedAgent, ...activeParticipants]
+                        .filter((agent) => agent?.id)
+                        .map((agent) => [agent.id, agent])
+                ).values()
+            );
+
             if (useSupabaseChat && workspaceId) {
                 await Promise.all(
-                    learningItems.map((item) =>
-                        addDoc(collection(db, "agent_memories"), {
-                            workspaceId,
-                            agentId: selectedAgent.id,
-                            sessionId: currentSessionId,
-                            memoryType: 'learning',
-                            content: item,
-                            confidence: 0.7,
-                            status: 'active',
-                            createdAt: new Date(),
-                            updatedAt: new Date(),
-                            createdBy: ownerUserId,
-                            updatedBy: ownerUserId,
-                            payload: { source: 'consolidate_chat_memory' }
-                        }).catch((error) => {
-                            console.error("Erro ao persistir aprendizado em agent_memories:", error);
-                        })
+                    memoryTargets.flatMap((targetAgent) =>
+                        learningItems.map((item) =>
+                            addDoc(collection(db, "agent_memories"), {
+                                workspaceId,
+                                agentId: targetAgent.id,
+                                sessionId: currentSessionId,
+                                memoryType: 'learning',
+                                content: item,
+                                confidence: 0.7,
+                                status: 'active',
+                                createdAt: new Date(),
+                                updatedAt: new Date(),
+                                createdBy: ownerUserId,
+                                updatedBy: ownerUserId,
+                                payload: {
+                                    source: 'consolidate_chat_memory',
+                                    primaryAgentId: selectedAgent.id,
+                                    participantAgentIds: memoryTargets.map((agent) => agent.id)
+                                }
+                            }).catch((error) => {
+                                console.error("Erro ao persistir aprendizado em agent_memories:", error);
+                            })
+                        )
                     )
                 );
             }
 
-            const mergedLearnedMemory = Array.from(new Set([
-                ...(selectedAgent.learnedMemory || []),
-                ...learningItems
-            ]));
-
-            const updatedAgent = { ...selectedAgent, learnedMemory: mergedLearnedMemory };
-            onUpdateAgents(dynamicAgents.map(a => a.id === updatedAgent.id ? updatedAgent : a));
-            setSelectedAgent(updatedAgent);
-            alert("Memória consolidada e salva no Supabase com sucesso!");
+            alert("Memória consolidada e salva no Supabase com sucesso! A sessão será reidratada automaticamente a partir do banco.");
         } else {
             alert("Nada de novo para aprender nesta conversa.");
         }
@@ -1401,7 +1457,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                             deepSeekHistory.push({ role: 'system', content: participantsLabel });
                         }
 
-                        const stream = streamDeepSeekResponse(deepSeekHistory, speaker.fullPrompt);
+                        const stream = streamDeepSeekResponse(deepSeekHistory, resolveAgentBasePrompt(speaker));
                         for await (const chunk of stream) {
                             const text = (chunk as any)?.text || '';
                             if (typeof (chunk as any)?.completionTokens === 'number') {
@@ -1432,7 +1488,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                             llamaHistory.push({ role: 'system', content: participantsLabel });
                         }
 
-                        const stream = streamLlamaLocalResponse(llamaHistory, speaker.fullPrompt || '');
+                        const stream = streamLlamaLocalResponse(llamaHistory, resolveAgentBasePrompt(speaker) || '');
                         for await (const chunk of stream) {
                             finalBotText += chunk.text;
                             setActiveMessages((prev) => prev.map((message) => (
@@ -1459,7 +1515,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                             proxyHistory.push({ role: 'system', content: participantsLabel });
                         }
 
-                        const stream = streamProxyProviderResponse(providerForMessage, proxyHistory, speaker.fullPrompt || '');
+                        const stream = streamProxyProviderResponse(providerForMessage, proxyHistory, resolveAgentBasePrompt(speaker) || '');
                         for await (const chunk of stream) {
                             finalBotText += chunk.text;
                             setActiveMessages((prev) => prev.map((message) => (
@@ -1483,7 +1539,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                             : "Nenhum documento vinculado.";
                         const speakerSession = startAgentSession(
                             speaker.id,
-                            speaker.fullPrompt || '',
+                            resolveAgentBasePrompt(speaker) || '',
                             speaker.knowledgeBase || [],
                             modelId,
                             historyForSpeaker,
@@ -1806,6 +1862,11 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
     ];
 
     const normalizedSessionSearch = sessionSearch.trim().toLowerCase();
+    const assigneeOptions = useMemo(() => {
+        const base = [selectedAgent?.name, CURRENT_USER.name, ...activeParticipants.map((participant) => participant.name)];
+        return Array.from(new Set(base.filter(Boolean)));
+    }, [selectedAgent?.name, CURRENT_USER.name, activeParticipants]);
+
     const visibleSessions = useMemo(() => {
         if (!normalizedSessionSearch) return sessions;
         return sessions.filter((session) => session.title.toLowerCase().includes(normalizedSessionSearch));
@@ -2043,7 +2104,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                                 >
                                                     {MODEL_PROVIDER_OPTIONS.map((option) => (
                                                         <option key={option.value} value={option.value}>
-                                                            {option.label}
+                                                            {`${getProviderHealthBadge(option.value)} ${option.label}`}
                                                         </option>
                                                     ))}
                                                 </select>
@@ -2054,8 +2115,16 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                             <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-gray-400 truncate max-w-[200px] md:max-w-none">
                                                 {activeParticipants.length > 0 ? `${activeParticipants.length + 1} Especialistas na Mesa` : selectedAgent.officialRole}
                                             </p>
+                                            {!activeParticipants.length && (
+                                                <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${getProviderHealthBadge(selectedModelProvider) === '🟢' ? 'bg-emerald-100 text-emerald-700' : getProviderHealthBadge(selectedModelProvider) === '🔴' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
+                                                    {getProviderHealthBadge(selectedModelProvider)} API
+                                                </span>
+                                            )}
                                             {selectedAgent.status === 'STAGING' && <span className="text-[8px] bg-yellow-400 text-yellow-900 px-1.5 py-0.5 rounded font-black uppercase tracking-widest animate-pulse">Homologação</span>}
                                         </div>
+                                        {providerHealthError && (
+                                            <p className="text-[8px] font-bold text-red-500 mt-1">{providerHealthError}</p>
+                                        )}
                                     </div>
                                 </div>
 
@@ -2172,10 +2241,12 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
                                                     onChange={e => setTaskForm({ ...taskForm, assignee: e.target.value })}
                                                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-bitrix-nav"
                                                 >
-                                                    <option value={selectedAgent?.name}>{selectedAgent?.name}</option>
-                                                    <option value="Douglas Rodrigues">Douglas Rodrigues</option>
-                                                    <option value="Pietro Carboni">Pietro Carboni</option>
-                                                    {dynamicAgents.map(a => <option key={a.id} value={a.name}>{a.name}</option>)}
+                                                    {assigneeOptions.map((name) => (
+                                                        <option key={name} value={name}>{name}</option>
+                                                    ))}
+                                                    {dynamicAgents
+                                                        .filter((agent) => !assigneeOptions.includes(agent.name))
+                                                        .map((agent) => <option key={agent.id} value={agent.name}>{agent.name}</option>)}
                                                 </select>
                                             </div>
                                             <div>
@@ -2215,7 +2286,7 @@ const SystemicVision: React.FC<SystemicVisionProps> = ({ dynamicAgents, onUpdate
 
                                         {titleOptions && (
                                             <div className="flex flex-col items-center gap-4 animate-msg pt-6 pb-6 border-t border-dashed border-gray-200 mt-6">
-                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Rodrigues, qual destas opções define melhor esta pauta?</p>
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Qual destas opções define melhor esta pauta?</p>
                                                 <div className="flex flex-wrap justify-center gap-3">
                                                     {titleOptions.map((title, idx) => (
                                                         <button

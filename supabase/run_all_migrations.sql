@@ -145,6 +145,36 @@ create table if not exists public.agent_configs (
   unique(workspace_id, agent_id)
 );
 
+-- 4.1 Agent DNA layers (global + individual + effective snapshot)
+create table if not exists public.agent_dna_profiles (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  agent_id text not null,
+  individual_prompt text,
+  version int not null default 1,
+  status text not null default 'active',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid,
+  updated_by uuid,
+  payload jsonb,
+  unique(workspace_id, agent_id)
+);
+
+create table if not exists public.agent_dna_effective (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  agent_id text not null,
+  effective_prompt text not null,
+  profile_version int,
+  status text not null default 'active',
+  synced_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  payload jsonb,
+  unique(workspace_id, agent_id)
+);
+
 -- 5. Chat persistence tables
 create table if not exists public.chat_sessions (
   id uuid primary key default gen_random_uuid(),
@@ -317,6 +347,10 @@ create index if not exists idx_knowledge_attachments_workspace on public.knowled
 create index if not exists idx_knowledge_attachments_node on public.knowledge_attachments(node_id);
 create index if not exists idx_agent_configs_workspace on public.agent_configs(workspace_id);
 create index if not exists idx_agent_configs_agent on public.agent_configs(agent_id);
+create index if not exists idx_agent_dna_profiles_workspace on public.agent_dna_profiles(workspace_id);
+create index if not exists idx_agent_dna_profiles_agent on public.agent_dna_profiles(agent_id);
+create index if not exists idx_agent_dna_effective_workspace on public.agent_dna_effective(workspace_id);
+create index if not exists idx_agent_dna_effective_agent on public.agent_dna_effective(agent_id);
 create index if not exists idx_chat_sessions_workspace on public.chat_sessions(workspace_id);
 create index if not exists idx_chat_sessions_agent on public.chat_sessions(agent_id);
 create index if not exists idx_chat_sessions_owner on public.chat_sessions(owner_user_id);
@@ -347,6 +381,145 @@ create index if not exists idx_intelligence_flow_steps_conversation on public.in
 create index if not exists idx_intelligence_flow_steps_actor on public.intelligence_flow_steps(actor_name);
 create index if not exists idx_intelligence_flow_steps_model on public.intelligence_flow_steps(model_used);
 create index if not exists idx_intelligence_flow_steps_event_time on public.intelligence_flow_steps(event_time desc);
+
+-- RLS - Agent DNA layers
+alter table if exists public.agent_dna_profiles enable row level security;
+alter table if exists public.agent_dna_effective enable row level security;
+
+grant select, insert, update, delete on table public.agent_dna_profiles to authenticated;
+grant select, insert, update, delete on table public.agent_dna_effective to authenticated;
+
+drop policy if exists agent_dna_profiles_select_workspace on public.agent_dna_profiles;
+create policy agent_dna_profiles_select_workspace on public.agent_dna_profiles
+  for select to authenticated
+  using (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_profiles.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  );
+
+drop policy if exists agent_dna_profiles_insert_workspace on public.agent_dna_profiles;
+create policy agent_dna_profiles_insert_workspace on public.agent_dna_profiles
+  for insert to authenticated
+  with check (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_profiles.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  );
+
+drop policy if exists agent_dna_profiles_update_workspace on public.agent_dna_profiles;
+create policy agent_dna_profiles_update_workspace on public.agent_dna_profiles
+  for update to authenticated
+  using (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_profiles.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  )
+  with check (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_profiles.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  );
+
+drop policy if exists agent_dna_profiles_delete_workspace on public.agent_dna_profiles;
+create policy agent_dna_profiles_delete_workspace on public.agent_dna_profiles
+  for delete to authenticated
+  using (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_profiles.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  );
+
+drop policy if exists agent_dna_effective_select_workspace on public.agent_dna_effective;
+create policy agent_dna_effective_select_workspace on public.agent_dna_effective
+  for select to authenticated
+  using (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_effective.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  );
+
+drop policy if exists agent_dna_effective_insert_workspace on public.agent_dna_effective;
+create policy agent_dna_effective_insert_workspace on public.agent_dna_effective
+  for insert to authenticated
+  with check (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_effective.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  );
+
+drop policy if exists agent_dna_effective_update_workspace on public.agent_dna_effective;
+create policy agent_dna_effective_update_workspace on public.agent_dna_effective
+  for update to authenticated
+  using (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_effective.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  )
+  with check (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_effective.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  );
+
+drop policy if exists agent_dna_effective_delete_workspace on public.agent_dna_effective;
+create policy agent_dna_effective_delete_workspace on public.agent_dna_effective
+  for delete to authenticated
+  using (
+    auth.role() = 'service_role'
+    or exists (
+      select 1
+      from public.workspace_members wm
+      where wm.workspace_id = agent_dna_effective.workspace_id
+        and wm.user_id = auth.uid()
+        and coalesce(wm.status, 'active') <> 'inactive'
+    )
+  );
 
 -- RLS - Fluxo de Inteligencia
 alter table if exists public.intelligence_flows enable row level security;

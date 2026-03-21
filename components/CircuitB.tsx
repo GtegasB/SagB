@@ -10,10 +10,10 @@ const CircuitB: React.FC = () => {
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center gap-8">
-        {/* Camada 1: Chairman */}
+        {/* Camada 1: Direção */}
         <div className="w-[300px] p-6 bg-bitrix-accent/20 border border-bitrix-accent/40 rounded-3xl text-center shadow-[0_0_30px_rgba(128,0,128,0.2)] animate-msg">
           <span className="text-[9px] font-black text-bitrix-accent uppercase tracking-widest block mb-2">Input Nível 01</span>
-          <h3 className="text-white font-black uppercase text-xl">Chairman (Douglas Rodrigues)</h3>
+          <h3 className="text-white font-black uppercase text-xl">Direção Estratégica</h3>
           <p className="text-white/40 text-[10px] mt-2 italic">A Ordem Bruta</p>
         </div>
 

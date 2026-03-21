@@ -967,6 +967,37 @@ const normalizeRecordForTable = (table: string, record: Record<string, any>) => 
     };
   }
 
+  if (table === 'agent_dna_profiles') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      agentId: String(r.agent_id ?? ''),
+      individualPrompt: r.individual_prompt ?? '',
+      version: Number(r.version ?? 1),
+      status: r.status ?? 'active',
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      createdBy: r.created_by ?? undefined,
+      updatedBy: r.updated_by ?? undefined,
+      payload: r.payload ?? undefined
+    };
+  }
+
+  if (table === 'agent_dna_effective') {
+    return {
+      id: String(r.id),
+      workspaceId: r.workspace_id,
+      agentId: String(r.agent_id ?? ''),
+      effectivePrompt: String(r.effective_prompt ?? ''),
+      profileVersion: r.profile_version !== undefined && r.profile_version !== null ? Number(r.profile_version) : undefined,
+      status: r.status ?? 'active',
+      syncedAt: asJsDate(pick(r, 'synced_at', 'syncedAt')),
+      createdAt: asJsDate(pick(r, 'created_at', 'createdAt')) ?? new Date(),
+      updatedAt: asJsDate(pick(r, 'updated_at', 'updatedAt')) ?? new Date(),
+      payload: r.payload ?? undefined
+    };
+  }
+
   if (table === 'agent_memories') {
     return {
       id: String(r.id),
@@ -1837,6 +1868,30 @@ const normalizePayloadForTable = (table: string, payload: Record<string, any>) =
     delete p.updatedAt;
   }
 
+  if (table === 'agent_dna_profiles') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
+    if (p.individualPrompt !== undefined) { p.individual_prompt = p.individualPrompt; delete p.individualPrompt; }
+    if (p.createdBy !== undefined) { p.created_by = p.createdBy; delete p.createdBy; }
+    if (p.updatedBy !== undefined) { p.updated_by = p.updatedBy; delete p.updatedBy; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
+  if (table === 'agent_dna_effective') {
+    if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
+    if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
+    if (p.effectivePrompt !== undefined) { p.effective_prompt = p.effectivePrompt; delete p.effectivePrompt; }
+    if (p.profileVersion !== undefined) { p.profile_version = p.profileVersion; delete p.profileVersion; }
+    if (p.syncedAt !== undefined) { p.synced_at = p.syncedAt; delete p.syncedAt; }
+    if (p.createdAt !== undefined && p.created_at === undefined) { p.created_at = p.createdAt; }
+    if (p.updatedAt !== undefined && p.updated_at === undefined) { p.updated_at = p.updatedAt; }
+    delete p.createdAt;
+    delete p.updatedAt;
+  }
+
   if (table === 'agent_memories') {
     if (p.workspaceId !== undefined) { p.workspace_id = p.workspaceId; delete p.workspaceId; }
     if (p.agentId !== undefined) { p.agent_id = p.agentId; delete p.agentId; }
@@ -2200,7 +2255,7 @@ const getBasePollingMs = (ref: AnyRef) => {
   const table = ref.table;
   if (table === 'chat_messages') return 2500;
   if (table === 'chat_sessions') return 4000;
-  if (table === 'agents' || table === 'workspace_members' || table === 'agent_configs' || table === 'agent_memories' || table === 'agent_quality_events') return 15000;
+  if (table === 'agents' || table === 'workspace_members' || table === 'agent_configs' || table === 'agent_dna_profiles' || table === 'agent_dna_effective' || table === 'agent_memories' || table === 'agent_quality_events') return 15000;
   if (
     table === 'governance_global_culture' ||
     table === 'governance_compliance_rules' ||

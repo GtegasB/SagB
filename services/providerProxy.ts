@@ -1,18 +1,27 @@
 import { callAiProxy } from './aiProxy';
 import { ModelProvider } from '../types';
+import { getRuntimeAiContext } from './gemini';
 
 export interface ProxyProviderMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
-const ACTION_MAP: Record<ModelProvider, string | null> = {
-  gemini: null,
-  deepseek: null,
-  llama_local: null,
+const ACTION_MAP: Partial<Record<ModelProvider, string>> = {
   openai: 'openai_chat',
-  claude: 'claude_chat',
-  qwen: 'qwen_chat'
+  claude: 'claude_chat'
+};
+
+const composeRuntimeGovernancePayload = (baseInstruction: string): { instruction: string; governanceContext: { constitution?: string; context?: string; compliance?: string } } => {
+  const runtime = getRuntimeAiContext();
+  return {
+    instruction: String(baseInstruction || '').trim(),
+    governanceContext: {
+      constitution: runtime.constitution,
+      context: runtime.context,
+      compliance: runtime.compliance
+    }
+  };
 };
 
 const toUserFacingError = (provider: ModelProvider, rawMessage: string): string => {
@@ -45,9 +54,11 @@ export async function* streamProxyProviderResponse(
   }
 
   try {
+    const composed = composeRuntimeGovernancePayload(systemInstruction);
     const response = await callAiProxy<{ text: string }>(action, {
       messages,
-      systemInstruction
+      systemInstruction: composed.instruction,
+      governanceContext: composed.governanceContext
     });
     yield { text: response.text || '' };
   } catch (error) {

@@ -192,6 +192,33 @@ export interface AgentMemory {
   payload?: Record<string, any>;
 }
 
+export interface AgentDnaProfile {
+  id: string;
+  workspaceId: string;
+  agentId: string;
+  individualPrompt?: string;
+  version: number;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  payload?: Record<string, any>;
+}
+
+export interface AgentDnaEffective {
+  id: string;
+  workspaceId: string;
+  agentId: string;
+  effectivePrompt: string;
+  profileVersion?: number;
+  status: string;
+  syncedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  payload?: Record<string, any>;
+}
+
 export type AgentQualityEventType =
   | 'understanding_error'
   | 'scope_error'
@@ -808,6 +835,8 @@ export interface Agent {
   // RAG & LEARNING (V1.8)
   globalDocuments?: { id: string, title: string, content: string, tags: string[] }[]; // Biblioteca do Agente
   learnedMemory?: string[]; // Fatos aprendidos e consolidados ao longo do tempo
+  dnaIndividualPrompt?: string;
+  effectivePrompt?: string;
 
   // Campos Estendidos (Visualização de Lista)
   division?: string;

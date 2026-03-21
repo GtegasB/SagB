@@ -74,7 +74,7 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
             else if (err.code === 'auth/invalid-email') setError('E-mail inválido.');
             else if (err.code === 'auth/email-already-in-use') setError('Este e-mail já está em uso.');
             else if (err.code === 'auth/weak-password') setError('A senha deve ter pelo menos 6 caracteres.');
-            else if (err.code === 'auth/configuration-not-found') setError('Configuração não encontrada. Newton, você REALMENTE ativou a "Identity Toolkit API" no Google Cloud Library para este projeto?');
+            else if (err.code === 'auth/configuration-not-found') setError('Configuração não encontrada. Verifique se a Identity Toolkit API está ativa no Google Cloud para este projeto.');
             else setError(`Erro ao autenticar (${err.code}). Verifique sua conexão e se o login por e-mail está ativo no Supabase.`);
         } finally {
             setLoading(false);
@@ -111,7 +111,7 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
                                     className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-black/5 transition-all text-sm font-medium"
-                                    placeholder="Ex: Douglas Rodrigues"
+                                    placeholder="Ex: Nome Sobrenome"
                                     required
                                 />
                             </div>
@@ -122,7 +122,7 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess }) => {
                                     value={role}
                                     onChange={(e) => setRole(e.target.value)}
                                     className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-6 py-4 outline-none focus:ring-2 focus:ring-black/5 transition-all text-sm font-medium"
-                                    placeholder="Ex: Chairman"
+                                    placeholder="Ex: Diretor de Operações"
                                     required
                                 />
                             </div>

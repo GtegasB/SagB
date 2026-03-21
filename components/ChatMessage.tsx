@@ -12,9 +12,6 @@ interface ChatMessageProps {
     onEdit?: (msg: Message, newText: string, newAttachment?: { data: string, mimeType: string, preview: string } | null) => void;
 }
 
-const DOUGLAS_IMAGE = "https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&q=80&w=200&h=200";
-const PIETRO_IMAGE = "https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&q=80&w=200&h=200";
-
 const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentContext, onEdit }) => {
     const isBot = message.sender === Sender.Bot;
     const isSystem = message.sender === Sender.System;
@@ -71,9 +68,18 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentCont
 
     // --- PARSE BOT PARTS (Para Agentes) ---
     const parseBotParts = (text: string) => {
-        if (!isBot) return [{ speaker: 'Douglas Rodrigues', content: text, imageUrl: DOUGLAS_IMAGE }];
+        if (!isBot) {
+            return [{
+                speaker: message.participantName || 'Usuário',
+                content: text,
+                imageUrl: agentContext?.avatarUrl
+            }];
+        }
 
         const parts: { speaker: string; content: string; imageUrl?: string | null }[] = [];
+        // This regex looks for patterns like `[Speaker Name]: message content`.
+        // It captures the speaker's name and the content of the message.
+        // The content is captured until the next speaker tag or the end of the string.
         const regex = /\[([^\]]+)\]:\s*([\s\S]*?)(?=\s*\[|$)/g;
         let match;
 
@@ -81,14 +87,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentCont
             const speakerName = match[1].trim();
 
             let imageUrl = null;
+            // Find the speaker's image URL from the directors list or the agent context.
             const director = directors.find(d => speakerName.toLowerCase().includes(d.name.toLowerCase().split(' ')[0]));
 
             if (director?.imageUrl) {
                 imageUrl = director.imageUrl;
             } else if (agentContext && speakerName.toLowerCase().includes(agentContext.name.toLowerCase().split(' ')[0])) {
                 imageUrl = agentContext.avatarUrl;
-            } else if (speakerName.toLowerCase().includes('pietro')) {
-                imageUrl = PIETRO_IMAGE;
             }
 
             parts.push({
@@ -98,12 +103,15 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, directors, agentCont
             });
         }
 
+        // If no parts were found, it means the bot's message is not in the expected format.
+        // In this case, we return the entire message with a fallback speaker.
         if (parts.length === 0) {
-            const fallbackSpeaker = message.participantName || agentContext?.name || 'Pietro Carboni';
+            console.warn('Bot message not in the expected format: a single message part will be rendered.', text);
+            const fallbackSpeaker = message.participantName || agentContext?.name || 'Especialista';
             return [{
                 speaker: fallbackSpeaker,
                 content: text,
-                imageUrl: agentContext?.avatarUrl || PIETRO_IMAGE
+                imageUrl: agentContext?.avatarUrl
             }];
         }
         return parts;

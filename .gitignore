@@ -123,3 +123,8 @@ dist
 # Local tool/runtime temp
 supabase/.temp/
 tools/__pycache__/
+
+# Projeto SagB - temporarios recorrentes
+tmpclaude-*
+tmp_test_file.txt
+sagb (10).zip

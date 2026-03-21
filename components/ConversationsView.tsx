@@ -1,14 +1,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { Agent } from '../types';
-import { Avatar } from './Avatar';
-import { SearchIcon, ChevronRightIcon, BotIcon } from './Icon';
-import { db, collection, query, where, orderBy, onSnapshot } from '../services/supabase';
-import { resolveWorkspaceId } from '../utils/supabaseChat';
+import { AlertTriangleIcon, BotIcon, ChevronRightIcon, SearchIcon } from './Icon';
 
 interface ConversationsViewProps {
   agents: Agent[];
   onOpenChat: (agent: Agent) => void;
+  onOpenSession?: (agent: Agent, sessionId: string) => void;
   activeWorkspaceId?: string | null;
 }
 
@@ -23,13 +21,17 @@ interface ChatSessionSummary {
     preview: string;
 }
 
-const ConversationsView: React.FC<ConversationsViewProps> = ({ agents, onOpenChat, activeWorkspaceId }) => {
+const ConversationsView: React.FC<ConversationsViewProps> = ({ agents, onOpenChat, onOpenSession, activeWorkspaceId }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [sessionsById, setSessionsById] = useState<Record<string, any>>({});
   const [messagePreviewBySession, setMessagePreviewBySession] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
     const scopedWorkspaceId = resolveWorkspaceId(activeWorkspaceId);
     const sessionsQuery = query(
       collection(db, 'chat_sessions'),
@@ -46,10 +48,13 @@ const ConversationsView: React.FC<ConversationsViewProps> = ({ agents, onOpenCha
           next[String(data.id || row.id)] = data;
         });
         setSessionsById(next);
+        setLoading(false);
       },
-      (error) => {
-        console.error('Erro ao carregar sessões de conversa:', error);
+      (err) => {
+        console.error('Erro ao carregar sessões de conversa:', err);
+        setError('Não foi possível carregar as conversas.');
         setSessionsById({});
+        setLoading(false);
       }
     );
 
@@ -57,34 +62,37 @@ const ConversationsView: React.FC<ConversationsViewProps> = ({ agents, onOpenCha
   }, [activeWorkspaceId]);
 
   useEffect(() => {
-    const scopedWorkspaceId = resolveWorkspaceId(activeWorkspaceId);
-    const messagesQuery = query(
-      collection(db, 'chat_messages'),
-      where('workspaceId', '==', scopedWorkspaceId),
-      orderBy('createdAt', 'desc')
-    );
+    const fetchPreviews = async () => {
+      const newPreviews: Record<string, string> = {};
+      const sessionIds = Object.keys(sessionsById);
 
-    const unsubscribe = onSnapshot(
-      messagesQuery,
-      (snapshot) => {
-        const previewMap: Record<string, string> = {};
-        snapshot.docs.forEach((row: any) => {
-          const data = row.data();
-          const sessionId = String(data.sessionId || '');
-          if (!sessionId || previewMap[sessionId]) return;
-          const raw = String(data.text || '').trim();
-          previewMap[sessionId] = raw ? `${raw.slice(0, 60)}${raw.length > 60 ? '...' : ''}` : 'Nova conversa iniciada...';
-        });
-        setMessagePreviewBySession(previewMap);
-      },
-      (error) => {
-        console.error('Erro ao carregar previews de conversa:', error);
-        setMessagePreviewBySession({});
+      const previewsPromises = sessionIds.map(async (sessionId) => {
+        const lastMessage = await getLastMessageForSession({ sessionId, workspaceId: activeWorkspaceId });
+        if (lastMessage) {
+          const raw = String(lastMessage.text || '').trim();
+          return { sessionId, preview: raw ? `${raw.slice(0, 60)}${raw.length > 60 ? '...' : ''}` : 'Nova conversa iniciada...' };
+        }
+        return { sessionId, preview: 'Nova conversa iniciada...' };
+      });
+
+      try {
+        const previews = await Promise.all(previewsPromises);
+
+        for (const { sessionId, preview } of previews) {
+          newPreviews[sessionId] = preview;
+        }
+
+        setMessagePreviewBySession(newPreviews);
+      } catch (err) {
+        console.error('Erro ao carregar previews de conversa:', err);
+        setError('Não foi possível carregar o preview das conversas.');
       }
-    );
+    };
 
-    return () => unsubscribe();
-  }, [activeWorkspaceId]);
+    if (Object.keys(sessionsById).length > 0) {
+      fetchPreviews();
+    }
+  }, [sessionsById, activeWorkspaceId]);
 
   useEffect(() => {
     const allSessions: ChatSessionSummary[] = Object.entries(sessionsById)
@@ -156,7 +164,17 @@ const ConversationsView: React.FC<ConversationsViewProps> = ({ agents, onOpenCha
         {/* LISTA */}
         <div className="flex-1 overflow-y-auto custom-scrollbar px-4 md:px-8 pb-10">
             <div className="max-w-5xl mx-auto space-y-2">
-                {filteredSessions.length === 0 ? (
+                {loading ? (
+                    <div className="flex flex-col items-center justify-center py-20 opacity-40">
+                        <BotIcon className="w-16 h-16 text-gray-300 mb-4 animate-pulse" />
+                        <p className="text-sm font-bold text-gray-400">Carregando conversas...</p>
+                    </div>
+                ) : error ? (
+                    <div className="flex flex-col items-center justify-center py-20 opacity-50 text-red-500">
+                        <AlertTriangleIcon className="w-16 h-16 text-red-400 mb-4" />
+                        <p className="text-sm font-bold">{error}</p>
+                    </div>
+                ) : filteredSessions.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 opacity-40">
                         <BotIcon className="w-16 h-16 text-gray-300 mb-4" />
                         <p className="text-sm font-bold text-gray-400">Nenhuma conversa encontrada.</p>
@@ -168,7 +186,12 @@ const ConversationsView: React.FC<ConversationsViewProps> = ({ agents, onOpenCha
                             key={`${session.agentId}-${session.sessionId}`}
                             onClick={() => {
                                 const agent = agents.find(a => a.id === session.agentId);
-                                if (agent) onOpenChat(agent);
+                                if (!agent) return;
+                                if (onOpenSession) {
+                                  onOpenSession(agent, session.sessionId);
+                                  return;
+                                }
+                                onOpenChat(agent);
                             }}
                             className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-gray-200 transition-all cursor-pointer group flex items-center gap-4 animate-msg"
                         >

@@ -208,7 +208,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <div className="flex flex-col min-w-0">
             <span className="text-[11px] font-bold text-gray-900 truncate tracking-tight">
-              {userProfile?.name || 'Douglas Rodrigues'}
+              {userProfile?.name || 'Usuário'}
             </span>
             <span className="text-[9px] font-black text-gray-400 truncate uppercase tracking-widest">
               {userProfile?.tier || 'ESTRATÉGICO'}

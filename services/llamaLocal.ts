@@ -1,4 +1,5 @@
 import { callAiProxy } from './aiProxy';
+import { getRuntimeAiContext } from './gemini';
 
 export interface LlamaMessage {
   role: 'system' | 'user' | 'assistant';
@@ -16,6 +17,34 @@ const LOCAL_LLAMA_USE_PROXY = String(import.meta.env.VITE_LOCAL_LLAMA_USE_PROXY 
 const LOCAL_LLAMA_TIMEOUT_MS = Number(import.meta.env.VITE_LOCAL_LLAMA_TIMEOUT_MS || 0) || 0;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const composeRuntimeGovernancePayload = (baseInstruction: string): { instruction: string; governanceContext: { constitution?: string; context?: string; compliance?: string } } => {
+  const runtime = getRuntimeAiContext();
+  return {
+    instruction: String(baseInstruction || '').trim(),
+    governanceContext: {
+    constitution: runtime.constitution,
+    context: runtime.context,
+    compliance: runtime.compliance
+    }
+  };
+};
+
+const composeRuntimeSystemInstruction = (baseInstruction: string): string => {
+  const runtime = getRuntimeAiContext();
+  const sections = [String(baseInstruction || '').trim()];
+  if (runtime.constitution?.trim()) {
+    sections.push(`[CONSTITUICAO GLOBAL]\n${runtime.constitution.trim()}`);
+  }
+  if (runtime.compliance?.trim()) {
+    sections.push(`[COMPLIANCE GLOBAL - OBRIGATORIO]\n${runtime.compliance.trim()}`);
+  }
+  if (runtime.context?.trim()) {
+    sections.push(`[CONTEXTO GLOBAL]\n${runtime.context.trim()}`);
+  }
+
+  return sections.filter(Boolean).join('\n\n').trim();
+};
 
 const resolveChatEndpoint = (rawUrl: string): string => {
   const cleaned = rawUrl.replace(/\/+$/, '');
@@ -120,9 +149,11 @@ const requestLlamaViaProxy = async (
   systemInstruction: string,
   options?: { model?: string; temperature?: number; maxTokens?: number }
 ): Promise<{ text: string }> => {
+  const composed = composeRuntimeGovernancePayload(systemInstruction);
   return callAiProxy<{ text: string }>('llama_local_chat', {
     messages,
-    systemInstruction,
+    systemInstruction: composed.instruction,
+    governanceContext: composed.governanceContext,
     model: options?.model || LOCAL_LLAMA_MODEL || 'llama3.1:8b',
     temperature: typeof options?.temperature === 'number' ? options.temperature : 0.4,
     maxTokens: typeof options?.maxTokens === 'number' ? options.maxTokens : 1800
@@ -142,7 +173,8 @@ const requestWithRetry = async (
       if (LOCAL_LLAMA_USE_PROXY) {
         return await requestLlamaViaProxy(messages, systemInstruction, options);
       }
-      return await requestLlamaViaLocal(messages, systemInstruction, options);
+      const localSystemInstruction = composeRuntimeSystemInstruction(systemInstruction);
+      return await requestLlamaViaLocal(messages, localSystemInstruction, options);
     } catch (error) {
       lastError = error;
       if (attempt < attempts) {

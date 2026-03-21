@@ -63,6 +63,16 @@ const hasGeminiKey = () => Boolean(pickGeminiKey());
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const timedFetch = async (url, options = {}, timeoutMs = 10000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const createHttpError = (statusCode, message) => {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -83,9 +93,12 @@ const requestDeepSeekCompletion = async (payload) => {
     throw createHttpError(500, 'Missing DeepSeek API key in function environment.');
   }
 
+  const governanceContext = normalizeGovernanceContext(payload);
+  const mergedSystemInstruction = mergeSystemInstructionWithGovernance(payload.systemInstruction || '', governanceContext);
+
   const messages = Array.isArray(payload.messages) ? payload.messages : [];
   const fullMessages = [
-    { role: 'system', content: payload.systemInstruction || '' },
+    { role: 'system', content: mergedSystemInstruction },
     ...messages
   ];
 
@@ -157,10 +170,42 @@ const normalizeTextMessages = (payload) => {
     }))
     .filter((message) => message.content.length > 0);
 
-  if (payload?.systemInstruction && typeof payload.systemInstruction === 'string' && payload.systemInstruction.trim()) {
-    return [{ role: 'system', content: payload.systemInstruction.trim() }, ...cleaned];
+  const governanceContext = normalizeGovernanceContext(payload);
+  const mergedSystemInstruction = mergeSystemInstructionWithGovernance(payload?.systemInstruction || '', governanceContext);
+  if (mergedSystemInstruction) {
+    return [{ role: 'system', content: mergedSystemInstruction }, ...cleaned];
   }
   return cleaned;
+};
+
+const normalizeGovernanceContext = (payload = {}) => {
+  const raw = payload?.governanceContext && typeof payload.governanceContext === 'object'
+    ? payload.governanceContext
+    : {};
+
+  const constitution = String(raw.constitution || '').trim();
+  const compliance = String(raw.compliance || '').trim();
+  const context = String(raw.context || '').trim();
+
+  return {
+    constitution: constitution || null,
+    compliance: compliance || null,
+    context: context || null
+  };
+};
+
+const mergeSystemInstructionWithGovernance = (systemInstruction, governanceContext) => {
+  const sections = [String(systemInstruction || '').trim()];
+  if (governanceContext?.constitution) {
+    sections.push(`[CONSTITUICAO GLOBAL]\n${governanceContext.constitution}`);
+  }
+  if (governanceContext?.compliance) {
+    sections.push(`[COMPLIANCE GLOBAL - OBRIGATORIO]\n${governanceContext.compliance}`);
+  }
+  if (governanceContext?.context) {
+    sections.push(`[CONTEXTO GLOBAL]\n${governanceContext.context}`);
+  }
+  return sections.filter(Boolean).join('\n\n').trim();
 };
 
 const requestOpenAICompletion = async (payload) => {
@@ -289,8 +334,10 @@ const normalizeLlamaMessages = (payload) => {
     }))
     .filter((message) => message.content.length > 0);
 
-  if (payload?.systemInstruction && typeof payload.systemInstruction === 'string' && payload.systemInstruction.trim()) {
-    return [{ role: 'system', content: payload.systemInstruction.trim() }, ...normalized];
+  const governanceContext = normalizeGovernanceContext(payload);
+  const mergedSystemInstruction = mergeSystemInstructionWithGovernance(payload?.systemInstruction || '', governanceContext);
+  if (mergedSystemInstruction) {
+    return [{ role: 'system', content: mergedSystemInstruction }, ...normalized];
   }
   return normalized;
 };
@@ -343,6 +390,161 @@ const requestLlamaLocalCompletion = async (payload) => {
   );
 
   return { text };
+};
+
+const runHealthCheck = async (label, checker) => {
+  const startedAt = Date.now();
+  try {
+    await checker();
+    return {
+      ok: true,
+      latencyMs: Date.now() - startedAt,
+      message: `${label} online`
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - startedAt,
+      message: String(error?.message || `${label} offline`)
+    };
+  }
+};
+
+const checkGeminiHealth = async () => {
+  const key = pickGeminiKey();
+  if (!key) throw new Error('Gemini sem API key');
+  const response = await timedFetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`, {
+    method: 'GET'
+  }, 9000);
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    throw new Error(`Gemini HTTP ${response.status}: ${raw}`);
+  }
+};
+
+const checkDeepSeekHealth = async () => {
+  const apiKey = pickDeepSeekKey();
+  if (!apiKey) throw new Error('DeepSeek sem API key');
+  const response = await timedFetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [{ role: 'user', content: 'ping' }],
+      max_tokens: 1,
+      temperature: 0
+    })
+  }, 10000);
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    throw new Error(`DeepSeek HTTP ${response.status}: ${raw}`);
+  }
+};
+
+const checkOpenAIHealth = async () => {
+  const apiKey = pickOpenAIKey();
+  if (!apiKey) throw new Error('OpenAI sem API key');
+  const response = await timedFetch(pickOpenAIBaseUrl(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'ping' }],
+      max_tokens: 1,
+      temperature: 0,
+      stream: false
+    })
+  }, 10000);
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    throw new Error(`OpenAI HTTP ${response.status}: ${raw}`);
+  }
+};
+
+const checkClaudeHealth = async () => {
+  const apiKey = pickAnthropicKey();
+  if (!apiKey) throw new Error('Claude sem API key');
+  const response = await timedFetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-latest',
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'ping' }],
+      temperature: 0
+    })
+  }, 10000);
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    throw new Error(`Claude HTTP ${response.status}: ${raw}`);
+  }
+};
+
+const checkLlamaHealth = async () => {
+  const endpoint = resolveLlamaEndpoint(pickLlamaLocalUrl());
+  if (!endpoint) throw new Error('Llama local sem URL configurada');
+  const model = pickLlamaLocalModel() || 'llama3.1:8b';
+  const apiKey = pickLlamaLocalApiKey();
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const response = await timedFetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: endpoint.endsWith('/v1/chat/completions')
+      ? JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        temperature: 0,
+        stream: false
+      })
+      : JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'ping' }],
+        stream: false,
+        options: {
+          num_predict: 1,
+          temperature: 0
+        }
+      })
+  }, 10000);
+
+  if (!response.ok) {
+    const raw = await response.text().catch(() => '');
+    throw new Error(`Llama local HTTP ${response.status}: ${raw}`);
+  }
+};
+
+const handleProvidersHealth = async () => {
+  const [gemini, deepseek, openai, claude, llama_local] = await Promise.all([
+    runHealthCheck('Gemini', checkGeminiHealth),
+    runHealthCheck('DeepSeek', checkDeepSeekHealth),
+    runHealthCheck('OpenAI', checkOpenAIHealth),
+    runHealthCheck('Claude', checkClaudeHealth),
+    runHealthCheck('Llama', checkLlamaHealth)
+  ]);
+
+  return {
+    providers: {
+      gemini,
+      deepseek,
+      openai,
+      claude,
+      llama_local
+    },
+    checkedAt: new Date().toISOString()
+  };
 };
 
 const normalizeMessageParts = (message) => {
@@ -646,6 +848,8 @@ const actionHandlers = {
   generate_title_options: handleGenerateTitleOptions,
   generate_task_suggestions: handleGenerateTaskSuggestions,
   create_agent_from_scratch: handleCreateAgentFromScratch
+  ,
+  providers_health: handleProvidersHealth
 };
 
 export async function handler(event) {

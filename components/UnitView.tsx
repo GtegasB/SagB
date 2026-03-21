@@ -69,7 +69,7 @@ const UnitView: React.FC<UnitViewProps> = ({ activeBU, agents, onBack, activeWor
             sessionId: targetSessionId,
             agentId: roomAgentId,
             sender: Sender.Bot,
-            text: `Sala de Guerra **${activeBU.name}** iniciada.\n\nTodos os agentes da unidade estão ouvindo. Qual a ordem do dia, Rodrigues?`,
+            text: `Sala de Guerra **${activeBU.name}** iniciada.\n\nTodos os agentes da unidade estão ouvindo. Qual a ordem do dia?`,
             buId: activeBU.id,
             participantName: 'Sala de Guerra'
           });
@@ -90,7 +90,7 @@ const UnitView: React.FC<UnitViewProps> = ({ activeBU, agents, onBack, activeWor
         setMessages([
           {
             id: 'init-fallback',
-            text: `Sala de Guerra **${activeBU.name}** iniciada.\n\nTodos os agentes da unidade estão ouvindo. Qual a ordem do dia, Rodrigues?`,
+            text: `Sala de Guerra **${activeBU.name}** iniciada.\n\nTodos os agentes da unidade estão ouvindo. Qual a ordem do dia?`,
             sender: Sender.Bot,
             timestamp: new Date(),
             buId: activeBU.id
@@ -219,7 +219,7 @@ const UnitView: React.FC<UnitViewProps> = ({ activeBU, agents, onBack, activeWor
 [EQUIPE PRESENTE]:
 ${teamContext}
 
-Você é o orquestrador desta sala. Responda como o líder da unidade ou delegue a fala para um dos agentes listados acima usando o formato "[NOME DO AGENTE]: Resposta".
+Você coordena esta sala. Responda como liderança da unidade ou delegue a fala para um dos agentes listados acima usando o formato "[NOME DO AGENTE]: Resposta".
 `.trim();
 
         let messagePayload: any = userText;

@@ -50,6 +50,7 @@ const toDate = (value: any): Date => {
 const normalizeText = (value: any): string => String(value || '').trim();
 
 const safeList = <T>(list: T[] | undefined | null): T[] => (Array.isArray(list) ? list : []);
+const DEFAULT_USER_ACTOR = 'Usuário';
 
 const statusFromText = (text: string): IntelligenceFlowStatus => {
   const normalized = normalizeText(text).toLowerCase();
@@ -99,11 +100,11 @@ const buildConversationFlow = (session: ChatSessionLike, sessionMessages: ChatMe
 
   const firstUserMessage = orderedMessages.find((message) => String(message.sender || '').toLowerCase() === 'user');
   if (firstUserMessage) {
-    participants.add('Rodrigues');
+    participants.add(DEFAULT_USER_ACTOR);
     steps.push(createStep({
       id: `${flowId}_q1`,
       actorType: 'user',
-      actorName: 'Rodrigues',
+      actorName: DEFAULT_USER_ACTOR,
       actionType: 'question',
       status: 'ok',
       timestamp: toDate(firstUserMessage.createdAt)
@@ -290,12 +291,12 @@ const pushOperationFlows = (
       workspaceId: item.workspaceId,
       flowType,
       origin: title,
-      participants: ['Rodrigues', 'Sistema'],
+      participants: [DEFAULT_USER_ACTOR, 'Sistema'],
       steps: [
         createStep({
           id: `${id}_s1`,
           actorType: 'user',
-          actorName: 'Rodrigues',
+          actorName: DEFAULT_USER_ACTOR,
           actionType: flowType === 'decision' ? 'decision' : 'agenda',
           status: 'ok',
           timestamp: ts

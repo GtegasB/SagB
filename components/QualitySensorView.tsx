@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { AgentQualityEvent } from '../types';
 import { BackIcon } from './Icon';
 import { collection, db, onSnapshot, orderBy, query, where } from '../services/supabase';
+import { getProvidersHealth, ProvidersHealthMap } from '../services/providerHealth';
 
 interface QualitySensorViewProps {
   qualityEvents: AgentQualityEvent[];
@@ -57,6 +58,35 @@ const QualitySensorView: React.FC<QualitySensorViewProps> = ({
 }) => {
   const [chatSessions, setChatSessions] = useState<ChatSessionRow[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessageRow[]>([]);
+  const [providersHealth, setProvidersHealth] = useState<Partial<ProvidersHealthMap>>({});
+  const [providersHealthCheckedAt, setProvidersHealthCheckedAt] = useState<string>('');
+  const [providersHealthError, setProvidersHealthError] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId: number | null = null;
+
+    const loadProvidersHealth = async () => {
+      try {
+        const result = await getProvidersHealth();
+        if (cancelled) return;
+        setProvidersHealth(result.providers || {});
+        setProvidersHealthCheckedAt(result.checkedAt || '');
+        setProvidersHealthError('');
+      } catch (error: any) {
+        if (cancelled) return;
+        setProvidersHealthError(String(error?.message || 'Falha ao carregar saúde das APIs.'));
+      }
+    };
+
+    loadProvidersHealth();
+    intervalId = window.setInterval(loadProvidersHealth, 30000);
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null) window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     const hasWorkspace = typeof workspaceId === 'string' && workspaceId.length > 0;
@@ -350,6 +380,38 @@ const QualitySensorView: React.FC<QualitySensorViewProps> = ({
             <div className="text-xl font-black text-red-700">{qualitySummary.critical}</div>
           </div>
         </div>
+
+        <section className="rounded-2xl border border-gray-100 overflow-hidden bg-white mb-6">
+          <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 text-[10px] font-black text-gray-500 uppercase tracking-widest">
+            Saúde das APIs de IA oficiais
+          </div>
+          <div className="p-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+              {(['gemini', 'deepseek', 'openai', 'claude', 'llama_local'] as const).map((provider) => {
+                const item = providersHealth?.[provider];
+                const isOk = Boolean(item?.ok);
+                return (
+                  <div key={provider} className="rounded-xl border border-gray-100 bg-white px-4 py-3">
+                    <div className="text-[9px] uppercase tracking-widest text-gray-400 font-bold mb-1">{provider}</div>
+                    <div className={`text-sm font-black ${item ? (isOk ? 'text-emerald-600' : 'text-red-600') : 'text-gray-500'}`}>
+                      {item ? (isOk ? '🟢 ONLINE' : '🔴 OFFLINE') : '⚪ SEM DADO'}
+                    </div>
+                    <div className="text-[11px] text-gray-500 mt-1">{item?.latencyMs ? `${item.latencyMs} ms` : '-'}</div>
+                    <div className="text-[11px] text-gray-400 mt-1 line-clamp-2">{item?.message || 'Sem diagnóstico'}</div>
+                  </div>
+                );
+              })}
+            </div>
+            {providersHealthCheckedAt && (
+              <div className="text-[11px] text-gray-400 mt-3">
+                Última checagem: {new Date(providersHealthCheckedAt).toLocaleString('pt-BR')}
+              </div>
+            )}
+            {providersHealthError && (
+              <div className="text-[11px] text-red-500 mt-2">{providersHealthError}</div>
+            )}
+          </div>
+        </section>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div className="rounded-2xl border border-gray-100 p-4 bg-white">

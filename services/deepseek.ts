@@ -1,4 +1,5 @@
 import { callAiProxy } from './aiProxy';
+import { getRuntimeAiContext } from './gemini';
 
 export interface DeepSeekMessage {
   role: 'system' | 'user' | 'assistant';
@@ -12,6 +13,20 @@ const PRIMARY_MAX_TOKENS = 1800;
 const FALLBACK_MAX_TOKENS = 1400;
 const MAX_CONTINUATIONS = 12;
 const END_MARKER = '<END_RESPONSE>';
+
+const composeRuntimeGovernancePayload = (baseInstruction: string): { instruction: string; governanceContext: { constitution?: string; context?: string; compliance?: string } } => {
+  const runtime = getRuntimeAiContext();
+  const governanceContext = {
+    constitution: runtime.constitution,
+    context: runtime.context,
+    compliance: runtime.compliance
+  };
+
+  return {
+    instruction: String(baseInstruction || '').trim(),
+    governanceContext
+  };
+};
 
 const compactHistory = (messages: DeepSeekMessage[]): DeepSeekMessage[] => {
   const cleaned = (messages || [])
@@ -110,11 +125,15 @@ const requestDeepSeek = async (
   messages: DeepSeekMessage[],
   systemInstruction: string,
   maxTokens: number
-) => callAiProxy<{ text: string }>('deepseek_chat', {
-  messages,
-  systemInstruction,
-  maxTokens
-}) as Promise<{ text: string; finishReason?: string | null; completionTokens?: number | null; requestedMaxTokens?: number | null }>;
+) => {
+  const composed = composeRuntimeGovernancePayload(systemInstruction);
+  return callAiProxy<{ text: string }>('deepseek_chat', {
+    messages,
+    systemInstruction: composed.instruction,
+    governanceContext: composed.governanceContext,
+    maxTokens
+  }) as Promise<{ text: string; finishReason?: string | null; completionTokens?: number | null; requestedMaxTokens?: number | null }>;
+};
 
 const isLikelyTruncatedText = (text: string): boolean => {
   const trimmed = String(text || '').trim();
